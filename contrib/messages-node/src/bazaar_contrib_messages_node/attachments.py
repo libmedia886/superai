@@ -19,12 +19,9 @@ class AttachmentMaterializer:
         self,
         workspace: Callable[[], Path],
         referenced_paths: Callable[[], Awaitable[Collection[str]]],
-        *,
-        max_file_bytes: int = 25 * 1024 * 1024,
     ) -> None:
         self._workspace = workspace
         self._referenced_paths = referenced_paths
-        self._max_file_bytes = max_file_bytes
 
     async def reconcile(self) -> None:
         root = self._workspace() / "attachments"
@@ -87,13 +84,9 @@ class AttachmentMaterializer:
         descriptor: int,
         source: AsyncIterable[bytes],
     ) -> int:
-        """Write the source through, refusing it the moment it goes over a limit."""
-
         size = 0
         async for chunk in source:
             size += len(chunk)
-            if size > self._max_file_bytes:
-                raise ValueError("attachment exceeds the per-file size limit")
             await asyncio.to_thread(_write_all, descriptor, chunk)
         return size
 
