@@ -1286,7 +1286,7 @@ class AgentLoop:
                 self.channels.turns[session.id, turn.id] = routes
                 target = routes[message.thread_id][1]
                 approval = ApprovalRoute(
-                    self.channels,
+                    connection.channel,
                     connection.kind,
                     connection.channel.get_identity().id,
                     target,

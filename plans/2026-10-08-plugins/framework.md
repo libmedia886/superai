@@ -2700,3 +2700,6 @@ Task 完成后停下等待 review。
 验证：agent 安装测试中现有的审批场景（provider_smoke 的审批包与 session_routes 的审批路由）照常通过；agent 包
 `scripts/ci.py check`、`test` 与 `package`（wheel 与 sdist）通过，仓库根目录
 `uv run --quiet scripts/pyright_lsp_check.py .` 通过。发布含上述包的 rc。
+
+验收结果：agent 的 `scripts/ci.py check`、`test` 与 `package`（wheel 与 sdist）通过，consumer_smoke 中的审批场景照常；
+仓库根目录 pyright 检查通过。
