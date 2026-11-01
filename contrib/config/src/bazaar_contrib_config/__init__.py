@@ -3,6 +3,7 @@
 lazy from .contracts import (
     CONFIG_CURRENT,
     CONFIG_PREPARE,
+    CONFIG_PREPARED,
     CONFIG_STORE,
     CONFIG_V1,
     CONFIG_V2,
@@ -39,6 +40,7 @@ __all__ = [
     "CONFIGURATION",
     "CONFIG_CURRENT",
     "CONFIG_PREPARE",
+    "CONFIG_PREPARED",
     "CONFIG_STORE",
     "CONFIG_V1",
     "CONFIG_V2",

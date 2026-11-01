@@ -401,21 +401,26 @@ async def exercise(directory: Path):
         )
         reviews = await events(directory, "channel.session.reviewed", count=6)
         assert {event["context"]["agent_id"] for event in reviews} == {"Cloud", "Tifa"}
-        notifications = [
-            json.loads(line)
-            for line in (
-                await asyncio.to_thread((directory / "review-events.jsonl").read_text)
-            ).splitlines()
-        ]
-        assert all(
+        expected = [
             {
                 "agent": event["context"]["agent_id"],
                 "thread": event["context"]["thread_id"],
                 "review": event["payload"]["metadata"]["review"],
             }
-            in notifications
             for event in reviews
-        )
+        ]
+        while True:
+            notifications = [
+                json.loads(line)
+                for line in (
+                    await asyncio.to_thread(
+                        (directory / "review-events.jsonl").read_text
+                    )
+                ).splitlines()
+            ]
+            if all(item in notifications for item in expected):
+                break
+            await asyncio.sleep(0.01)
         assert (await contacts(directory, "Tifa"))[0]["thread_id"] == other_row[
             "thread_id"
         ]

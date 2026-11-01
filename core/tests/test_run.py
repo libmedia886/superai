@@ -117,9 +117,8 @@ async def test_run_loads_from_bootstrap_and_persists_the_loaded_composition(
     ):
         database = connections["observe-db"]
         await hub.announce(MESSAGE_RECEIVED, Message("loaded from bootstrap"))
-        rows = await database.messages()
-        assert ("alice", "loaded from bootstrap") in rows
-        assert ("bob", "loaded from bootstrap") in rows
+        await database.recorded("alice", "loaded from bootstrap")
+        await database.recorded("bob", "loaded from bootstrap")
     assert database.closed and database.worker.done()
     assert all(handle.closed for handle in handles)
     assert closed.index("business") < closed.index("bootstrap")

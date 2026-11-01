@@ -15,6 +15,7 @@ lazy from uuid import UUID
 
 from bazaar_contrib_config import (
     CONFIG_PREPARE,
+    CONFIG_PREPARED,
     CONFIGURATION,
     ConfigDocument,
     ContribPackage,
@@ -816,9 +817,16 @@ async def lifespan(ctx: Context, config: ManagerConfig):
 
 
 async def prepare(ctx: Context, _: None) -> None:
-    result = await ctx.accept(CONTRIB_MANAGER).sync(only_missing=True)
-    if result.error:
-        ctx.accept(CONFIGURATION).preparation_error = result.error
+    configuration = ctx.accept(CONFIGURATION)
+    try:
+        result = await ctx.accept(CONTRIB_MANAGER).sync(only_missing=True)
+        if result.error:
+            configuration.preparation_error = result.error
+    except Exception as error:
+        configuration.preparation_error = str(error) or type(error).__name__
+        raise
+    finally:
+        await ctx.announce(CONFIG_PREPARED, None)
 
 
 manager = Contrib(

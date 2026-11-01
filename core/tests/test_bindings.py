@@ -191,10 +191,16 @@ async def test_nested_local_database_and_events_inherit_shared_notifications(
         ):
             yield
 
+    noticed: list[str] = []
+    written = asyncio.Condition()
+
     async def notice(ctx: Context, value: Message):
         handle = ctx.accept(key)
         await handle.write(value.text + "\n")
         await handle.flush()
+        async with written:
+            noticed.append(value.text)
+            written.notify_all()
 
     @asynccontextmanager
     async def broadcast(ctx: Context):
@@ -275,19 +281,31 @@ async def test_nested_local_database_and_events_inherit_shared_notifications(
                     MESSAGE_RECEIVED, Message("bob private data")
                 )
                 await hub.announce(MESSAGE_RECEIVED, Message("node data"))
-                assert ("alice", "alice private data") in await alice.messages()
-                assert ("bob", "bob private data") in await bob.messages()
-                assert ("node", "node data") in await node.messages()
+                await alice.recorded("alice", "alice private data")
+                await bob.recorded("bob", "bob private data")
+                await node.recorded("node", "node data")
                 # SQLite ownership and event binding are independent of entry names.
                 await contexts["alice"].announce(
                     MESSAGE_RECEIVED, Message("alice continues")
                 )
             assert bob.closed
             await contexts["alice"].announce(MESSAGE_RECEIVED, Message("bob retired"))
-            assert ("alice", "bob retired") in await alice.messages()
+            await alice.recorded("alice", "bob retired")
         assert alice.closed
         await node.insert("node", "node continues")
         assert ("node", "node continues") in await node.messages()
+        async with written:
+            await written.wait_for(
+                lambda: (
+                    {
+                        "alice private data",
+                        "bob private data",
+                        "node data",
+                        "bob retired",
+                    }
+                    <= set(noticed)
+                )
+            )
     assert node.closed
     document = await asyncio.to_thread((tmp_path / "broadcast.log").read_text)
     assert (
@@ -409,10 +427,14 @@ async def test_listener_enabled_during_dispatch_receives_later_events_and_closes
             ctx.offer(key, handle)
             yield
 
+    subscribed = asyncio.Event()
+    written = asyncio.Event()
+
     async def write(ctx: Context, value: str):
         handle = ctx.accept(key)
         await handle.write(value + "\n")
         await handle.flush()
+        written.set()
 
     async def subscribe(ctx: Context, value: str):
         if value == "Hello":
@@ -432,6 +454,7 @@ async def test_listener_enabled_during_dispatch_receives_later_events_and_closes
                     )
                 )
             )
+            subscribed.set()
 
     async with (
         ContribHub() as hub,
@@ -448,7 +471,9 @@ async def test_listener_enabled_during_dispatch_receives_later_events_and_closes
     ):
         async with AsyncExitStack() as subscriptions:
             await hub.announce(message, "Hello")
+            await subscribed.wait()
             await hub.announce(message, "How are you?")
+            await written.wait()
         assert handles[0].closed
         await hub.announce(message, "Goodbye")
     assert "How are you?" in await asyncio.to_thread((tmp_path / "late.log").read_text)

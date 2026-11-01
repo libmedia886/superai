@@ -45,6 +45,8 @@ class Database:
         self.queue: asyncio.Queue[Write | None] = asyncio.Queue(16)
         self.progress = asyncio.Event()
         self.progress.set()
+        self.written = asyncio.Condition()
+        self.rows: list[tuple[str, str]] = []
         self.ready = asyncio.Event()
         self.failure = TaskFailureSignal()
         self.failure.reset()
@@ -93,6 +95,9 @@ class Database:
                     ):
                         pass
                     await self.connection.commit()
+                async with self.written:
+                    self.rows.append((request.agent, request.text))
+                    self.written.notify_all()
             except sqlite3.Error as error:
                 request.error = error
                 raise
@@ -106,6 +111,11 @@ class Database:
         await request.done.wait()
         if request.error is not None:
             raise request.error
+
+    async def recorded(self, agent: str, text: str) -> None:
+        """Wait until a listener has written this row through the connection."""
+        async with self.written:
+            await self.written.wait_for(lambda: (agent, text) in self.rows)
 
     async def messages(self) -> list[tuple[str, str]]:
         async with (

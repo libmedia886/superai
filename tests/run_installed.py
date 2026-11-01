@@ -1,5 +1,6 @@
 """Restore default dependencies while testing the locally built distributions."""
 
+import importlib.metadata
 import json
 import os
 import subprocess
@@ -8,10 +9,15 @@ import tomllib
 from importlib.metadata import PackageNotFoundError, distribution
 from importlib.resources import files
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import tomli_w
 from packaging.requirements import Requirement
-from packaging.utils import parse_sdist_filename, parse_wheel_filename
+from packaging.utils import (
+    canonicalize_name,
+    parse_sdist_filename,
+    parse_wheel_filename,
+)
 
 artifacts = Path(sys.argv[1])
 packages: dict[str, list[Path]] = {}
@@ -61,5 +67,32 @@ for name in ("blockbuster", "pytest", "pytest-asyncio"):
 config = Path(os.environ["BCN_HOME"]) / ".bcn" / "config.toml"
 config.parent.mkdir(parents=True, exist_ok=True)
 config.write_text(tomli_w.dumps(document))
-subprocess.run([sys.executable, "-m", "bazaar_compute_node", "--help"], check=True)
-subprocess.run([sys.executable, *sys.argv[2:]], check=True)
+# uv run --with keeps these distributions in a layer that a later uv pip install into
+# this interpreter cannot see, so it would install the released copies over them.
+requirements: dict[str, str] = {}
+for installed in importlib.metadata.distributions():
+    name = canonicalize_name(installed.metadata["Name"])
+    direct = installed.read_text("direct_url.json")
+    requirements.setdefault(
+        name,
+        f"{name} @ {json.loads(direct)['url']}"
+        if direct is not None
+        else f"{name}=={installed.version}",
+    )
+with TemporaryDirectory(prefix="bcn-installed-") as directory:
+    environment = Path(directory)
+    subprocess.run(
+        ["uv", "venv", "--python", sys.executable, str(environment)], check=True
+    )
+    python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    subprocess.run(
+        ["uv", "pip", "install", "--python", str(python), *requirements.values()],
+        check=True,
+    )
+    variables = os.environ | {
+        "PATH": str(python.parent) + os.pathsep + os.environ.get("PATH", "")
+    }
+    subprocess.run(
+        [str(python), "-m", "bazaar_compute_node", "--help"], check=True, env=variables
+    )
+    subprocess.run([str(python), *sys.argv[2:]], check=True, env=variables)

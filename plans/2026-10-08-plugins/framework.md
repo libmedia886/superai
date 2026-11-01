@@ -102,12 +102,13 @@ app 发行名为 bazaar-compute-node，core 为 bazaar-core，必要包位于 co
 core 要求 Python 3.15。ContribHub 是异步上下文管理器，拥有管理插件实例的 `asyncio.TaskGroup`；
 `async with ContribHub() as hub` 进入后才可启用插件，`run(bootstrap, load)` 自动进入该宿主上下文。
 每个实例在其独立 Task 中进入和退出完整 lifespan；实例内的 AsyncExitStack 与任务组按原任务、逆序退出。
-生命周期任务和监听器 eager start，确保取消前已进入拥有者的异常与清理逻辑。
-事件在宿主任务组并发启动，用 `gather(return_exceptions=True)` 等待全部监听器；取消发布或停止操作时取消所属监听器，
+生命周期任务和事件分发任务 eager start，确保取消前已进入拥有者的异常与清理逻辑。
+发布事件只把值放入各监听器的队列后返回；每个监听器的分发任务在宿主任务组中按入队顺序调用处理函数，
+监听器异常记录日志后继续处理下一个事件。停止操作被取消时取消所属分发任务，
 用 `asyncio.shield` 等待清理任务完成后继续传播调用者取消，再按依赖逆序收回服务。
 正常关闭先将待退出实例标记为 Stopping。已经就绪、没有故障、仍在等待依赖者退出的监听器
-继续接收事件，使依赖者的收尾输出和审计可以完成。监听器自身的停止信号发出后停止接收新回调，
-等待在途回调结束后退出 lifespan、释放资源。故障及其阻塞实例仍立即停止事件分发。
+继续接收事件，使依赖者的收尾输出和审计可以完成。监听器自身的停止信号发出后停止接收新事件，
+处理完已入队的事件后退出 lifespan、释放资源。故障及其阻塞实例仍立即停止事件分发。
 初始化失败与运行故障按实例隔离。宿主沿已绑定的服务依赖计算传递闭包，停用这些实例的监听器、
 取消在途回调和启动中的任务，再按依赖逆序结束 lifespan；独立插件及同一定义的其他独立实例继续运行。
 并发故障及显式停止使用同一实例任务完成清理，消费者结束后才收回提供者的服务。
@@ -275,8 +276,10 @@ Context.update 修改由该配置加载器产生的组合，Enablement.update �
 候选应用前将实际服务 ready 等待与 lifespan Task 正在等待子组合启用的边一起检查，跨层级或多层嵌套的等待环在资源获取前报错；已就绪服务和祖先服务的直接提供不构成等待边。后台 Task 启用子组合不会被当作父 lifespan 的等待。
 同批清理中，属于待停止实例的 Context 关闭子组合时只等待自己的子实例，避免后台 Task 等整批清理、父实例又等该 Task 的循环。
 实例内的后台任务故障通过现有 TaskFailureSignal 传播到依赖者和所属子组合，独立实例继续工作。
-停止前禁用监听器，取消或等待在途回调，再按依赖逆序退出；异常与取消等待资源清理后传给原调用者。
-事件监听按绑定身份建索引，派发在 ContribHub 的任务组中并发执行、等待所有结果；监听器异常返回发布者，由 Hub 保持其他实例运行。
+停止前禁用监听器，等待已入队的事件处理完，取消时取消正在执行的处理并丢弃其余事件，再按依赖逆序退出；
+异常与取消等待资源清理后传给原调用者。
+事件监听按绑定身份建索引，每个监听器一条队列，派发在 ContribHub 的任务组中执行，发布者不等待处理结果；
+监听器异常由 Hub 记录日志，其他监听器及该监听器的后续事件照常处理。
 状态变化通过 CONTRIB_CHANGED 发布，私有事件由组合指定 local。
 
 ### 状态查询模块
@@ -997,13 +1000,15 @@ configured 同样将省略 contribs 的合法空配置按模型默认空列表�
 支持从 pyproject 解析依赖并用同一 pylock 同步完整环境。配置边界用 packaging/Pydantic 校验字符串；安装仍交给 uv。
 
 每次启动先通过配置服务读取和保存文档，按普通配置声明发现入口。app 先按配置启用监听 CONFIG_PREPARE 的插件及其服务依赖，
-在它们就绪后发布并等待这个公开配置准备事件，再切换所选业务组合。配置决定入口名称和参数，自写实现监听同一事件即可替换。
-CONFIG_PREPARE 是 EventKey[None]；包管理插件自己的事件处理器复用 sync(only_missing=True)，失败时将诊断写入配置服务的 preparation_error。
+在它们就绪后发布这个公开配置准备事件，等待每个准备插件发布 CONFIG_PREPARED，再切换所选业务组合。
+配置决定入口名称和参数，自写实现监听同一事件、完成后发布 CONFIG_PREPARED 即可替换。
+CONFIG_PREPARE 与 CONFIG_PREPARED 都是 EventKey[None]；包管理插件自己的事件处理器复用 sync(only_missing=True)，
+返回失败结果或抛出异常时都将诊断写入配置服务的 preparation_error，并总是发布 CONFIG_PREPARED。
 默认实现检查目标解释器中的声明、extras 及传递依赖，缺失或版本不符时执行完整候选解析、安装和入口验证；
 满足时直接继续。随后配置服务报告准备诊断，在同一 Hub 中切换到调用者选择的命令根或完整节点组合，再进入业务 lifespan。
 所选命令根及其依赖继续严格校验；完整运行组合复用 core 的 Failed／Blocked 隔离，让独立的健康分支继续。
 配置服务只在准备成功且完整候选通过校验后自动保存新建或转换后的文档；降级启动保留原配置及其全部插件声明。
-完整组合激活前再次校验本次启动根及其服务依赖，其他故障通过现有状态与日志展示。manager 只消费已有 CONFIGURATION，app 继续只发布准备事件。
+完整组合激活前再次校验本次启动根及其服务依赖，其他故障通过现有状态与日志展示。manager 只消费已有 CONFIGURATION，app 只发布准备事件并监听完成事件。
 显式 `bcn contrib sync` 按配置重新解析并安装，失败保留操作诊断；add、remove 及显式配置提交继续校验完整候选。
 普通解析将上次成功安装的 pylock 作为 uv 的版本偏好，复用仍满足配置的锁定版本和 HTTP 缓存；
 配置约束改变时由 uv 重新求解。用户显式执行 `bcn contrib sync --upgrade` 或 `bcn contrib upgrade VERSION`
@@ -2585,3 +2590,56 @@ edit_of_message_id 均为空，`idx_messages_inbound_provider_identity` 含 edit
 e2e 增加一例：驱动 bot 在测试话题发送 `@bot <marker> draft`，再用 `editMessageText` 改为 `@bot <marker> edited`。
 worker 对 `edited` 指令读取消息头中的 edit_of，用 `bcc message read --around <edit_of>` 确认原消息正文含
 `<marker> draft`，再回复 `<marker> edited`；测试断言收到该回复。
+
+## 事件队列分发（2026-10-31）
+
+现有 `ContribHub._announce` 为每个符合条件的监听器创建一个回调任务，等待全部回调结束，并把监听器异常汇总抛回发布方。
+发布方因此被最慢的监听器拖住：内容增量等高频审计事件逐条等待 agent-activity 与 logging 处理完；
+监听器异常还会让已经完成业务写入的发布方报错，collaboration 在审核落库后发布 CONTACT_REVIEWED 即属此类。
+本节把事件发布改为入队即返回，由每个监听器自己的分发任务处理，作为回合事件与审批改走事件订阅的前置改动。
+Task 完成后停下等待 review。
+
+### Task 29：announce 入队与按监听器分发
+
+- 监听器：一个实例对一个事件的处理函数，沿用现有（事件，绑定身份）索引。每个监听器持有一条不设上限的 FIFO 队列，
+  同一监听器的事件按发布顺序逐个处理，不同监听器之间互不等待。
+- 发布：`announce` 按现有资格（Running，或处于 stopping 阶段、没有故障、已就绪且自身停止信号未发出）把值追加到
+  各监听器的队列后返回，不等待处理，监听器异常不返回发布方。发布方只会收到框架错误：宿主未进入、发布方实例已停止。
+- 分发任务：值入队时该监听器没有分发任务，就在宿主任务组中创建一个。任务沿用 eager start，进入异常与清理逻辑后
+  先让出一次，发布方返回前不执行监听器代码。任务按入队顺序逐个调用处理函数，调用期间 CURRENT_CONTEXT 为该实例的
+  Context；队列取空后任务结束，下一次入队再创建。空闲的监听器只保留一条空队列。
+- 异常：处理函数的异常由宿主记录 ERROR 日志，包含实例标签与事件名，分发任务继续处理下一个事件。
+- 停止：实例停止信号发出后不再入队，分发任务处理完已入队的事件后结束，lifespan 随后退出；依赖者收尾时发布的
+  事件因此在提供者退出前处理完。实例故障或关闭被取消时取消正在执行的处理并清空队列，与现有在途回调的取消方式相同。
+  在监听器内关闭所属组合或宿主时报错的判断，改为以分发任务识别当前监听器。
+- 配置准备：bazaar-contrib-config 增加 `CONFIG_PREPARED = EventKey[None]("config.prepared")` 并导出。准备插件处理完
+  CONFIG_PREPARE 后发布 CONFIG_PREPARED，表示处理结束，成败由 preparation_error 表达。manager 的 `prepare` 在
+  finally 中发布；`sync` 记录操作时的文件错误等会让它抛出异常，此时先把异常文本写入 preparation_error 再继续抛出，
+  启动按准备失败处理，与 `sync` 返回失败结果时相同。app 的 node-dependencies 条目监听 CONFIG_PREPARED 并释放一个
+  初值为 0 的 asyncio.Semaphore；`prepare` 发布 CONFIG_PREPARE 后按 `initial` 组合中监听 CONFIG_PREPARE 的条目数
+  acquire，全部完成后调用 `select`，没有准备插件时直接 `select`。
+  测试用的替代准备插件 example-preparation 写出检查结果后同样发布 CONFIG_PREPARED。
+- 审计与协作：监听器异常由宿主隔离，NodeAudit.publish 去掉 `ctx.announce` 外的异常捕获，取代本目录 README
+  「Codex 行为对照后的宿主契约（2026-10-25）」Task 1 中 publish 隔离事件投递异常的边界。
+  collaboration 发布 CONTACT_REVIEWED 后，`review_contact` 的结果不受监听器异常影响。
+- 安装测试环境：`uv run --isolated --with` 把本地构建放在下层环境，节点启动时 bootstrap 的 `uv pip install`
+  看不到它们，会把 PyPI 上同版本的 bazaar-core、config、sidecar、timer 装在上层覆盖本地构建，安装测试因此测不到
+  这些包的本地改动。`tests/run_installed.py` 按当前环境的发行原样建普通 venv（本地构建按 direct_url，其余按版本），
+  在其中运行 `--help` 与冒烟脚本。
+
+验证：core 安装测试覆盖同一监听器按发布顺序收到事件；一个监听器阻塞时发布方立即返回、其他监听器照常处理；
+监听器抛错后发布方正常返回、该监听器继续处理后续事件，日志含实例标签与事件名；处于 stopping 的提供者继续收到
+依赖者的收尾事件并在退出前处理完；实例故障时正在执行的处理被取消。既有用例中依赖 announce
+等待处理结束、或依赖发布方取消联动监听器的，改为等待监听器自身发出的信号。app 的 configuration_smoke 在 manager
+与 example-preparation 两种准备插件下，`node()` 进入时补装与检查结果已经生效。collaboration 安装测试中
+CONTACT_REVIEWED 监听器抛错时，`review_contact` 正常返回且审核已落库。core 改动影响的全部包（CI 按依赖闭包选择）
+`scripts/ci.py check` 与 `test` 通过，wheel 与 sdist 各执行一遍；仓库根目录 `uv run --quiet scripts/pyright_lsp_check.py .`
+通过。发布含上述包的 rc。
+
+验收结果：core 的 `scripts/ci.py test` 47 个用例通过，含新增的按发布顺序处理与提供者故障取消在途处理两例，
+连续多次运行结果一致。core、config、audit、manager、collaboration、app 的 `scripts/ci.py check` 与 `package`
+（wheel 与 sdist）通过，仓库根目录 pyright 检查通过。修正安装测试环境后，app、collaboration、schema、
+node-management、reminder、messages-node、legacy-node-migrations、agent 的 `scripts/ci.py test` 通过，
+status、invoke、config-versions、agent-command、manager 同样通过。collaboration 的 CONTACT_REVIEWED 观察者在记录后
+抛错，`review_contact` 正常返回、通知齐全；修正环境前，同一用例的节点进程加载的是 PyPI 上的 bazaar-core
+0.3.0rc11，按旧语义把观察者异常返回给了 `review_contact`。

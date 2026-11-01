@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from dataclasses import dataclass, field
 from uuid import uuid7
 lazy from collections.abc import Sequence
 lazy from contextlib import AbstractAsyncContextManager
 lazy from dataclasses import replace
-lazy from inspect import isawaitable
 lazy from typing import Any, Literal, cast
 lazy from uuid import UUID
 
@@ -172,6 +172,7 @@ class _ContribInstance:
     id: UUID = field(default_factory=uuid7)
     context: _Context = field(init=False)
     bindings: dict[ServiceKey[Any] | EventKey[Any], UUID | None] = field(init=False)
+    _listeners: dict[EventKey[Any], _Listener] = field(init=False)
     _order: int = 0
     _dependencies: dict[ServiceKey[Any], _ContribInstance] = field(default_factory=dict)
     _parents: tuple[_ContribInstance, ...] = ()
@@ -188,6 +189,10 @@ class _ContribInstance:
         self.context = _Context(self)
         self.bindings = dict(self.enablement._bindings)
         self.bindings.update((key, self.registration.id) for key in self.entry.local)
+        self._listeners = {
+            event: _Listener(self, event, handler)
+            for event, handler in self.definition.listen.items()
+        }
         parents = []
         parent = self.enablement._parent
         while parent is not None:
@@ -288,27 +293,16 @@ class _ContribInstance:
             self._transition("aborting")
             self._task.cancel()
 
-    async def _invoke(
-        self, invocation: _Invocation, handler: EventHandler[Any], value: Any
-    ) -> None:
-        invocation.task = cast(asyncio.Task[None], asyncio.current_task())
-        failure: BaseException | None = None
-        token = CURRENT_CONTEXT.set(self.context)
-        try:
-            result = handler(self.context, value)
-            if isawaitable(result):
-                await result
-        except asyncio.CancelledError as error:
-            if not isinstance(invocation._state, _Cancelled):
-                failure = error
-            raise
-        except BaseException as error:  # noqa: BLE001 - Announce aggregates listener failures.
-            failure = error
-        finally:
-            CURRENT_CONTEXT.reset(token)
-            invocation._state = _Finished(failure)
-            self._callbacks.discard(invocation)
-            invocation.done.set()
+
+@dataclass(eq=False, slots=True)
+class _Listener:
+    """An instance's handler for one event and the values still waiting for it."""
+
+    instance: _ContribInstance
+    event: EventKey[Any]
+    handler: EventHandler[Any]
+    pending: deque[Any] = field(default_factory=deque)
+    invocation: _Invocation | None = None
 
 
 @dataclass(frozen=True, slots=True)
