@@ -109,7 +109,7 @@ async def test_rebinding_recorder_to_private_database_keeps_public_storage(
     ):
         public = root_connections["observe-db"]
         await hub.announce(MESSAGE_RECEIVED, Message("before private storage"))
-        assert ("alice", "before private storage") in await public.messages()
+        await public.recorded("alice", "before private storage")
         async with hub.enable(
             Composition(
                 entries=[
@@ -136,7 +136,7 @@ async def test_rebinding_recorder_to_private_database_keeps_public_storage(
             await contexts[-1].announce(
                 MESSAGE_RECEIVED, Message("after private storage")
             )
-            assert ("alice", "after private storage") in await private.messages()
+            await private.recorded("alice", "after private storage")
             await public.insert("node", "public storage remains available")
             assert (
                 "node",
@@ -175,7 +175,7 @@ async def test_enabling_database_resumes_a_blocked_agent_recorder(tmp_path: Path
             database = connections["observe-db"]
             alice = hub
             await alice.announce(MESSAGE_RECEIVED, Message("storage is now available"))
-            assert ("recorder", "storage is now available") in await database.messages()
+            await database.recorded("recorder", "storage is now available")
             snapshot = next(
                 item for item in recording.snapshots if item.name == "recorder"
             )
@@ -316,7 +316,7 @@ async def test_update_rebinds_cross_composition_consumers_and_preserves_live_fil
             assert previous.closed and previous.worker.done()
             assert outside["observe-db"] is current
             await hub.announce(MESSAGE_RECEIVED, Message("after replacement"))
-            assert ("alice", "after replacement") in await current.messages()
+            await current.recorded("alice", "after replacement")
             assert not handle.closed
             await hub.announce(NOTE, "unaffected resource continues")
         await contexts[0].update(composition.model_copy(update={"entries": [healthy]}))
@@ -597,9 +597,12 @@ async def test_plugin_callback_applies_configuration_and_keeps_its_own_lifespan(
             ctx.offer(JOURNAL, handle)
             yield
 
+    applied = asyncio.Event()
+
     async def update(ctx: Context, composition: Composition):
         await ctx.accept(apply)(composition)
         await write(ctx, "configuration applied")
+        applied.set()
 
     entry = ContribEntry(
         name="operator",
@@ -642,6 +645,7 @@ async def test_plugin_callback_applies_configuration_and_keeps_its_own_lifespan(
                 }
             ),
         )
+        await applied.wait()
         assert previous.closed
         assert not handle.closed
         await connections["observe-db"].insert("root", "callback requested update")
@@ -781,10 +785,7 @@ async def test_parent_replacement_recreates_nested_children_and_retains_private_
         await contexts[-1].announce(
             MESSAGE_RECEIVED, Message("same private binding after update")
         )
-        assert (
-            "recorder",
-            "same private binding after update",
-        ) in await second.messages()
+        await second.recorded("recorder", "same private binding after update")
         await owner.update(
             Composition(
                 entries=[
@@ -799,6 +800,6 @@ async def test_parent_replacement_recreates_nested_children_and_retains_private_
         await contexts[-1].announce(
             MESSAGE_RECEIVED, Message("new parent child writes")
         )
-        assert ("recorder", "new parent child writes") in await third.messages()
+        await third.recorded("recorder", "new parent child writes")
         assert ("grandchild", "inherited private database") in await third.messages()
     assert all(database.closed and database.worker.done() for database in connections)

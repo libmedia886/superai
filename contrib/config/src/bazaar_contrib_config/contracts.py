@@ -21,6 +21,7 @@ lazy from packaging.specifiers import SpecifierSet
 lazy from packaging.utils import canonicalize_name
 
 CONFIG_PREPARE = EventKey[None]("config.prepare")
+CONFIG_PREPARED = EventKey[None]("config.prepared")
 
 
 class ConfigConflict(ValueError):

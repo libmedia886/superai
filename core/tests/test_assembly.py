@@ -128,11 +128,12 @@ async def test_unordered_backends_share_selected_connection_across_enablements(
             await tasks.create_task(
                 hub.announce(MESSAGE_RECEIVED, Message("hello from a shared database"))
             )
+            await selected.recorded("journal", "hello from a shared database")
             await first.aclose()
             await first.aclose()
             assert handles["journal"].closed
             await hub.announce(MESSAGE_RECEIVED, Message("remaining recorder"))
-            assert ("recorder", "remaining recorder") in await selected.messages()
+            await selected.recorded("recorder", "remaining recorder")
             async with aiofiles.open(tmp_path / "journal.txt") as handle:
                 assert "hello" in await handle.read()
     assert selected.closed and selected.worker.done()

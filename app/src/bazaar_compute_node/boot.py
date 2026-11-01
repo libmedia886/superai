@@ -11,6 +11,7 @@ lazy from importlib.resources import files
 
 lazy from bazaar_contrib_config import (
     CONFIG_PREPARE,
+    CONFIG_PREPARED,
     CONFIG_STORE,
     CONFIGURATION,
     ConfigDocument,
@@ -164,6 +165,8 @@ async def node(
         await asyncio.to_thread(importlib.invalidate_caches)
 
     configurations: list[Configuration] = []
+    preparers: list[str] = []
+    prepared = asyncio.Semaphore(0)
 
     @asynccontextmanager
     async def dependencies(ctx: Context):
@@ -172,24 +175,23 @@ async def node(
 
     def initial(document: ConfigDocument) -> Composition:
         composition = build(document)
+        preparers.extend(
+            entry.name
+            for entry in composition.entries
+            if CONFIG_PREPARE in entry.definition.listen
+        )
         entry = ContribEntry(
             name="node-dependencies",
             definition=Contrib(
                 accepts=[CONFIGURATION],
                 lifespan=dependencies,
+                listen={CONFIG_PREPARED: lambda ctx, _: prepared.release()},
             ),
         )
         return composition.model_copy(
             update={
                 "entries": (*composition.entries, entry),
-                "roots": (
-                    entry.name,
-                    *(
-                        entry.name
-                        for entry in composition.entries
-                        if CONFIG_PREPARE in entry.definition.listen
-                    ),
-                ),
+                "roots": (entry.name, *preparers),
             }
         )
 
@@ -203,6 +205,8 @@ async def node(
     async def prepare(hub: ContribHub) -> None:
         Configuration.check(hub)
         await hub.announce(CONFIG_PREPARE, None)
+        for _ in preparers:
+            await prepared.acquire()
         await configurations[0].select(start)
 
     async with run(entries, loader, prepare=prepare) as hub:

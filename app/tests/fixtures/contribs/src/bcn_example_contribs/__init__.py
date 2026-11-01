@@ -13,6 +13,7 @@ lazy from typing import Any
 from bazaar_contrib_agent import AGENT, AgentConfig, compose
 from bazaar_contrib_config import (
     CONFIG_PREPARE,
+    CONFIG_PREPARED,
     CONFIG_STORE,
     ConfigCommitUnknown,
     ConfigConflict,
@@ -205,12 +206,11 @@ async def prepare(ctx: Context, _: None) -> None:
         if process.returncode is None:
             process.terminate()
             await process.wait()
-    report = (output + errors).decode()
-    if process.returncode:
-        raise RuntimeError(report)
     await asyncio.to_thread(
-        (ctx.accept(DIRECTORY) / "dependencies.txt").write_text, report
+        (ctx.accept(DIRECTORY) / "dependencies.txt").write_text,
+        (output + errors).decode(),
     )
+    await ctx.announce(CONFIG_PREPARED, None)
 
 
 preparation = Contrib(

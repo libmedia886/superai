@@ -13,6 +13,7 @@ lazy from collections.abc import (
 )
 lazy from contextlib import AbstractAsyncContextManager, AsyncExitStack
 lazy from dataclasses import replace
+lazy from inspect import isawaitable
 lazy from types import TracebackType
 lazy from typing import Any, Self, cast
 lazy from uuid import UUID
@@ -44,6 +45,7 @@ lazy from .instances import (
     _ContribInstance,
     _Finished,
     _Invocation,
+    _Listener,
     _Open,
     _OwnerState,
     _Registration,
@@ -63,8 +65,7 @@ class ContribHub:
         self._failed: dict[UUID, _ContribInstance] = {}
         self._diagnostics: dict[UUID, ContribStatus] = {}
         self._listeners: dict[
-            tuple[EventKey[Any], UUID | None],
-            dict[UUID, tuple[_ContribInstance, Callable[..., Any]]],
+            tuple[EventKey[Any], UUID | None], dict[UUID, _Listener]
         ] = {}
         self._dependents: dict[_ContribInstance, dict[UUID, _ContribInstance]] = {}
         self._revision = 0
@@ -163,10 +164,10 @@ class ContribHub:
             self._instances[instance.id] = instance
             for provider in (*instance._dependencies.values(), *instance._parents):
                 self._dependents.setdefault(provider, {})[instance.id] = instance
-            for event, handler in instance.definition.listen.items():
+            for event, listener in instance._listeners.items():
                 self._listeners.setdefault((event, instance.bindings.get(event)), {})[
                     instance.id
-                ] = (instance, handler)
+                ] = listener
         self._notify(candidate._instances)
 
     def _unregister(self, instance: _ContribInstance) -> None:
@@ -582,10 +583,10 @@ class ContribHub:
         group = self._tasks
         if group is None:
             raise ContribError("enter the hub before announcing events")
-        callbacks: list[_Invocation] = []
-        for instance, handler in tuple(
+        for listener in tuple(
             self._listeners.get((event, bindings.get(event)), {}).values()
         ):
+            instance = listener.instance
             # Dependent teardown can still publish until this listener starts exiting.
             state = instance.state
             if isinstance(state, Running) or (
@@ -595,39 +596,43 @@ class ContribHub:
                 and instance._ready.is_set()
                 and not instance._stop.is_set()
             ):
-                invocation = _Invocation()
-                instance._callbacks.add(invocation)
-                invocation.task = group.create_task(
-                    instance._invoke(invocation, handler, value),
-                    name=f"{instance.entry.name}:{event.name}",
-                    eager_start=True,
-                )
-                callbacks.append(invocation)
-        if not callbacks:
-            return
-        pending = asyncio.gather(
-            *(invocation.task for invocation in callbacks), return_exceptions=True
-        )
+                listener.pending.append(value)
+                if listener.invocation is None:
+                    invocation = listener.invocation = _Invocation()
+                    instance._callbacks.add(invocation)
+                    invocation.task = group.create_task(
+                        self._deliver(listener, invocation),
+                        name=f"{instance.entry.name}:{event.name}",
+                        eager_start=True,
+                    )
+
+    async def _deliver(self, listener: _Listener, invocation: _Invocation) -> None:
+        instance = listener.instance
+        invocation.task = cast(asyncio.Task[None], asyncio.current_task())
+        token = CURRENT_CONTEXT.set(instance.context)
         try:
-            await asyncio.shield(pending)
-        except asyncio.CancelledError:
-            for invocation in callbacks:
-                invocation.cancel()
-            while not pending.done():
+            # Return to the publisher before any listener code runs.
+            await asyncio.sleep(0)
+            while listener.pending:
                 try:
-                    await asyncio.shield(pending)
-                except asyncio.CancelledError:
-                    pass
-            raise
-        errors = [
-            item._state.error
-            for item in callbacks
-            if isinstance(item._state, _Finished) and item._state.error is not None
-        ]
-        if len(errors) == 1:
-            raise errors[0]
-        if errors:
-            raise BaseExceptionGroup(f"event {event.name!r} failed", errors)
+                    result = listener.handler(
+                        instance.context, listener.pending.popleft()
+                    )
+                    if isawaitable(result):
+                        await result
+                except Exception:
+                    logger.exception(
+                        "%s failed handling event %r",
+                        instance.label,
+                        listener.event.name,
+                    )
+        finally:
+            CURRENT_CONTEXT.reset(token)
+            listener.pending.clear()
+            listener.invocation = None
+            invocation._state = _Finished()
+            instance._callbacks.discard(invocation)
+            invocation.done.set()
 
     def _notify(
         self,

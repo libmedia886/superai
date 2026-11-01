@@ -2635,3 +2635,11 @@ Task 完成后停下等待 review。
 CONTACT_REVIEWED 监听器抛错时，`review_contact` 正常返回且审核已落库。core 改动影响的全部包（CI 按依赖闭包选择）
 `scripts/ci.py check` 与 `test` 通过，wheel 与 sdist 各执行一遍；仓库根目录 `uv run --quiet scripts/pyright_lsp_check.py .`
 通过。发布含上述包的 rc。
+
+验收结果：core 的 `scripts/ci.py test` 47 个用例通过，含新增的按发布顺序处理与提供者故障取消在途处理两例，
+连续多次运行结果一致。core、config、audit、manager、collaboration、app 的 `scripts/ci.py check` 与 `package`
+（wheel 与 sdist）通过，仓库根目录 pyright 检查通过。修正安装测试环境后，app、collaboration、schema、
+node-management、reminder、messages-node、legacy-node-migrations、agent 的 `scripts/ci.py test` 通过，
+status、invoke、config-versions、agent-command、manager 同样通过。collaboration 的 CONTACT_REVIEWED 观察者在记录后
+抛错，`review_contact` 正常返回、通知齐全；修正环境前，同一用例的节点进程加载的是 PyPI 上的 bazaar-core
+0.3.0rc11，按旧语义把观察者异常返回给了 `review_contact`。

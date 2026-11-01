@@ -31,6 +31,7 @@ async def main():
                 )
 
         await asyncio.to_thread(record)
+        raise RuntimeError("the review observer fails after recording")
 
     async with node(configer_options=(sys.argv[1],)) as hub:
         errors = [

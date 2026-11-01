@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from contextlib import asynccontextmanager
 from time import monotonic_ns, time_ns
 from typing import Annotated, Literal, Protocol
@@ -124,12 +123,7 @@ class NodeAudit:
             if error is None
             else AuditFailure(**fields, error=error)
         )
-        try:
-            await self.ctx.announce(AUDIT_EVENT, event)
-        except Exception:
-            logging.getLogger(__name__).exception(
-                "audit publication failed", extra={"event_name": event_name}
-            )
+        await self.ctx.announce(AUDIT_EVENT, event)
 
 
 @asynccontextmanager

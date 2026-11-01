@@ -20,6 +20,7 @@ from bazaar_core import (
     ContribChange,
     ContribEntry,
     ContribHub,
+    EventKey,
     Failed,
     Running,
     ServiceKey,
@@ -106,8 +107,8 @@ async def test_startup_failure_blocks_dependencies_and_allows_independent_child_
             alice = hub
             await alice.announce(MESSAGE_RECEIVED, Message("startup continues"))
             database = connections["observe-db"]
-            assert ("recorder", "startup continues") in await database.messages()
-            assert ("page", "document: failed") in await database.messages()
+            await database.recorded("recorder", "startup continues")
+            await database.recorded("page", "document: failed")
         assert database.closed
 
 
@@ -334,7 +335,7 @@ async def test_same_definition_fault_stops_only_its_local_database_and_consumers
         assert isinstance(instances["alice"].state, Blocked)
         assert instances["alice"].state.blocked_by == instances["alice-db"].id
         await contexts["bob"].announce(MESSAGE_RECEIVED, Message("bob continues"))
-        assert ("bob", "bob continues") in await connections["bob"].messages()
+        await connections["bob"].recorded("bob", "bob continues")
 
 
 async def test_lifespan_task_group_failure_does_not_escape_to_the_hub(
@@ -565,7 +566,7 @@ async def test_simultaneous_faults_and_explicit_close_wait_for_shared_consumer(
         assert all(resource.closed for resource in resources)
 
 
-async def test_repeated_publisher_cancellation_waits_for_listener_cleanup_before_disable(
+async def test_repeated_close_cancellation_waits_for_listener_cleanup_before_disable(
     tmp_path: Path,
     tasks: asyncio.TaskGroup,
 ):
@@ -614,22 +615,109 @@ async def test_repeated_publisher_cancellation_waits_for_listener_cleanup_before
             )
         ) as enablement,
     ):
-        publisher = tasks.create_task(
-            hub.announce(MESSAGE_RECEIVED, Message("waiting"))
-        )
+        await hub.announce(MESSAGE_RECEIVED, Message("waiting"))
+        await active.wait()
+        close = tasks.create_task(enablement.aclose(), eager_start=True)
         try:
-            await active.wait()
-            publisher.cancel()
+            close.cancel()
             await cleaning.wait()
-            publisher.cancel()
-            close = tasks.create_task(enablement.aclose(), eager_start=True)
+            close.cancel()
         finally:
             release.set()
         with pytest.raises(asyncio.CancelledError):
-            await publisher
-        await close
+            await close
     database = await Database.open(path)
     try:
         assert ("root", "listener cleanup committed") in await database.messages()
     finally:
         await database.aclose()
+
+
+async def test_listener_handles_its_events_in_publication_order():
+    count = EventKey[int]("count")
+    received: list[int] = []
+    handled = asyncio.Condition()
+
+    async def remember(ctx: Context, value: int):
+        del ctx
+        for _ in range(value % 3):
+            await asyncio.sleep(0)
+        async with handled:
+            received.append(value)
+            handled.notify_all()
+
+    async with (
+        ContribHub() as hub,
+        hub.enable(
+            Composition(
+                entries=[
+                    ContribEntry(
+                        name="ordered", definition=Contrib(listen={count: remember})
+                    )
+                ]
+            )
+        ),
+    ):
+        for value in range(30):
+            await hub.announce(count, value)
+        async with handled:
+            await handled.wait_for(lambda: 29 in received)
+    assert received == sorted(received)
+
+
+async def test_provider_fault_cancels_the_handling_in_progress(tmp_path: Path):
+    active = asyncio.Event()
+    cancelled = asyncio.Event()
+    connections: dict[str, Database] = {}
+
+    @asynccontextmanager
+    async def database_lifespan(ctx: Context):
+        resource = await Database.open(tmp_path / "fault.sqlite")
+        try:
+            await resource.start()
+            ctx.offer(DB, resource)
+            yield
+        finally:
+            await resource.aclose()
+
+    async def listener(ctx: Context, value: Message):
+        del value
+        ctx.accept(DB)
+        active.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    async with (
+        ContribHub() as hub,
+        hub.enable(
+            Composition(
+                entries=[
+                    observe(DB, connections),
+                    ContribEntry(
+                        name="db",
+                        definition=Contrib(offers=[DB], lifespan=database_lifespan),
+                    ),
+                    ContribEntry(
+                        name="listener",
+                        definition=Contrib(
+                            accepts=[DB], listen={MESSAGE_RECEIVED: listener}
+                        ),
+                    ),
+                ]
+            )
+        ),
+    ):
+        await hub.announce(MESSAGE_RECEIVED, Message("held by the listener"))
+        await active.wait()
+        database = connections["observe-db"]
+        async with database.connection.execute("DROP TABLE messages"):
+            pass
+        await database.connection.commit()
+        with pytest.raises(sqlite3.OperationalError):
+            await database.insert("root", "broken schema")
+        await cancelled.wait()
+        instances = {item.name: item for item in hub.snapshots}
+        assert isinstance(instances["listener"].state, Blocked)

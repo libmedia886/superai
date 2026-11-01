@@ -266,12 +266,15 @@ async def test_shutdown_publishes_final_events_before_closing_the_listener_datab
 async def test_event_parse_error_keeps_other_listeners_running_and_can_be_corrected(
     tmp_path: Path,
     lifespans: AsyncExitStack,
+    caplog: pytest.LogCaptureFixture,
 ):
     parsed: list[object] = []
+    corrected = asyncio.Event()
 
     def parse(ctx: Context, value: Message):
         del ctx
         parsed.append(json.loads(value.text))
+        corrected.set()
 
     connections: dict[str, Database] = {}
 
@@ -303,16 +306,20 @@ async def test_event_parse_error_keeps_other_listeners_running_and_can_be_correc
         )
     ):
         alice = hub
-        try:
-            await alice.announce(MESSAGE_RECEIVED, Message("incomplete JSON"))
-        except json.JSONDecodeError:
-            pass
+        await alice.announce(MESSAGE_RECEIVED, Message("incomplete JSON"))
         database = connections["observe-db"]
-        assert ("recorder", "incomplete JSON") in await database.messages()
+        await database.recorded("recorder", "incomplete JSON")
         await alice.announce(MESSAGE_RECEIVED, Message('{"text": "corrected message"}'))
+        await corrected.wait()
         assert any(
             isinstance(value, dict) and value.get("text") == "corrected message"
             for value in parsed
+        )
+        assert any(
+            "'parser'" in record.getMessage()
+            and MESSAGE_RECEIVED.name in record.getMessage()
+            and record.exc_info is not None
+            for record in caplog.records
         )
     assert database.closed
     await hub.aclose()
