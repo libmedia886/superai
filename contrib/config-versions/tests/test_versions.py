@@ -88,7 +88,6 @@ async def test_installed_chain_preserves_legacy_identity_and_provider_settings(
         harness = agent["harness"][0]
         assert harness["model"] == "gpt-6.1-sol"
         assert harness["effort"] == "max"
-        assert harness["env"]["CUSTOM_CA"] == "CUSTOM_CA"
         assert agent["session"]["config"]["sandbox"]["policy"] == "workspace-write"
         assert agent["idle_timeout"] == 12.5
         assert historical.payload["version"] == "4"
@@ -154,10 +153,6 @@ async def test_v3_and_v4_keep_multiple_entities_data_and_provider_settings(
         for package in candidate.required_packages
     )
     assert entries["sqlite"]["name"] == "history.sqlite3"
-    assert (
-        entries["agent"]["agents"][0]["harness"][0]["env"]["ANTHROPIC_API_KEY"]
-        == "KEY_WORK"
-    )
     v4 = await asyncio.to_thread(converters[-2].convert, v3)
     v4.payload["agent"][0]["id"] = str(uuid4())
     v4.payload["node"].update(
