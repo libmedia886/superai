@@ -302,14 +302,6 @@ class TestChannel:
     ) -> str:
         return provider_thread_id
 
-    def accept_turn_event(self, event: HarnessOutput, *, target: ChannelTarget):
-        self.outbound.put_nowait(
-            {
-                "event": event.model_dump(mode="json"),
-                "target": target.model_dump(mode="json"),
-            }
-        )
-
     async def prepare_send(
         self, request: ChannelSendRequest
     ) -> tuple[ChannelSendPart, ...]:
@@ -429,8 +421,11 @@ async def channel_lifespan(ctx: Context, config: ChannelConfig):
 
 
 def turn(ctx: Context, value: ChannelTurn) -> None:
-    cast(TestChannel, ctx.accept(CHANNEL)).accept_turn_event(
-        value.event, target=value.target
+    cast(TestChannel, ctx.accept(CHANNEL)).outbound.put_nowait(
+        {
+            "event": value.event.model_dump(mode="json"),
+            "target": value.target.model_dump(mode="json"),
+        }
     )
 
 
