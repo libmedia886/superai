@@ -2720,3 +2720,15 @@ Task 完成后停下等待 review。
 
 验收结果：messages-node 包 `scripts/ci.py check`、`test` 与 `package`（wheel 与 sdist）通过，仓库根目录
 pyright 检查通过。
+
+## 运行时环境变量不再按 agent 配置（2026-11-01）
+
+harness 继承节点的完整环境，0.2 的 `[agent.runtime.env]`（`--set runtime.env=名字=来源变量`）不再支持，
+V4 转 V5 时不再迁移这张表。Task 完成后停下等待 review。
+
+### Task 33：V4 转 V5 丢弃运行时环境变量
+
+- V4 到 V5 的转换像 `sandbox_mode`、`network_access` 一样丢弃每个 harness 的 `env`；V1 到 V4 的历史转换保持不变。
+
+验证：config-versions 包 `scripts/ci.py check`、`test` 与 `package`（wheel 与 sdist）通过，仓库根目录
+`uv run --quiet scripts/pyright_lsp_check.py .` 通过。发布含该包的 rc。

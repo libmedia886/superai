@@ -165,6 +165,7 @@ def migrate_v5(payload: Mapping[str, object]) -> ConfigCandidate:
         for harness in item["harness"]:
             harness.pop("sandbox_mode", None)
             harness.pop("network_access", None)
+            harness.pop("env", None)
         agents.append(item)
         changes.append(
             FieldChange(
