@@ -2703,3 +2703,17 @@ Task 完成后停下等待 review。
 
 验收结果：agent 的 `scripts/ci.py check`、`test` 与 `package`（wheel 与 sdist）通过，consumer_smoke 中的审批场景照常；
 仓库根目录 pyright 检查通过。
+
+## 附件不设大小上限（2026-11-01）
+
+入站附件按块流式落盘，内存中只保留一块；文件大小由各平台自身的上限约束。消息层的单文件上限（25 MiB）与各
+Channel 插件自带的下载限额都没有平台依据，一并去掉；本节取代 Task 12 中 Telegram 与 Lark 保留下载限额的要求。
+Task 完成后停下等待 review。
+
+### Task 32：去掉附件落盘的单文件上限
+
+- messages-node 的 `AttachmentMaterializer` 去掉 `max_file_bytes` 参数及写入时的累计大小检查。
+- Telegram 与 WeCom 插件在各自仓库去掉下载限额；Lark 迁移时不再设限额。
+
+验证：messages-node 包 `scripts/ci.py check`、`test` 与 `package`（wheel 与 sdist）通过，仓库根目录
+`uv run --quiet scripts/pyright_lsp_check.py .` 通过。发布含该包的 rc。
