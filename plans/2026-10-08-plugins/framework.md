@@ -2717,3 +2717,6 @@ Task 完成后停下等待 review。
 
 验证：messages-node 包 `scripts/ci.py check`、`test` 与 `package`（wheel 与 sdist）通过，仓库根目录
 `uv run --quiet scripts/pyright_lsp_check.py .` 通过。发布含该包的 rc。
+
+验收结果：messages-node 包 `scripts/ci.py check`、`test` 与 `package`（wheel 与 sdist）通过，仓库根目录
+pyright 检查通过。
