@@ -2643,3 +2643,42 @@ node-management、reminder、messages-node、legacy-node-migrations、agent 的 
 status、invoke、config-versions、agent-command、manager 同样通过。collaboration 的 CONTACT_REVIEWED 观察者在记录后
 抛错，`review_contact` 正常返回、通知齐全；修正环境前，同一用例的节点进程加载的是 PyPI 上的 bazaar-core
 0.3.0rc11，按旧语义把观察者异常返回给了 `review_contact`。
+
+## 回合事件订阅（2026-11-01）
+
+Agent 每收到一个 Harness 事件，`events.forward` 先发布 `harness.<type>` 审计，再经 `Channels.accept_turn_event`
+按 `turns[(session, turn)]` 登记的连接与目标逐个调用 `channel.accept_turn_event`；回合终结事件在收尾时由 loop
+再调用一次。这是 0.2 方法透传的延续，事件沿 agent 的方法链逐个送到 channel。Task 29 之后 announce 只入队、
+不阻塞发布方，本节把回合事件改为事件订阅。
+Task 完成后停下等待 review。
+
+### Task 30：回合事件改为每个连接私有的事件
+
+- 契约：bazaar-contrib-channel 新增 `events.py`，定义 `ChannelTurn`（frozen dataclass，字段 `target: ChannelTarget`、
+  `event: HarnessOutput`）与 `CHANNEL_TURN = EventKey[ChannelTurn]("channel.turn")`，从包入口导出；
+  `Channel` 协议删除 `accept_turn_event`。
+- 私有绑定：agent 的 `channel_lifespan` 启用 provider 子组合时使用 `local=(CHANNEL_INPUT, CHANNEL, CHANNEL_TURN)`，
+  同一子组合中的 `connect` 条目把自身 Context 存入 `Connection.context`。agent 通过这个 Context 发布
+  `CHANNEL_TURN`，事件只到达该连接的 provider，provider 不需要按 agent 或 bot 身份过滤。
+- 发布：`Channels.accept_turn_event` 改为 `async def announce(self, event: HarnessOutput)`，向
+  `turns[(event.session_id, event.turn_id)]` 中状态不是 STOPPED 的每个连接发布 `ChannelTurn(目标, event)`。
+  STOPPED 由 `retire` 在连接退出 lifespan 前设置，此后该连接的 Context 不再接受发布。`events.forward` 在
+  `deliver` 时 await 它，`channel` 参数改为 `Channels`、`target` 参数删除，loop 中只为它计算首个目标的表达式随之删除；
+  回合收尾处的终结事件同样改为 await `announce`。原先包在这三处调用外的 `except Exception` 删除，
+  provider 处理事件的异常由 core 按监听器隔离。
+- Provider：提供 `CHANNEL` 的 Contrib 声明 `listen={CHANNEL_TURN: ...}`，处理函数用 `ctx.accept(CHANNEL)`
+  取得自身提供的 channel 处理事件。主仓库 workbench 的 `channel` 与 `secondary_channel` 照旧把事件与目标写入
+  outbound 包；editor 夹具启用 channel 时把 `CHANNEL_TURN` 加入 local，由 `process` 的 Context 发布。
+- 外部仓库在主仓库发布含本 Task 的 rc 后各自交付：contrib-telegram 的 channel Contrib 监听 `CHANNEL_TURN`，
+  typing 规则不变；contrib-wecom 删除 `accept_turn_event` 空实现；contrib-codex、contrib-claudecode 的测试 channel
+  监听 `CHANNEL_TURN`，照旧把事件转给测试。
+
+验证：agent 安装测试 consumer_smoke 中 workbench provider 与 editor 自定义 agent 两个场景对回合事件的现有观察
+（started、content.delta、completed 及工具调用事件，经 workbench channel 的 outbound 包读取）照常通过。
+channel、agent 包的 `scripts/ci.py check` 与
+`test` 通过，wheel 与 sdist 各执行一遍；仓库根目录 `uv run --quiet scripts/pyright_lsp_check.py .` 通过。
+发布含上述包的 rc。
+
+验收结果：channel、agent 的 `scripts/ci.py check` 与 `package`（wheel 与 sdist）通过，仓库根目录 pyright 检查通过。
+agent 的 `scripts/ci.py test` 通过，consumer_smoke 中 workbench provider 与 editor 自定义 agent 两个场景经 outbound
+包读到的回合事件照常；agent-command 与 app 的 `scripts/ci.py test` 同样通过。

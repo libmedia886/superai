@@ -25,6 +25,7 @@ from bazaar_contrib_channel import (
     CHANNEL,
     CHANNEL_BUILDERS,
     CHANNEL_INPUT,
+    CHANNEL_TURN,
     ChannelApprovalRequest,
     ChannelBuilderConfig,
     ChannelConnectionError,
@@ -38,6 +39,7 @@ from bazaar_contrib_channel import (
     ChannelSendRequest,
     ChannelTarget,
     ChannelTargetPresentation,
+    ChannelTurn,
     DmAddress,
     DmRequest,
     InboundAttachment,
@@ -426,11 +428,18 @@ async def channel_lifespan(ctx: Context, config: ChannelConfig):
             )
 
 
+def turn(ctx: Context, value: ChannelTurn) -> None:
+    cast(TestChannel, ctx.accept(CHANNEL)).accept_turn_event(
+        value.event, target=value.target
+    )
+
+
 channel = Contrib(
     config=ChannelConfig,
     accepts=[CHANNEL_INPUT],
     offers=[CHANNEL],
     lifespan=channel_lifespan,
+    listen={CHANNEL_TURN: turn},
 )
 
 
@@ -898,6 +907,7 @@ secondary_channel = Contrib(
     accepts=[CHANNEL_INPUT],
     offers=[CHANNEL],
     lifespan=channel_lifespan,
+    listen={CHANNEL_TURN: turn},
 )
 
 

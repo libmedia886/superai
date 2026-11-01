@@ -8,13 +8,12 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Protocol
 
-from bazaar_contrib_harness import ApprovalResult, HarnessOutput
+from bazaar_contrib_harness import ApprovalResult
 
 from .models import (
     ChannelApprovalRequest,
     ChannelIdentity,
     ChannelSendRequest,
-    ChannelTarget,
     DmAddress,
     DmRequest,
     InboundMessage,
@@ -34,10 +33,6 @@ class Channel(Protocol):
     def dm_address(self, request: DmRequest) -> DmAddress | None: ...
 
     def receive(self) -> AsyncIterator[InboundMessage]: ...
-
-    def accept_turn_event(
-        self, event: HarnessOutput, *, target: ChannelTarget
-    ) -> None: ...
 
     async def prepare_send(
         self, request: ChannelSendRequest
