@@ -22,6 +22,8 @@ from bazaar_contrib_harness import (
     TurnFailed,
 )
 
+from .routing import Channels
+
 logger = logging.getLogger(__name__)
 
 
@@ -156,13 +158,12 @@ class ApprovalRoute:
 async def forward(
     audit: Audit,
     context: AuditContext,
-    channel: Channel,
+    channels: Channels,
     event: HarnessOutput,
-    target: ChannelTarget,
     *,
     deliver: bool = True,
 ) -> None:
-    """Publish turn events and forward them to the channel."""
+    """Publish turn events and announce them to the turn's channels."""
     await audit.publish(
         f"harness.{event.payload.type}",
         context=context.model_copy(
@@ -187,7 +188,4 @@ async def forward(
         else None,
     )
     if deliver:
-        try:
-            channel.accept_turn_event(event, target=target)
-        except Exception:
-            logger.exception("channel rejected %s", event.payload.type)
+        await channels.announce(event)

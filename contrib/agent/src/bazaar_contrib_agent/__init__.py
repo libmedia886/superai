@@ -14,6 +14,7 @@ from bazaar_contrib_channel import (
     CHANNEL,
     CHANNEL_BUILDERS,
     CHANNEL_INPUT,
+    CHANNEL_TURN,
     ChannelBuilder,
     ChannelInput,
     channel_builder_key,
@@ -161,6 +162,7 @@ async def channel_lifespan(ctx: Context, config: _ChannelConfig):
             ctx.accept(CHANNEL),
             config.provider,
             loop.channels.order[ctx.name],
+            ctx,
         )
         identity = connection.channel.get_identity()
         for member in loop.channels.connections.values():
@@ -220,7 +222,7 @@ async def channel_lifespan(ctx: Context, config: _ChannelConfig):
     )
     async with (
         asyncio.TaskGroup() as group,
-        ctx.enable(composition, local=(CHANNEL_INPUT, CHANNEL)),
+        ctx.enable(composition, local=(CHANNEL_INPUT, CHANNEL, CHANNEL_TURN)),
     ):
         yield
 

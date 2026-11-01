@@ -23,6 +23,7 @@ from .errors import (
     ChannelTimeoutError,
     ChannelUnavailableError,
 )
+from .events import CHANNEL_TURN, ChannelTurn
 from .models import (
     ChannelApprovalRequest,
     ChannelDeliveryReceipt,
@@ -50,6 +51,7 @@ __all__ = [
     "CHANNEL",
     "CHANNEL_BUILDERS",
     "CHANNEL_INPUT",
+    "CHANNEL_TURN",
     "Channel",
     "ChannelApprovalRequest",
     "ChannelAuthenticationError",
@@ -75,6 +77,7 @@ __all__ = [
     "ChannelTarget",
     "ChannelTargetPresentation",
     "ChannelTimeoutError",
+    "ChannelTurn",
     "ChannelUnavailableError",
     "DmAddress",
     "DmRequest",

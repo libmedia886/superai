@@ -1113,13 +1113,6 @@ class AgentLoop:
                     active.context,
                     self.channels,
                     event,
-                    next(
-                        iter(
-                            self.channels.turns[
-                                active.session.id, active.turn.id
-                            ].values()
-                        )
-                    )[1],
                     deliver=not terminal,
                 )
                 if terminal:
@@ -1154,11 +1147,6 @@ class AgentLoop:
                 active.context,
                 self.channels,
                 outcome,
-                next(
-                    iter(
-                        self.channels.turns[active.session.id, active.turn.id].values()
-                    )
-                )[1],
                 deliver=False,
             )
             return outcome
@@ -1347,7 +1335,6 @@ class AgentLoop:
                             context,
                             self.channels,
                             outcome,
-                            target,
                             deliver=False,
                         )
                     else:
@@ -1413,7 +1400,6 @@ class AgentLoop:
                                     context,
                                     self.channels,
                                     outcome,
-                                    target,
                                     deliver=False,
                                 )
                             else:
@@ -1443,7 +1429,6 @@ class AgentLoop:
                                             active.context,
                                             self.channels,
                                             outcome,
-                                            target,
                                             deliver=False,
                                         )
                                     break
@@ -1488,7 +1473,6 @@ class AgentLoop:
                                 context,
                                 self.channels,
                                 outcome,
-                                target,
                                 deliver=False,
                             )
                     active.state = states.TurnState.FINISHED
@@ -1537,10 +1521,7 @@ class AgentLoop:
                         await self.audit.publish(
                             "harness.pool.released", context=context, payload={}
                         )
-                    try:
-                        self.channels.accept_turn_event(outcome, target=target)
-                    except Exception:
-                        logger.exception("channel rejected terminal event")
+                    await self.channels.announce(outcome)
                     if isinstance(outcome.payload, TurnFailed):
                         await self.report_error(active, outcome.payload.failure)
                     return
@@ -1554,7 +1535,6 @@ class AgentLoop:
                             turn_id=turn.id,
                             payload=TurnCancelled(event_name="runtime turn cancelled"),
                         ),
-                        target,
                     )
                     raise
                 finally:

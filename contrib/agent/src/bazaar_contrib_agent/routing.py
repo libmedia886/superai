@@ -6,15 +6,16 @@ import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from uuid import NAMESPACE_URL, uuid5
-lazy import logging
 
 from bazaar_contrib_channel import (
+    CHANNEL_TURN,
     Channel,
     ChannelApprovalRequest,
     ChannelIdentity,
     ChannelSendPart,
     ChannelSendRequest,
     ChannelTarget,
+    ChannelTurn,
     ChannelUnavailableError,
     DmAddress,
     DmRequest,
@@ -22,11 +23,10 @@ from bazaar_contrib_channel import (
 )
 from bazaar_contrib_harness import ApprovalResult, HarnessOutput
 from bazaar_contrib_timer import Timer
+from bazaar_core import Context
 
 from . import states
 from .models import ProviderConfig
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(eq=False, slots=True)
@@ -36,6 +36,7 @@ class Connection:
     channel: Channel
     provider: ProviderConfig
     priority: int
+    context: Context
     state: states.ConnectionState = states.ConnectionState.RUNNING
     ready: asyncio.Event = field(default_factory=asyncio.Event)
 
@@ -159,14 +160,14 @@ class Channels:
             raise ValueError("Channel is stopping and no longer accepts new sends")
         return await connection.channel.prepare_send(request)
 
-    def accept_turn_event(self, event: HarnessOutput, *, target: ChannelTarget) -> None:
+    async def announce(self, event: HarnessOutput) -> None:
         for connection, destination in self.turns[
             event.session_id, event.turn_id
         ].values():
-            try:
-                connection.channel.accept_turn_event(event, target=destination)
-            except Exception:
-                logger.exception("channel rejected %s", event.payload.type)
+            if connection.state is not states.ConnectionState.STOPPED:
+                await connection.context.announce(
+                    CHANNEL_TURN, ChannelTurn(destination, event)
+                )
 
     async def request_approval(
         self,

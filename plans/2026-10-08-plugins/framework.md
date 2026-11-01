@@ -2678,3 +2678,7 @@ Task 完成后停下等待 review。
 channel、agent 包的 `scripts/ci.py check` 与
 `test` 通过，wheel 与 sdist 各执行一遍；仓库根目录 `uv run --quiet scripts/pyright_lsp_check.py .` 通过。
 发布含上述包的 rc。
+
+验收结果：channel、agent 的 `scripts/ci.py check` 与 `package`（wheel 与 sdist）通过，仓库根目录 pyright 检查通过。
+agent 的 `scripts/ci.py test` 通过，consumer_smoke 中 workbench provider 与 editor 自定义 agent 两个场景经 outbound
+包读到的回合事件照常；agent-command 与 app 的 `scripts/ci.py test` 同样通过。

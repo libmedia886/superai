@@ -14,10 +14,12 @@ from uuid import uuid7
 from bazaar_contrib_channel import (
     CHANNEL,
     CHANNEL_INPUT,
+    CHANNEL_TURN,
     Channel,
     ChannelApprovalRequest,
     ChannelInput,
     ChannelTarget,
+    ChannelTurn,
 )
 from bazaar_contrib_config import CONFIGURATION
 from bazaar_contrib_harness import (
@@ -207,7 +209,9 @@ async def process(ctx: Context, config: Input):
                 )
                 try:
                     async for event in stream:
-                        channel.accept_turn_event(event, target=inbound.target)
+                        await ctx.announce(
+                            CHANNEL_TURN, ChannelTurn(inbound.target, event)
+                        )
                         if isinstance(
                             event.payload, (TurnCompleted, TurnFailed, TurnCancelled)
                         ):
@@ -270,7 +274,7 @@ async def lifespan(ctx: Context, config: Config):
                         ),
                     )
                 ),
-                local=(CHANNEL, CHANNEL_INPUT, HARNESS, HARNESS_INPUT),
+                local=(CHANNEL, CHANNEL_INPUT, CHANNEL_TURN, HARNESS, HARNESS_INPUT),
             ),
         ):
             yield
