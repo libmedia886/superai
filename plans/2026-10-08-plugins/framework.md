@@ -2682,3 +2682,24 @@ channel、agent 包的 `scripts/ci.py check` 与
 验收结果：channel、agent 的 `scripts/ci.py check` 与 `package`（wheel 与 sdist）通过，仓库根目录 pyright 检查通过。
 agent 的 `scripts/ci.py test` 通过，consumer_smoke 中 workbench provider 与 editor 自定义 agent 两个场景经 outbound
 包读到的回合事件照常；agent-command 与 app 的 `scripts/ci.py test` 同样通过。
+
+## 审批直达回合连接（2026-11-01）
+
+审批是一问一答，需要等待结果、随回合取消并报告失败，继续使用方法调用。ApprovalRoute 只依赖 `Channel` 接口，
+Channels 聚合与单个 channel 遵守同一接口；回合开始时 agent 已知锚点所在的连接，而当前传入 ApprovalRoute 的是聚合，
+它在每次审批时按 kind 与 bot 身份遍历连接重新查找。
+Task 完成后停下等待 review。
+
+### Task 31：ApprovalRoute 使用回合连接的 channel
+
+- 回合开始创建 ApprovalRoute 时传入锚点连接的 `connection.channel`，取代 `self.channels`，审批直接调用该连接的
+  `request_approval`。聚合及其 `request_approval` 保持不变。
+- 连接处于 STOPPING 排空时，审批照常送到原连接，与「Stopping 保留既有请求所需的事件、审批、回执及回复通路」一致；
+  整节点停机后连接已 STOPPED 时，由 provider 自身报告不可用。
+
+验证：agent 安装测试中现有的审批场景（provider_smoke 的审批包与 session_routes 的审批路由）照常通过；agent 包
+`scripts/ci.py check`、`test` 与 `package`（wheel 与 sdist）通过，仓库根目录
+`uv run --quiet scripts/pyright_lsp_check.py .` 通过。发布含上述包的 rc。
+
+验收结果：agent 的 `scripts/ci.py check`、`test` 与 `package`（wheel 与 sdist）通过，consumer_smoke 中的审批场景照常；
+仓库根目录 pyright 检查通过。
