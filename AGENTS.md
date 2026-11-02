@@ -14,7 +14,7 @@
 12. 如果作用域内没有分歧, 禁止为变量名添加前缀，例如: 优先使用 `session_id` 而不是 `bcn_session_id`
 13. 当变量在后续没有被使用时，优先复用同名, 例如: 不要使用 resolved_xxx = resolved(xxx), 而是使用 xxx = resolved(xxx) 进行变量遮蔽
 14. 代码内部禁止无脑添加异常数据校验, 对于输入数据的校验，应当在接口边界使用 pydantic 进行校验
-15. 禁止任何反向测试和精确断言, 这种测试毫无意义
+15. 测试断言需求规定的、调用方可观察的行为，包括拒绝与失败路径上应有的结果，例如被拒绝的操作不改动环境。实现方案的取舍不是需求：方案被否决后直接改实现，不追加测试证明代码没有采用旧方案。禁止精确断言。
 16. 禁止使用 fake/mock 测试。真实外部 Provider 依赖归类为 e2e；所有平台的 system-service 测试归类为 system，只在隔离 CI runner 执行，三系统 CI 必须独立执行 `pytest -m system`。
 17. Provider runtime 的 e2e 测试必须使用 TestChannel 作为控制面，通过它注入 inbound、观察输出并处理审批；
     禁止绕过 orchestration 直接用测试 approval handler 模拟 Channel 行为

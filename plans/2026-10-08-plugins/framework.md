@@ -2756,3 +2756,50 @@ V4 转 V5 时不再迁移这张表。Task 完成后停下等待 review。
 验证：sidecar 包 `scripts/ci.py check` 与 `package`（wheel 与 sdist）通过，仓库根目录
 `uv run --quiet scripts/pyright_lsp_check.py .` 通过，主仓库 CI 的安装测试在已发布的平台插件上通过。发布含该包的 rc 后，sidecar-unix 与 sidecar-windows 的
 installed_smoke 让同一个 CLIENT 跨隔离节点的重启继续调用，原生传输与 TCP 夹具在各自 CI 上通过。
+
+## manager 安装只交给 uv（2026-11-02）
+
+manager 现在把完整候选组合解析成 pylock，在临时环境中安装预检，再把锁中每个产物写成 `名称 @ URL#sha256`，
+交给 `uv tool install` 或 `uv pip sync`。从索引安装的已有包与直接引用来源不符，uv 在首次补装时卸载并重装全部包；
+`uv tool install` 每次重装 bin 下的入口，Windows 上运行中的 bcn.exe 无法替换，uv 失败后的清理删除整个 tool 环境，
+干净的 Windows 上 `uv tool install bazaar-compute-node` 后首次运行即损坏。uv 的原始输出见 contrib-system-service
+分支 `diagnose/20261102-windows-tool-sync` 的诊断 workflow。按消息 `22b024c4-c7ad-5924-bfce-5b85feee75e8`，
+保留每个插件自己的包源，去掉预先解析、临时环境预检、恢复用的锁与版本偏好，解析与安装交给 uv。
+本节取代「完整组合的版本与来源解析」中的 pylock 解析、临时环境与直接引用安装，以及「uv tool 部署」「自管 venv 部署」两条。
+Task 完成后停下等待 review。
+
+### Task 35：manager 的包操作统一交给 uv pip
+
+- 启动准备按已装元数据检查配置声明，全部满足时不调用 uv。需要安装时，按消息 `83fb1a1b-c6f1-5fd0-b2ca-a9f70df02969`，
+  manager 在临时目录生成 pyproject.toml，`project.dependencies` 包含宿主 `bazaar-compute-node==<已装版本>` 与配置中
+  全部生效的插件要求，再执行 `uv pip install --python <节点解释器> -r <临时目录>/pyproject.toml`：uv 一并解析整张依赖图，
+  已满足的包不重装，依赖冲突时报错且不改动环境；按消息 `bcdc57e8-649f-5243-a9f1-c5f34fb0b016`，冲突检测由这一次解析承担。
+  按消息 `9812d311-0c0b-570c-8a84-23377234eb3d`，临时目录只在这次 uv 运行期间存在，结束后不论成功失败都删除。
+  uv tool 部署与自管 venv 部署使用同一条命令，不再执行 `uv tool install` 或 `uv pip sync`，bin 下的入口不变。
+  manager 装入的包不记入 uv 的 tool 回执，用户自行执行 `uv tool upgrade` 后缺少的包由下一次启动准备补装。
+- 各插件配置的 `source` 在临时 pyproject 中写成 `tool.uv.index`，`tool.uv.sources` 把每个声明的包绑定到自己的源，
+  宿主与未配置来源的包绑定到 manager 的 `host_source`。按消息 `a116394f-439a-55d9-97d5-cada0c22b1cb`，这些 index 都不标
+  explicit：私有源（插件声明的、既不是 `host_source` 也不是 PyPI 的源）按配置顺序排在最前，其后是 `host_source`，
+  再后是插件声明的 PyPI；临时 pyproject 不覆盖 uv 自身的默认源（未配置时为 PyPI），它始终最后。传递依赖按 uv 默认的
+  first-index 规则依次查找，私有插件依赖的其他私有包不必在配置中声明，也不会被公共源上的同名包顶掉。
+  uv 0.13 实测 `uv pip install -r pyproject.toml` 按 sources 取包，且不重装已满足的包。自举沿用同一方式。
+- add 与 `bcn contrib sync` 使用同一份临时 pyproject，新包及启用入口所需的包一并加入；remove 保留现有的停用检查，
+  再按消息 `fd5e487e-ace7-5b2b-85f9-59afb544cf7c`，把删除之后的配置（宿主、其余声明连同各自请求的 extra、
+  提供节点启动所选入口的包，例如当前配置载体）沿已装元数据展开，要删的包仍在其中时拒绝，展开逻辑与启动准备的满足检查共用；
+  通过后执行 `uv pip uninstall`。`bcn contrib sync --upgrade`
+  与宿主升级 `bcn contrib upgrade VERSION` 把对应要求连同 `--upgrade` 交给 uv，宿主升级同样不经过 `uv tool install`。
+- 删除 pylock 的生成、临时环境的安装与预检、`URL#sha256` 转写、before.json 与 before.pylock.toml，
+  以及以 pylock 作版本偏好。安装后按实际环境检查入口并校验候选配置，失败时保留原配置。
+- 操作记录写入 uv 或校验的原始错误；安装失败的处理路径不再重新检查环境，原始错误不再被覆盖。
+  uv 安装或卸载完成、重新检查环境后，立即记录已安装、环境是否变化与是否需要重启，再校验配置；
+  校验失败时操作记录与输出照样反映环境已经变化。
+
+验证：manager 现有 venv 与 uv tool 两种部署的安装、同步、升级与 live 回归通过；uv tool 部署新增经 `bin` 下 bcn 入口
+发起的首次运行，默认插件装好后命令正常完成，Windows 上同样通过。按消息 `33d1f428-df57-5ac9-8824-f26d1fd6d3c1`，
+uv tool 部署再新增一例：manager 装好插件后执行 `uv tool upgrade --reinstall bazaar-compute-node`，再次运行 bcn 时
+启动准备补装缺少的包，命令正常完成。测试夹具中第二个源上 example 0.2.0 的 `text` 额外依赖一个只发在该源上的包，
+配置不声明它，两种部署的迁移节点首次运行时一并装上。删除当前配置载体被拒绝后，以该载体启动的节点照常运行。
+按消息 `2bb205de-afe8-5c9e-adcd-5fd032342553`，再加两例反向用例：另一声明经 extra 仍需要的包，remove 被拒绝且包仍在；
+配置含无人提供的入口时 add 新包，包装上后校验失败，操作记录仍写明已安装与环境已变化。manager 包 `scripts/ci.py check`、`test` 与
+`package`（wheel 与 sdist）通过，仓库根目录 `uv run --quiet scripts/pyright_lsp_check.py .` 通过，PR 的三平台 CI 通过；
+发布含该包的 rc 后，contrib-system-service 的 Windows system 测试通过。

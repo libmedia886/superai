@@ -1,15 +1,14 @@
-"""Resolve one complete environment and install the resulting lock unchanged."""
+"""Hand the declared environment to uv as one project and let it install what is missing."""
 
 from __future__ import annotations
 
 lazy import asyncio
-lazy import os
 lazy import re
 lazy import shutil
 lazy import sys
-lazy import tomllib
 lazy from pathlib import Path
-lazy from urllib.parse import unquote, urlsplit
+lazy from tempfile import TemporaryDirectory
+lazy from typing import Any
 
 lazy import tomli_w
 lazy from bazaar_contrib_config import (
@@ -18,11 +17,18 @@ lazy from bazaar_contrib_config import (
     ContribPackage,
 )
 lazy from packaging.requirements import Requirement
-lazy from packaging.tags import sys_tags
-lazy from packaging.utils import canonicalize_name, parse_wheel_filename
+lazy from packaging.utils import canonicalize_name
 
-lazy from .contracts import EnvironmentInfo, EnvironmentPlan, ManagementError, Package
+lazy from .contracts import (
+    EnvironmentInfo,
+    EnvironmentPlan,
+    InstalledPackage,
+    ManagementError,
+    Package,
+)
 lazy from .environment import inspect
+
+PYPI = "https://pypi.org/simple"
 
 
 class Packages:
@@ -32,7 +38,6 @@ class Packages:
         self.python = Path(sys.executable)
         self.prefix = Path(sys.prefix)
         self.uv: str | None = None
-        self.tool = False
 
     async def command(self, *arguments: str, cwd: Path | None = None) -> str:
         process = await asyncio.create_subprocess_exec(
@@ -60,13 +65,7 @@ class Packages:
         self.uv = await asyncio.to_thread(shutil.which, "uv")
         if self.uv is None:
             raise ManagementError("uv is not on this node's PATH")
-        directory = Path((await self.command(self.uv, "tool", "dir")).strip())
-        self.tool = await asyncio.to_thread(
-            lambda: (
-                (directory / "bazaar-compute-node").resolve() == self.prefix.resolve()
-            )
-        )
-        if not self.tool and sys.prefix == sys.base_prefix:
+        if sys.prefix == sys.base_prefix:
             raise ManagementError(
                 "package operations require a uv tool or dedicated venv"
             )
@@ -130,27 +129,25 @@ class Packages:
             ),
         )
 
-    async def satisfied(self, plan: EnvironmentPlan) -> bool:
-        """Check declarations and the requested extras against actual installed metadata."""
+    async def expand(
+        self, plan: EnvironmentPlan
+    ) -> list[tuple[Requirement, InstalledPackage | None]]:
+        """Walk the plan and the extras each requirement requests through installed metadata."""
         installed = await self.inspect(definitions=False)
         packages = {package.package: package for package in installed.packages}
         pending = [
             Requirement(entry.package) for entry in plan.packages if entry.applies
         ]
         pending.append(Requirement(plan.host.package + plan.host.version))
+        expanded: list[tuple[Requirement, InstalledPackage | None]] = []
         checked: set[tuple[str, frozenset[str]]] = set()
         while pending:
             requirement = pending.pop()
             name = str(canonicalize_name(requirement.name))
             package = packages.get(name)
-            if package is None or not requirement.specifier.contains(
-                package.version, prereleases=True
-            ):
-                return False
-            if requirement.url and package.url != requirement.url.split("#", 1)[0]:
-                return False
+            expanded.append((requirement, package))
             key = name, frozenset(requirement.extras)
-            if key in checked:
+            if package is None or key in checked:
                 continue
             checked.add(key)
             for raw in package.requirements:
@@ -160,32 +157,50 @@ class Packages:
                     for extra in ("", *requirement.extras)
                 ):
                     pending.append(dependency)
-        return True
+        return expanded
 
-    async def resolve(
-        self, plan: EnvironmentPlan, path: Path, *, upgrade: bool = False
-    ) -> Path:
-        await asyncio.to_thread(path.mkdir, parents=True, exist_ok=True)
+    async def satisfied(self, plan: EnvironmentPlan) -> bool:
+        """Check declarations and the requested extras against actual installed metadata."""
+        return all(
+            package is not None
+            and requirement.specifier.contains(package.version, prereleases=True)
+            and (not requirement.url or package.url == requirement.url.split("#", 1)[0])
+            for requirement, package in await self.expand(plan)
+        )
+
+    def project(self, plan: EnvironmentPlan) -> dict[str, Any]:
+        """Describe the declared graph as a project binding each package to its source.
+
+        Private sources come first, so a package one of them publishes never resolves
+        from a public index; the host source and PyPI follow, uv's own default index last.
+        """
         packages = (
             ContribPackage(
                 package=plan.host.package + plan.host.version, source=plan.host.source
             ),
             *plan.packages,
         )
-        indexes = list(
-            dict.fromkeys(package.source or self.source for package in packages)
+        declared = dict.fromkeys(
+            package.source
+            for package in packages
+            if package.applies and package.source not in ("", self.source)
         )
+        public = [url for url in declared if url.rstrip("/") == PYPI]
+        indexes = [
+            *(url for url in declared if url not in public),
+            self.source,
+            *public,
+        ]
         sources: dict[str, dict[str, str]] = {}
         for package in packages:
-            requirement = Requirement(package.package)
-            if requirement.url or not package.applies:
+            if Requirement(package.package).url or not package.applies:
                 continue
             source = {"index": f"source-{indexes.index(package.source or self.source)}"}
             name = package.distribution
             if name in sources and sources[name] != source:
                 raise ManagementError(f"conflicting sources for {name}")
             sources[name] = source
-        project = {
+        return {
             "project": {
                 "name": "bazaar-contrib-environment",
                 "version": "0",
@@ -195,112 +210,36 @@ class Packages:
             "tool": {
                 "uv": {
                     "index": [
-                        {"name": f"source-{index}", "url": source}
-                        for index, source in enumerate(indexes)
+                        {"name": f"source-{index}", "url": url}
+                        for index, url in enumerate(indexes)
                     ],
                     "sources": sources,
                 }
             },
         }
-        await asyncio.to_thread(
-            (path / "pyproject.toml").write_text, tomli_w.dumps(project), "utf-8"
-        )
-        lock = path / "pylock.toml"
+
+    async def install(self, plan: EnvironmentPlan, *, upgrade: bool = False) -> None:
+        temporary = await asyncio.to_thread(TemporaryDirectory)
         try:
-            await asyncio.to_thread(shutil.copyfile, self.path / "pylock.toml", lock)
-        except FileNotFoundError:
-            pass
-        await self.command(
-            str(self.uv),
-            "pip",
-            "compile",
-            str(path / "pyproject.toml"),
-            "--python",
-            str(self.python),
-            "--format",
-            "pylock.toml",
-            "--output-file",
-            str(lock),
-            *(("--upgrade",) if upgrade else ()),
-            cwd=path,
-        )
-        return lock
-
-    async def stage(self, lock: Path) -> Path:
-        path = lock.parent / "environment"
-        await self.command(
-            str(self.uv), "venv", "--python", str(self.python), str(path)
-        )
-        python = path / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-        await self.command(
-            str(self.uv), "pip", "sync", "--python", str(python), str(lock)
-        )
-        return python
-
-    async def install(self, plan: EnvironmentPlan, lock: Path) -> None:
-        if self.tool:
-            info = await self.inspect(definitions=False)
-            document = tomllib.loads(
-                await asyncio.to_thread(lock.read_text, encoding="utf-8")
-            )
-            tags = await asyncio.to_thread(
-                lambda: {tag: index for index, tag in enumerate(sys_tags())}
-            )
-            requirements: dict[str, str] = {}
-            for package in document["packages"]:
-                candidates = []
-                for wheel in package.get("wheels", ()):
-                    filename = wheel.get("name") or (
-                        Path(wheel["path"]).name
-                        if "path" in wheel
-                        else unquote(urlsplit(wheel["url"]).path.rsplit("/", 1)[-1])
-                    )
-                    wheel_tags = parse_wheel_filename(filename)[3]
-                    priorities = [tags[tag] for tag in wheel_tags if tag in tags]
-                    if priorities:
-                        candidates.append((min(priorities), wheel))
-                artifact = (
-                    min(candidates, key=lambda item: item[0])[1]
-                    if candidates
-                    else package["archive"]
-                    if "archive" in package
-                    else package["directory"]
-                    if "directory" in package
-                    else package["sdist"]
-                )
-                if "path" in artifact:
-                    path = await asyncio.to_thread(
-                        (lock.parent / artifact["path"]).resolve
-                    )
-                    url = path.as_uri()
-                else:
-                    url = artifact["url"]
-                digest = artifact.get("hashes", {}).get("sha256")
-                if digest is not None:
-                    url += f"#sha256={digest}"
-                requirements[package["name"]] = f"{package['name']} @ {url}"
-            path = lock.with_name("requirements.txt")
+            project = Path(temporary.name) / "pyproject.toml"
             await asyncio.to_thread(
-                path.write_text, "\n".join(requirements.values()) + "\n", "utf-8"
+                project.write_text, tomli_w.dumps(self.project(plan)), "utf-8"
             )
-            await self.command(
-                str(self.uv),
-                "tool",
-                "install",
-                requirements[plan.host.package],
-                "--with-requirements",
-                str(path),
-                "--python",
-                str(info.base_python),
-                cwd=lock.parent,
-            )
-        else:
             await self.command(
                 str(self.uv),
                 "pip",
-                "sync",
+                "install",
                 "--python",
                 str(self.python),
-                str(lock),
-                cwd=lock.parent,
+                "-r",
+                str(project),
+                *(("--upgrade",) if upgrade else ()),
+                cwd=project.parent,
             )
+        finally:
+            await asyncio.to_thread(temporary.cleanup)
+
+    async def uninstall(self, package: str) -> None:
+        await self.command(
+            str(self.uv), "pip", "uninstall", "--python", str(self.python), package
+        )
