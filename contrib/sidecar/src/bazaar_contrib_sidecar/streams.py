@@ -9,11 +9,15 @@ lazy import logging
 lazy from collections.abc import Awaitable, Callable
 
 from pydantic import Field, TypeAdapter
+lazy from bazaar_contrib_timer import Timer
 
 from .contracts import Response, Sessions
 from .wire import Failure, Message, Request
 
 _READ_CHUNK_BYTES = 64 * 1024
+_CONNECT_ATTEMPTS = 3
+_FIRST_RETRY_MS = 250
+_LAST_RETRY_MS = 4_000
 logger = logging.getLogger(__name__)
 
 
@@ -63,89 +67,117 @@ class UnlimitedLineReader:
                 self._eof = True
 
 
-class Connection:
-    """Pair concurrent calls with their responses on one lazy connection."""
+class _Link:
+    """One opened connection and the calls written to it."""
 
     def __init__(
-        self,
-        connect: Callable[
-            [], Awaitable[tuple[asyncio.StreamReader, asyncio.StreamWriter]]
-        ],
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
-        self.connect = connect
-        self.lock = asyncio.Lock()
-        self.writer: asyncio.StreamWriter | None = None
-        self.reader: asyncio.Task[None] | None = None
+        self.writer = writer
         self.pending: dict[UUID, asyncio.Future[Response]] = {}
-        self.error: Exception | None = None
-
-    async def send(self, request: Request) -> Response:
-        call = Call(request=request)
-        future: asyncio.Future[Response] = asyncio.get_running_loop().create_future()
-        try:
-            async with self.lock:
-                if self.error is not None:
-                    raise ConnectionError(
-                        "the sidecar connection has closed"
-                    ) from self.error
-                if self.writer is None:
-                    reader, self.writer = await self.connect()
-                    self.reader = asyncio.create_task(
-                        self.receive(UnlimitedLineReader(reader))
-                    )
-                self.pending[call.id] = future
-                self.writer.write(call.model_dump_json().encode() + b"\n")
-                await self.writer.drain()
-            return await future
-        except asyncio.CancelledError:
-            if call.id in self.pending:
-                try:
-                    if self.writer is not None and not self.writer.is_closing():
-                        # Queue the complete frame without waiting on backpressure.
-                        self.writer.write(
-                            Cancel(id=call.id).model_dump_json().encode() + b"\n"
-                        )
-                except OSError:
-                    logger.exception("could not cancel sidecar call %s", call.id)
-            raise
-        finally:
-            self.pending.pop(call.id, None)
-            if not future.done():
-                future.cancel()
-            elif not future.cancelled():
-                future.exception()
+        self.receiver = asyncio.create_task(self.receive(UnlimitedLineReader(reader)))
 
     async def receive(self, reader: UnlimitedLineReader) -> None:
+        error: Exception = ConnectionError("sidecar closed before returning a result")
         try:
             while line := await reader.readline():
                 reply = Reply.model_validate_json(line)
                 future = self.pending.get(reply.id)
                 if future is not None and not future.done():
                     future.set_result(reply.response)
-        except Exception as error:  # noqa: BLE001 - Fail all calls owned by this broken connection.
-            self.error = error
+        except Exception as caught:  # noqa: BLE001 - Fail all calls owned by this broken connection.
+            error = caught
         finally:
-            self.error = self.error or ConnectionError(
-                "sidecar closed before returning a result"
-            )
+            self.writer.close()
             for future in self.pending.values():
                 if not future.done():
-                    future.set_exception(self.error)
+                    future.set_exception(error)
+
+
+class Connection:
+    """Pair concurrent calls with their responses on one lazy connection.
+
+    A call that finds the connection missing or broken connects again, trying a
+    few times with backoff; calls already written to a connection fail with it."""
+
+    def __init__(
+        self,
+        connect: Callable[
+            [], Awaitable[tuple[asyncio.StreamReader, asyncio.StreamWriter]]
+        ],
+        timer: Timer | None = None,
+    ) -> None:
+        self.connect = connect
+        self.timer = timer
+        self.lock = asyncio.Lock()
+        self.link: _Link | None = None
+        self.closed = False
+        self.retry = _FIRST_RETRY_MS
+
+    async def send(self, request: Request) -> Response:
+        call = Call(request=request)
+        future: asyncio.Future[Response] = asyncio.get_running_loop().create_future()
+        link: _Link | None = None
+        try:
+            async with self.lock:
+                link = await self.open()
+                link.pending[call.id] = future
+                link.writer.write(call.model_dump_json().encode() + b"\n")
+                await link.writer.drain()
+            return await future
+        except asyncio.CancelledError:
+            if link is not None and call.id in link.pending:
+                try:
+                    if not link.writer.is_closing():
+                        # Queue the complete frame without waiting on backpressure.
+                        link.writer.write(
+                            Cancel(id=call.id).model_dump_json().encode() + b"\n"
+                        )
+                except OSError:
+                    logger.exception("could not cancel sidecar call %s", call.id)
+            raise
+        finally:
+            if link is not None:
+                link.pending.pop(call.id, None)
+            if not future.done():
+                future.cancel()
+            elif not future.cancelled():
+                future.exception()
+
+    async def open(self) -> _Link:
+        if self.link is not None and self.link.writer.is_closing():
+            await asyncio.gather(self.link.receiver, return_exceptions=True)
+            self.link = None
+        for attempt in range(1, _CONNECT_ATTEMPTS + 1):
+            if self.link is not None or self.closed:
+                break
+            try:
+                self.link = _Link(*await self.connect())
+            except OSError:
+                if attempt == _CONNECT_ATTEMPTS:
+                    raise
+                delay, self.retry = self.retry, min(self.retry * 2, _LAST_RETRY_MS)
+                if self.timer is None:
+                    await asyncio.sleep(delay / 1000)
+                else:
+                    await self.timer.create(delay).wait()
+            else:
+                self.retry = _FIRST_RETRY_MS
+        if self.closed or self.link is None:
+            raise ConnectionError("the sidecar connection has closed")
+        return self.link
 
     async def aclose(self) -> None:
+        self.closed = True
         async with self.lock:
-            self.error = self.error or ConnectionError(
-                "the sidecar connection has closed"
-            )
-            if self.writer is not None:
-                self.writer.close()
-            if self.reader is not None:
-                self.reader.cancel()
-        if self.reader is not None:
-            await asyncio.gather(self.reader, return_exceptions=True)
-        if self.writer is not None:
+            link = self.link
+            if link is not None:
+                link.writer.close()
+                link.receiver.cancel()
+        if link is not None:
+            await asyncio.gather(link.receiver, return_exceptions=True)
             try:
-                await self.writer.wait_closed()
+                await link.writer.wait_closed()
             except OSError:
                 pass
 
