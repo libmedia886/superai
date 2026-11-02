@@ -817,8 +817,21 @@ messages-node、reminder 保留现有的 `~=0.3.0rc1` 依赖范围，从 PyPI �
 
 - [x] Task 1：建立 open-bazaar/contrib-legacy-node-migrations，迁入源码、夹具与真实测试，完成独立依赖、构建、CI 与 Release，
   配置 pypi 环境并添加 PyPI 发布者，交付检查结果供 review。
-- [ ] Task 2：合入新仓 Task 1 后从新仓发布 `0.3.0rc15`，核对源码提交、文件校验值、真实包源安装与标签；
+- [x] Task 2：合入新仓 Task 1 后从新仓发布 `0.3.0rc15`，核对源码提交、文件校验值、真实包源安装与标签；
   再从主仓移除该成员与 workspace source，调整共同发行范围与外层联调来源，在 contrib-index 登记；
   以 PyPI 上的 `0.3.0rc15` 验证 agent、collaboration、messages-node、reminder 的安装与迁移及默认组合，
   执行根目录 Ruff、Pyright/LSP，提交主仓与索引变更供 review，由 PR 执行三平台 CI。
-- [ ] Task 3：主仓变更合入后发布主仓新 rc，核对发布集合不含该包；移除主仓旧发布者，记录跨仓组合所用版本与提交。
+- [x] Task 3：主仓变更合入后发布主仓新 rc，核对发布集合不含该包；移除主仓旧发布者，记录跨仓组合所用版本与提交。
+
+### 验收记录
+
+| 环节 | 提交与版本 | 结果 |
+| --- | --- | --- |
+| 新仓 Task 1 | [bd6af07](https://github.com/open-bazaar/contrib-legacy-node-migrations/commit/bd6af07ce20baf9d256c9213f8198147dd50400c) | PR #1 的 CI 与 Codex review 通过后合入 |
+| 新仓发行 | 标签 `v0.3.0rc15` → [b7ab56d](https://github.com/open-bazaar/contrib-legacy-node-migrations/commit/b7ab56d46fc5e2167b3d9674e939e676ed0033a7) | [Release](https://github.com/open-bazaar/contrib-legacy-node-migrations/actions/runs/41427679111) 通过；wheel `86de8dbc218118b8…`、sdist `f1151f4073181ee3…` |
+| 主仓移除 | #137 合入 [0548ad5](https://github.com/yuchanns/bazaar-compute-node/commit/0548ad5eb8398a2fad11802e86d8f11691aa2203) | [三平台 CI](https://github.com/yuchanns/bazaar-compute-node/actions/runs/41429000921) 18 个 job 通过 |
+| 索引登记 | contrib-index #2 合入 [0ce71ec](https://github.com/open-bazaar/contrib-index/commit/0ce71ec425e0ef8d9bb9649983421b8e0bbddbeb) | 索引 CI 通过 |
+| 主仓发行 | 标签 `v0.3.0rc15` → [4ca6526](https://github.com/yuchanns/bazaar-compute-node/commit/4ca6526ecfd3d42c73f3484b0fb61fdfcd896029) | [Release](https://github.com/yuchanns/bazaar-compute-node/actions/runs/41439254718) 上传 21 包，不含该包；首轮 verify 遇 PyPI 索引滞后，原 run 重跑通过 |
+
+从 PyPI 安装的 `0.3.0rc15` 核对了版本、`legacy-node-migrations` 入口与 Repository 地址；主仓 uv.lock 从 PyPI 解析该版本，
+外层 bcn-dev 以 editable path 引用新仓源码。主仓 rc15 发行后，PyPI 上该项目移除了主仓旧发布者，只保留新仓的发布者。
