@@ -36,6 +36,7 @@ from bazaar_contrib_harness import (
 from bazaar_contrib_messages import MESSAGES
 from bazaar_contrib_messages.states import Review
 from bazaar_contrib_reminder import REMINDER
+from bazaar_contrib_sidecar import CLIENT
 from bazaar_contrib_storage import DB
 from bazaar_contrib_timer import TIMER
 from bazaar_core import (
@@ -134,6 +135,7 @@ async def loop_lifespan(ctx: Context, config: _InstanceConfig):
             ctx.accept(TIMER),
             ctx.accept(AUDIT),
             ctx.accept(DB),
+            ctx.accept(CLIENT),
             tool.path,
             ctx.id,
             registry.channel_order,
@@ -328,7 +330,7 @@ instance = Contrib(config=_InstanceConfig, offers=[AGENT], lifespan=instance_lif
 _loop = Contrib(
     config=_InstanceConfig,
     offers=[_LOOP],
-    accepts=[*SERVICES, AGENTS, AGENT, CONFIGURATION],
+    accepts=[*SERVICES, AGENTS, AGENT, CONFIGURATION, CLIENT],
     lifespan=loop_lifespan,
     listen={CONTACT_REVIEWED: contact_reviewed, CONTRIB_CHANGED: stopping},
 )

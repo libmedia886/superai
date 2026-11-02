@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 lazy import asyncio
 lazy import re
 lazy import shutil
 lazy import sys
+lazy from collections.abc import AsyncIterator
 lazy from pathlib import Path
 lazy from tempfile import TemporaryDirectory
 lazy from typing import Any
@@ -46,12 +48,12 @@ class Packages:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
+        communication = asyncio.create_task(process.communicate())
         try:
-            output, errors = await process.communicate()
+            output, errors = await asyncio.shield(communication)
         except BaseException:
-            if process.returncode is None:
-                process.terminate()
-            await process.wait()
+            # uv finishes what it started, leaving neither the environment nor its directory half done.
+            await communication
             raise
         if process.returncode:
             detail = (errors or output).decode("utf-8", errors="replace").strip()
@@ -218,13 +220,23 @@ class Packages:
             },
         }
 
-    async def install(self, plan: EnvironmentPlan, *, upgrade: bool = False) -> None:
+    @asynccontextmanager
+    async def written(self, plan: EnvironmentPlan) -> AsyncIterator[Path]:
+        """Write the declared graph as a project that only exists while uv reads it."""
         temporary = await asyncio.to_thread(TemporaryDirectory)
         try:
             project = Path(temporary.name) / "pyproject.toml"
             await asyncio.to_thread(
                 project.write_text, tomli_w.dumps(self.project(plan)), "utf-8"
             )
+            yield project
+        finally:
+            await asyncio.to_thread(temporary.cleanup)
+
+    async def install(
+        self, plan: EnvironmentPlan, *, upgrade: tuple[str, ...] = ()
+    ) -> None:
+        async with self.written(plan) as project:
             await self.command(
                 str(self.uv),
                 "pip",
@@ -233,11 +245,66 @@ class Packages:
                 str(self.python),
                 "-r",
                 str(project),
-                *(("--upgrade",) if upgrade else ()),
+                *(
+                    argument
+                    for package in upgrade
+                    for argument in ("--upgrade-package", package)
+                ),
                 cwd=project.parent,
             )
-        finally:
-            await asyncio.to_thread(temporary.cleanup)
+
+    async def resolve(self, plan: EnvironmentPlan) -> dict[str, str]:
+        """Resolve the declared graph for this interpreter without installing it."""
+        async with self.written(plan) as project:
+            output = await self.command(
+                str(self.uv),
+                "pip",
+                "compile",
+                str(project),
+                "--python",
+                str(self.python),
+                "--quiet",
+                "--no-header",
+                "--no-annotate",
+                "--refresh-package",
+                plan.host.package,
+                cwd=project.parent,
+            )
+        return {
+            str(canonicalize_name(match.group(1))): match.group(2)
+            for match in re.finditer(
+                r"^([A-Za-z0-9._-]+)==([^\s;]+)", output, re.MULTILINE
+            )
+        }
+
+    async def latest(self, plan: EnvironmentPlan) -> str | None:
+        """The newest host version the declared contribs can be installed with."""
+        host = plan.host.model_copy(
+            update={"version": ">" + plan.host.version.removeprefix("==")}
+        )
+        try:
+            resolved = await self.resolve(plan.model_copy(update={"host": host}))
+        except ManagementError as error:
+            if "No solution found" in str(error):
+                return None
+            raise
+        return resolved.get(plan.host.package)
+
+    async def tool(self) -> bool:
+        """Whether this environment is the uv tool the host was installed as."""
+        return await asyncio.to_thread((self.prefix / "uv-receipt.toml").is_file)
+
+    async def install_host(self, version: str) -> None:
+        """Install a host release the way 0.2 did, as the uv tool it was installed as."""
+        await self.command(
+            str(self.uv),
+            "tool",
+            "install",
+            "--refresh-package",
+            "bazaar-compute-node",
+            *(("--index", self.source) if self.source.rstrip("/") != PYPI else ()),
+            f"bazaar-compute-node=={version}",
+        )
 
     async def uninstall(self, package: str) -> None:
         await self.command(

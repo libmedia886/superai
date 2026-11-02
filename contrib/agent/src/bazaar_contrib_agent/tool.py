@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
-from collections.abc import Mapping
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -84,9 +84,9 @@ class Tool:
         await asyncio.to_thread(self.directory.cleanup)
 
 
-async def request(
-    path: Path, service: str, payload: Mapping[str, object]
-) -> Mapping[str, object]:
+@asynccontextmanager
+async def connect(path: Path) -> AsyncIterator[Client]:
+    """Start the sidecar client entries recorded for this session."""
     config = Config.model_validate_json(
         await asyncio.to_thread(path.read_text, encoding="utf-8")
     )
@@ -115,8 +115,4 @@ async def request(
         }
     )
     async with factory() as hub, hub.enable(composition):
-        # The dispatcher owns this command's wait budget.
-        return cast(
-            Mapping[str, object],
-            await clients[0].call(service, "request", dict(payload), timeout=None),
-        )
+        yield clients[0]
