@@ -783,3 +783,42 @@ agent-command 两项、node-management 安装态运行验收通过，app wheel�
 十二个变更 Python 文件的 Ruff 格式与 lint、仓库根目录 Pyright/LSP 通过。
 根锁包含 51 包，不包含六个独立实现；主仓 dev 依赖与基线一致，core 没有改动。
 临时文档简化后重新执行 app 的真实安装回归，1 项通过（18.71 秒）；boot.py 的 Ruff 格式与 lint、根目录 Pyright/LSP 通过。
+
+## 2026-11-02 历史迁移迁仓
+
+按消息 `5f291431-6df7-5c8b-8fa9-d439e9ae21c4` 与 `703c1e5f-591a-5608-ba31-b150eb5148d9`，
+将 bazaar-contrib-legacy-node-migrations 迁到独立仓库，退出主仓共同版本与共同发行，此后只在自身内容变化时发版。
+基线为 `0.3` 的 `03b096e`（Release v0.3.0rc14）；PyPI 已有 `0.3.0rc14`，该包自 rc13 起只变更版本号。
+
+| 发行包 | 独立仓库 | 主仓继续提供的契约 |
+| --- | --- | --- |
+| bazaar-contrib-legacy-node-migrations | open-bazaar/contrib-legacy-node-migrations | schema 的 SCHEMA、业务迁移登记与 predecessor 依赖；storage 的 Database 与查询 |
+
+新仓保持发行名、Python 模块名、入口名与现有实现，携带普通 LICENSE、源码、README、现有测试与夹具
+（history.py 及两个 SQLite 快照）、独立工具配置、uv.lock、CI 与 Release，Repository 元数据指向新仓。
+生产依赖沿用 bazaar-core、bazaar-contrib-storage、bazaar-contrib-schema 的现有范围；测试所需的 app、sqlite，
+以及提供业务 schema 的 agent、collaboration、messages-node、reminder 放在 dev 依赖，从 PyPI 解析。
+安装测试只构建本仓产物，与 PyPI 上的 app 及业务包组成独立环境，在 wheel 与 sdist 中分别执行原有迁移用例；
+测试经 ci_pytest 入口运行，使用临时 HOME、BCN_HOME 与隔离进程。按消息 `3dfaf12c-f33a-54b8-802c-c8510263e9aa`，
+逐版历史用例的参照库改由 PyPI 上的 bazaar-compute-node 0.2.3 生成，只在测试中使用；生产代码不引用任何 0.2 代码，
+测试也不再依赖主仓根目录的 0.2 源码。
+
+主仓中该包退出 workspace 成员、workspace source、共同版本准备与共同发布集合。agent、collaboration、
+messages-node、reminder 保留现有的 `~=0.3.0rc1` 依赖范围，从 PyPI 取得已发布版本；V4→V5 转换照旧加入该入口，不带版本要求。
+外层 bcn-dev 改为引用新仓的 editable path source。manager 随包官方目录不再包含该包，改由 contrib-index 登记包名与 PyPI 来源。
+
+新仓 Release 沿用其他独立仓的单 version 输入流程。按消息 `c25b911f-11eb-522c-b305-cb074d333fa1`，
+从新仓发布 `0.3.0rc15`，确认新仓发版流程有效；此后只在该包内容变化时发版。按消息
+`36c85990-e052-5fff-9637-6b711ffda8c6`，新仓先发 `0.3.0rc15`，主仓再移除该包，之后才发主仓新 rc，
+该包的 rc15 只由新仓发出。PyPI 先为该项目添加 `open-bazaar/contrib-legacy-node-migrations`、`release.yml`、
+`pypi` 环境的发布者；主仓移除该包后的第一次发行核对发布集合不含该包，再移除主仓的旧发布者。
+
+### 交付安排
+
+- [x] Task 1：建立 open-bazaar/contrib-legacy-node-migrations，迁入源码、夹具与真实测试，完成独立依赖、构建、CI 与 Release，
+  配置 pypi 环境并添加 PyPI 发布者，交付检查结果供 review。
+- [ ] Task 2：合入新仓 Task 1 后从新仓发布 `0.3.0rc15`，核对源码提交、文件校验值、真实包源安装与标签；
+  再从主仓移除该成员与 workspace source，调整共同发行范围与外层联调来源，在 contrib-index 登记；
+  以 PyPI 上的 `0.3.0rc15` 验证 agent、collaboration、messages-node、reminder 的安装与迁移及默认组合，
+  执行根目录 Ruff、Pyright/LSP，提交主仓与索引变更供 review，由 PR 执行三平台 CI。
+- [ ] Task 3：主仓变更合入后发布主仓新 rc，核对发布集合不含该包；移除主仓旧发布者，记录跨仓组合所用版本与提交。
