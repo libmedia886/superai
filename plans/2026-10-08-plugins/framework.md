@@ -2811,3 +2811,78 @@ uv tool 部署再新增一例：manager 装好插件后执行 `uv tool upgrade -
 Windows 上经 `bin\bcn.exe` 的首次运行与 `uv tool upgrade --reinstall` 两例通过；随 0.3.0rc15（4ca6526）发布。
 contrib-system-service PR #1 修正插件自身 PowerShell 输出的编码后，Windows system 测试从 PyPI 安装 0.3.0rc15，
 在含非 ASCII 字符的路径上完成安装、启动、状态、重启、停止与卸载（run 41447516453）。
+
+## 插件与本体升级（2026-11-02）
+
+Task 35 把 `bcn contrib sync --upgrade` 与宿主升级 `bcn contrib upgrade VERSION` 都以全局 `--upgrade` 交给 uv，
+uv 因此把环境里所有可升级的包一并升到最新，包括 pydantic 等多个插件共用的依赖。按消息 `21e4e57b-4d5a-58bf-81d4-945ff341b892`，
+升级只把目标包升到最新，依赖只在新版本要求时随之升级；按消息 `587d596c-304c-5c60-b6ab-7621a7daa29e`，
+sync 回到按配置安装缺少的包的原义，`bcn contrib` 保持插件管理。按消息 `03333557-df0a-520e-98ab-a8a9e9a64e14` 与
+`86dc0175-1bd2-52d5-b89c-5490aca60164`，本体照 0.2 以 `uv tool install bazaar-compute-node==<版本> --refresh-package bazaar-compute-node`
+升级，uv 把工具环境同步为本体及其依赖，安装随即按同一份插件声明把插件装回；版本检查与 agent 提示只针对本体；`bcc node upgrade` 先预检，
+配置中的插件声明与新本体不兼容时拒绝执行；手动 `uv tool upgrade` 造成插件不兼容时，启动时该插件不启动，其余照常运行。
+按消息 `afa1bdb2-59e2-59e3-914e-46d5060bd5d0` 与 `4776aeab-4030-5e81-8340-5161fc04eec6`，本体升级是节点级服务，
+经 sidecar 开放版本、可升级版本、升级与失败原因，供 GUI 与后续 server 调用，失败原因经审计事件上报。
+按消息 `07a71f3e-defb-5420-97e8-e7a5b6d2914d`、`bfce5ed9-2ded-5c7c-be3f-90ea0217dc0c` 与 `fec64f07-245d-507f-a0db-c62c0764518a`，
+node-management 提供安装与重启，`bcc node upgrade` 是 bcc 经 sidecar 依次调用安装、提醒与重启编排出的命令，
+跨插件的能力都经 sidecar 调用。按消息 `16db3bc0-8a76-57bc-a971-e5dfee1fce6e`，uv 没有保留环境中其他包的参数，因此安装本体后装回插件。
+按消息 `9c005413-f572-5a68-9306-7a8b8b863b57`，版本一律取运行实例内存中的值，只有 `bcn --version` 读磁盘上的元数据。
+按消息 `e957dc98-7897-5004-8a64-992db0b4c087`，节点自行升级只针对系统服务托管的运行方式，前台运行由用户停机后升级：
+Windows 上 uv 替换不了正在运行的工具入口 bcn.exe，失败后连工具环境一并损坏；托管时运行的是复制出的 bcn.running.exe，
+不受影响（contrib-system-service 诊断 run 41581671112）。按消息 `070ee46a-93b7-5591-b6ca-4b49011d5466` 与
+`041c5ed1-33cb-5697-8441-41ce8edc4495`，Windows 上的前台节点拒绝自行升级，由 agent 转告用户停机后手动升级；其他平台不拦。
+本节取代 Task 35 中这两处 `--upgrade` 与 manager 的宿主升级。Task 完成后停下等待 review。
+
+### Task 36：插件升级只动目标包，本体照 0.2 升级
+
+- `bcn contrib upgrade PACKAGE` 把配置中声明的一个插件升到兼容范围内的最新版：传 `--upgrade-package <发行名>`，
+  不传全局 `--upgrade`。uv 对 `--upgrade-package` 同时刷新该包缓存的索引，刚发布的版本因此可见。
+  未在配置中声明的包按 remove 的方式拒绝。
+- `bcn contrib sync` 去掉 `--upgrade`，只按配置安装缺少的包；启动准备、add 与 remove 不变。
+- 按消息 `04d08d9c-87f5-5629-8edc-bd6bdfa43991`，manager 调用的 uv 命令被取消时不再杀掉 uv，而是继续读取输出、等它自行结束，
+  再删除临时 pyproject 并传出取消；环境不会停在半装状态，Windows 上临时目录也不再被残留进程占用。关停因此等候手头的 uv 命令。
+- manager 去掉宿主升级操作与 `bcn contrib upgrade VERSION`，改为提供本体升级的底层操作：
+  - 最新可装版本：临时 pyproject 中宿主要求为 `bazaar-compute-node>当前版本`，其余为配置中的插件声明，执行 `uv pip compile`
+    并刷新宿主的索引；解析通过时取宿主的解析版本，无解时没有可升级版本。预发布版本按 uv 的语义，只有当前为预发布版本时才考虑。
+  - 预检：宿主要求为 `==目标版本`，同样只解析不安装；无解时报错，附 uv 的原始输出，其中列出冲突的插件。
+  - 安装：只支持 uv tool 部署，即环境中存在 `uv-receipt.toml`，其他部署在预检前报不支持；执行
+    `uv tool install --refresh-package bazaar-compute-node bazaar-compute-node==<目标版本>`，host_source 不是 PyPI 时以 `--index` 加入。
+    uv 把工具环境同步为 receipt 所列的本体，经 `uv pip` 装入的插件随之移除，uv 没有保留它们的参数，`--with` 会把插件写进
+    receipt、与配置同时管理插件。安装因此紧接着以预检的同一份声明执行 `uv pip install` 装回插件，未重启的节点只是待重启。
+    操作记录的 kind 为 upgrade；本体装好即记录已安装、需要重启与目标版本，之后装回插件失败时这些记录保留；
+    失败时错误为 uv 的原始输出。
+- 按消息 `6e344175-68b7-5c7d-851c-c7e5b5cc8877` 与 `8617de0d-ae9f-5b4b-b59e-703357dad90e`，`bcn run` 不依赖 manager：
+  node-management 的 `node-management` 入口仍只依赖 COMMANDS 与 CONFIGURATION，另提供 RUN，即 `bcn run` 等待的停止事件；
+  同一包新增 `node-upgrade` 入口提供 NODE 服务，依赖 RUN、CONTRIB_MANAGER、TIMER 与 AUDIT，默认配置与 V4→V5 转换都启用它：
+  - `version()` 返回节点启动时记下的运行版本，装完未重启时仍是原版本；node-health 心跳中的版本同样取启动时的运行版本。
+    `available()` 返回每小时检查一次得到的最新可装版本。
+  - `install(版本)` 预检后安装，版本缺省时取 `available()`；在节点自己的任务中执行，调用方断开时照样装完并发布审计事件。
+    Windows 上解释器所运行的启动器（`sys.orig_argv[1]`）就是 receipt 所列的工具入口（前台 `bcn.exe run`）时，
+    在预检前抛 UnsupportedUpgrade；`sys.argv[0]` 在这里不带 .exe，不能用来比较（contrib-system-service 诊断 run 41589428916）。
+  - `restart()` 置位 RUN 的停止事件，节点按正常关停流程退出，各平台一致。
+  - 安装开始、完成与失败都发布审计事件 `node.upgrade`，带版本，失败时带 uv 的原始输出。
+  - 这些方法经 `bazaar_compute_node.remotes` 登记的 RemoteEntry 由 sidecar 开放。
+  - contrib-manager、timer 或 audit 入口停用时只有 node-upgrade 不可用，`bcn run` 不受影响。
+- agent 不 accept NODE，经 sidecar 调用它。按消息 `654e5a19-0174-54ff-a170-7dc2795deae9`，升级检测可以关闭：
+  停用 node-upgrade 入口后没有升级提示，`bcc node` 报 NODE 不可用，其余照常。按消息 `0566ef8a-a19e-5777-be66-c0c8bfacea77`
+  照 0.2：检查只由 NODE 的后台任务每小时做一次，全节点一份，结果在其内存中；回合开始与 steer 经 sidecar 读这份值，
+  不联网也不跑 uv，sidecar 或 NODE 不可用时视为没有新版本：
+  - 回合开始与回合中 steer 的 inbox 提示在 `available()` 有版本时附 0.2 的 Upgrade available 一行，每个会话同一版本只提示一次。
+  - bcc 增加 `node upgrade --message-id`（必填）与 `node version`。upgrade 依次调用 NODE 的 `install`，经 reminder 服务挂 60 秒后的
+    「Report the outcome of upgrading to <版本>」提醒并锚定该消息，再调用 NODE 的 `restart`；安装失败时报错，不挂提醒、不重启；
+    提醒挂不上时照常重启，输出说明没有提醒。NODE 抛 UnsupportedUpgrade 时报 UPGRADE_UNSUPPORTED，
+    Next action 让 agent 转告用户停机后执行 `uv tool install bazaar-compute-node==<版本>`，或改用系统服务运行。
+    version 照 0.2 只输出运行版本。
+  - 按消息 `e35821f1-0417-5a79-8675-412a1034ae33`，bcc 进程只在第一次调用时启动一次会话记录的客户端 hub，
+    同一命令里的多次 sidecar 调用复用同一个 client，不为每次调用重起 hub。
+
+验证：manager 的 installed_smoke 中，`bcn contrib upgrade example` 把 example 升到新发布的版本，而索引里同时有更新版本的
+bazaar-core 保持原版本；uv tool 部署在索引发布本体新版本后，最新可装版本为该版本；像系统服务那样把工具入口复制成
+bcn.running 再运行 `bcn run`，经 sidecar 调用 `install()` 后插件仍在环境中，再调用 `restart()` 后正常退出，
+工具入口的 `bcn --version` 为新版本，再次启动后插件照常运行；Windows 上在此之前先直接以工具入口前台运行，
+`install()` 报 UnsupportedUpgrade；venv 部署的安装报不支持。
+node-management 的安装态用例经 sidecar 读取 `version()` 与 `available()`，`restart()` 让 `bcn run` 正常退出，
+非 uv tool 部署的 `install()` 报不支持，三个平台都运行。agent 的 provider_smoke 在会话环境中执行 `bcc node version`
+并读到节点的本体版本。app 的 configuration_smoke 不改：去掉 manager、换成其他准备插件的配置照旧提交并 `bcn run`。
+manager、node-management、agent、config-versions 与 app 包 `scripts/ci.py check`、`test` 与 `package` 通过，
+仓库根目录 `uv run --quiet scripts/pyright_lsp_check.py .` 通过，PR 的三平台 CI 通过。
