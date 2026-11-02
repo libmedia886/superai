@@ -226,7 +226,9 @@ async def exercise(path: Path, source: str, other_source: str, releases: Path) -
 
     # A private index publishes a newer release after the original lock is warm.
     version = Version(detail.version)
-    wheel = next((releases / "registry" / "two" / "files").glob("*.whl"))
+    wheel = next(
+        (releases / "registry" / "two" / "files").glob("bazaar_contrib_example-*.whl")
+    )
     await asyncio.to_thread(
         shutil.copyfile, wheel, path / "registry" / "one" / "files" / wheel.name
     )
@@ -668,6 +670,20 @@ async def exercise(path: Path, source: str, other_source: str, releases: Path) -
         for package in candidate["contribs"]
         for entry in package["enabled"]
     )
+    # A package installed before the configuration fails validation is still reported.
+    original = await asyncio.to_thread(config.read_text)
+    payload = tomllib.loads(original)
+    payload["contribs"].append({"enabled": [{"entry": "example-missing"}]})
+    await asyncio.to_thread(config.write_text, tomli_w.dumps(payload))
+    invalid = await invoke(
+        options,
+        lambda manager: manager.add(
+            Package(package="bazaar-contrib-example-support", source=other_source)
+        ),
+    )
+    assert invalid.phase == "failed" and invalid.error
+    assert invalid.installed and invalid.environment_changed
+    await asyncio.to_thread(config.write_text, original)
     # Edit the standard dependency syntax just as an operator edits the portable document.
     snapshot = tomllib.loads(await asyncio.to_thread(config.read_text))
     payload = ConfigDocument.model_validate(snapshot).model_dump(mode="json")
@@ -745,10 +761,14 @@ async def exercise(path: Path, source: str, other_source: str, releases: Path) -
         }
     )
     note = migrated / "copied-command.json"
+    # A tool node runs through its entry point, which the manager must leave in place.
+    bcn = (
+        (str(migrated / "bin" / ("bcn.exe" if os.name == "nt" else "bcn")),)
+        if tool
+        else (str(python), "-m", "bazaar_compute_node")
+    )
     await launch(
-        str(python),
-        "-m",
-        "bazaar_compute_node",
+        *bcn,
         "--config",
         str(copied),
         "example",
@@ -760,6 +780,31 @@ async def exercise(path: Path, source: str, other_source: str, releases: Path) -
     assert (
         "migrated node" in json.loads(await asyncio.to_thread(note.read_text))["text"]
     )
+    if tool:
+        # uv rebuilds the tool from its receipt, which lists only the host.
+        await launch(
+            "uv",
+            "tool",
+            "upgrade",
+            "--reinstall",
+            "--index",
+            source,
+            "bazaar-compute-node",
+        )
+        await launch(
+            *bcn,
+            "--config",
+            str(copied),
+            "example",
+            "write",
+            "reinstalled tool",
+            "--output",
+            str(note),
+        )
+        assert (
+            "reinstalled tool"
+            in json.loads(await asyncio.to_thread(note.read_text))["text"]
+        )
     after = json.loads(
         await launch(str(python), "-m", "bazaar_contrib_manager.environment")
     )
@@ -858,6 +903,15 @@ async def exercise(path: Path, source: str, other_source: str, releases: Path) -
             in json.loads(await asyncio.to_thread(note.read_text))["text"]
         )
 
+    # A dependency another declaration still needs through its extra stays installed.
+    original = await asyncio.to_thread(config.read_text)
+    payload = tomllib.loads(original)
+    payload["contribs"].append({"package": "idna", "source": "https://pypi.org/simple"})
+    await asyncio.to_thread(config.write_text, tomli_w.dumps(payload))
+    needed = await invoke(options, lambda manager: manager.remove("idna"))
+    assert needed.phase == "failed" and needed.error
+    assert (await checked(lambda manager: manager.detail("idna"))).version
+    await asyncio.to_thread(config.write_text, original)
     blocked = await invoke(
         options, lambda manager: manager.remove("bazaar-contrib-example")
     )
@@ -909,7 +963,9 @@ async def exercise(path: Path, source: str, other_source: str, releases: Path) -
         carrier, lambda manager: manager.remove("bazaar-contrib-example-carrier")
     )
     assert protected.error and protected.phase == "failed"
-    assert (await checked(lambda manager: manager.detail("example-carrier"))).entries
+    assert (
+        await invoke(carrier, lambda manager: manager.detail("example-carrier"))
+    ).entries
     await asyncio.to_thread(print, "Remove installed example packages", flush=True)
     removed = await checked(lambda manager: manager.remove("bazaar-contrib-example"))
     assert removed.installed

@@ -108,7 +108,13 @@ def wheels(tmp_path_factory):
         fixture = path / f"example-{number}"
         shutil.copytree(Path(__file__).parent / "fixtures" / "example", fixture)
         project = fixture / "pyproject.toml"
-        project.write_text(project.read_text().replace("0.1.0", version))
+        document = tomllib.loads(project.read_text())
+        document["project"]["version"] = version
+        if number == "two":
+            document["project"]["optional-dependencies"]["text"].append(
+                "bazaar-contrib-example-support"
+            )
+        project.write_text(tomli_w.dumps(document))
         subprocess.run(
             [
                 "uv",
@@ -121,6 +127,20 @@ def wheels(tmp_path_factory):
             ],
             check=True,
         )
+    fixture = path / "support"
+    shutil.copytree(Path(__file__).parent / "fixtures" / "support", fixture)
+    subprocess.run(
+        [
+            "uv",
+            "build",
+            "--wheel",
+            "--directory",
+            str(fixture),
+            "--out-dir",
+            str(path / "registry" / "two" / "files"),
+        ],
+        check=True,
+    )
     fixture = path / "carrier"
     shutil.copytree(Path(__file__).parent / "fixtures" / "carrier", fixture)
     subprocess.run(
