@@ -2806,3 +2806,8 @@ uv tool 部署再新增一例：manager 装好插件后执行 `uv tool upgrade -
 配置含无人提供的入口时 add 新包，包装上后校验失败，操作记录仍写明已安装与环境已变化。manager 包 `scripts/ci.py check`、`test` 与
 `package`（wheel 与 sdist）通过，仓库根目录 `uv run --quiet scripts/pyright_lsp_check.py .` 通过，PR 的三平台 CI 通过；
 发布含该包的 rc 后，contrib-system-service 的 Windows system 测试通过。
+
+验收结果：#138 的计划 e4e9893、Task 35 e77c58b 与 AGENTS.md 第 15 条改写 c9e035c 合入 4d78cd4，三平台 CI 通过，
+Windows 上经 `bin\bcn.exe` 的首次运行与 `uv tool upgrade --reinstall` 两例通过；随 0.3.0rc15（4ca6526）发布。
+contrib-system-service PR #1 修正插件自身 PowerShell 输出的编码后，Windows system 测试从 PyPI 安装 0.3.0rc15，
+在含非 ASCII 字符的路径上完成安装、启动、状态、重启、停止与卸载（run 41447516453）。
