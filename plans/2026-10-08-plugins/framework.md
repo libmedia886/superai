@@ -2732,3 +2732,27 @@ V4 转 V5 时不再迁移这张表。Task 完成后停下等待 review。
 
 验证：config-versions 包 `scripts/ci.py check`、`test` 与 `package`（wheel 与 sdist）通过，仓库根目录
 `uv run --quiet scripts/pyright_lsp_check.py .` 通过。发布含该包的 rc。
+
+## sidecar 客户端断开后重连（2026-11-01）
+
+共享流客户端在连接断开后保留首个错误，之后每次调用都报告连接已关闭，长期持有 CLIENT 的进程只能重启才能恢复；
+0.2.3 的本机命令客户端每次请求新开连接，没有这一状态。改为由断开后的下一次调用重新建立连接，建立失败时按次数退避重试；
+连接故障仍只向写到该连接上的调用返回错误。Task 完成后停下等待 review。
+
+### Task 34：sidecar 客户端由下一次调用重新建立连接
+
+- 每条已建立的连接持有自己的写端、读取任务和在途调用表；读取任务结束时关闭写端，并让这条连接上未完成的调用失败。
+- 调用发现没有连接，或现有连接的写端已关闭时，等待旧连接的读取任务结束后建立新连接；建立连接及其间的退避都在
+  连接锁内，并发调用依次等待，连上后共用同一条连接。
+- 建立连接最多尝试 3 次，两次尝试之间的等待从 0.25 秒起翻倍、最长 4 秒，取 Channel 共享发送器的重试参数；
+  退避跨调用累计，建立成功后回到 0.25 秒；3 次都失败时向调用方抛出最后一次的连接错误。Client 的等待预算照旧覆盖整个调用。
+- 退避等待消费公共 TIMER。主仓库 CI 使用已发布的平台插件，Connection 的构造参数分三步收紧：本 rc 的 Connection
+  接收可选的 Timer，未传入时以 asyncio.sleep 等待，重试次数与间隔不变，已发布的平台插件按原签名照常构造；本 rc 发布后，
+  sidecar-unix、sidecar-windows 及 consumers 测试的 TCP 夹具传入各自已接受的 TIMER，sidecar 依赖下限提到本 rc；
+  平台插件发布后的下一个 rc 把 Timer 改为必填，并删除 asyncio.sleep 分支。
+- 重试只覆盖建立连接，调用帧写出后不再重发；写出时对端已断开、本进程尚未收到断开的调用同样按在途调用失败。
+- 关闭客户端后的调用，以及退避等待中遇到关闭的调用，报告连接已关闭。
+
+验证：sidecar 包 `scripts/ci.py check` 与 `package`（wheel 与 sdist）通过，仓库根目录
+`uv run --quiet scripts/pyright_lsp_check.py .` 通过，主仓库 CI 的安装测试在已发布的平台插件上通过。发布含该包的 rc 后，sidecar-unix 与 sidecar-windows 的
+installed_smoke 让同一个 CLIENT 跨隔离节点的重启继续调用，原生传输与 TCP 夹具在各自 CI 上通过。
