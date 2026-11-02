@@ -55,7 +55,6 @@ def wheels(tmp_path_factory):
                 "invoke",
                 "storage",
                 "schema",
-                "legacy-node-migrations",
                 "messages",
                 "messages-node",
                 "collaboration",

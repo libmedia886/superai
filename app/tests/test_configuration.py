@@ -28,7 +28,6 @@ async def test_installed_node_uses_files_and_a_persistent_remote_carrier(
             "bazaar-contrib-invoke",
             "bazaar-contrib-storage",
             "bazaar-contrib-schema",
-            "bazaar-contrib-legacy-node-migrations",
             "bazaar-contrib-messages",
             "bazaar-contrib-messages-node",
             "bazaar-contrib-collaboration",

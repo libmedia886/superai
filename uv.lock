@@ -14,7 +14,6 @@ members = [
     "bazaar-contrib-config-versions",
     "bazaar-contrib-harness",
     "bazaar-contrib-invoke",
-    "bazaar-contrib-legacy-node-migrations",
     "bazaar-contrib-manager",
     "bazaar-contrib-messages",
     "bazaar-contrib-messages-node",
@@ -111,7 +110,7 @@ requires-dist = [
     { name = "bazaar-contrib-config", editable = "contrib/config" },
     { name = "bazaar-contrib-harness", editable = "contrib/harness" },
     { name = "bazaar-contrib-invoke", editable = "contrib/invoke" },
-    { name = "bazaar-contrib-legacy-node-migrations", editable = "contrib/legacy-node-migrations" },
+    { name = "bazaar-contrib-legacy-node-migrations", specifier = "~=0.3.0rc1" },
     { name = "bazaar-contrib-messages", editable = "contrib/messages" },
     { name = "bazaar-contrib-reminder", editable = "contrib/reminder" },
     { name = "bazaar-contrib-schema", editable = "contrib/schema" },
@@ -214,7 +213,7 @@ dependencies = [
 requires-dist = [
     { name = "bazaar-contrib-audit", editable = "contrib/audit" },
     { name = "bazaar-contrib-channel", editable = "contrib/channel" },
-    { name = "bazaar-contrib-legacy-node-migrations", editable = "contrib/legacy-node-migrations" },
+    { name = "bazaar-contrib-legacy-node-migrations", specifier = "~=0.3.0rc1" },
     { name = "bazaar-contrib-messages", editable = "contrib/messages" },
     { name = "bazaar-contrib-schema", editable = "contrib/schema" },
     { name = "bazaar-contrib-sidecar", editable = "contrib/sidecar" },
@@ -284,19 +283,16 @@ requires-dist = [
 
 [[package]]
 name = "bazaar-contrib-legacy-node-migrations"
-version = "0.3.0rc14"
-source = { editable = "contrib/legacy-node-migrations" }
+version = "0.3.0rc15"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bazaar-contrib-schema" },
     { name = "bazaar-contrib-storage" },
     { name = "bazaar-core" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "bazaar-contrib-schema", editable = "contrib/schema" },
-    { name = "bazaar-contrib-storage", editable = "contrib/storage" },
-    { name = "bazaar-core", editable = "core" },
+sdist = { url = "https://files.pythonhosted.org/packages/09/14/d217a0541073dd5d9d44b7f6d91762a6312a55f93b46fe7348f975dcc5c5/bazaar_contrib_legacy_node_migrations-0.3.0rc15.tar.gz", hash = "sha256:f1151f4073181ee31b737e179165529cb2c6ae4de38120692715a4614d3db854", size = 18977, upload-time = "2026-11-02T10:22:57.616Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/13/aa/84bfa66f987855b0cb5c7c597ebe63c9f5b753cccbbac07297d4c908848a/bazaar_contrib_legacy_node_migrations-0.3.0rc15-py3-none-any.whl", hash = "sha256:86de8dbc218118b83c3b2a5e570ebb9a02b9731766ff74eaf17a481a4a92915e", size = 21141, upload-time = "2026-11-02T10:22:56.745Z" },
 ]
 
 [[package]]
@@ -363,7 +359,7 @@ dependencies = [
 requires-dist = [
     { name = "bazaar-contrib-audit", editable = "contrib/audit" },
     { name = "bazaar-contrib-channel", editable = "contrib/channel" },
-    { name = "bazaar-contrib-legacy-node-migrations", editable = "contrib/legacy-node-migrations" },
+    { name = "bazaar-contrib-legacy-node-migrations", specifier = "~=0.3.0rc1" },
     { name = "bazaar-contrib-messages", editable = "contrib/messages" },
     { name = "bazaar-contrib-schema", editable = "contrib/schema" },
     { name = "bazaar-contrib-sidecar", editable = "contrib/sidecar" },
@@ -419,7 +415,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "bazaar-contrib-audit", editable = "contrib/audit" },
-    { name = "bazaar-contrib-legacy-node-migrations", editable = "contrib/legacy-node-migrations" },
+    { name = "bazaar-contrib-legacy-node-migrations", specifier = "~=0.3.0rc1" },
     { name = "bazaar-contrib-messages", editable = "contrib/messages" },
     { name = "bazaar-contrib-schema", editable = "contrib/schema" },
     { name = "bazaar-contrib-sidecar", editable = "contrib/sidecar" },
