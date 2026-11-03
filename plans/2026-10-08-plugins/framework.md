@@ -1983,7 +1983,7 @@ Channel 子组合的变更由 Agent 所属组合管理，保留未改动的 Agen
 退役 Channel 停止入站后保留已受理工作所需的回复、审批与命令路由，排空再释放。
 Harness 的配置顺序确定默认执行者；入站受理即计入所选实例，排队及持久化中的工作随该实例完成后退出。
 Agent 执行绑定使用零退出等待预算关闭 Messages／Reminder 命令，在途 bcc 调用与 Actor 任务一并取消后回收 Harness。
-配置入口进入 Running 后，通过现有 CONTRIB_CHANGED 回调应用实体组合；调用方可通过 AGENTS.wait_applied 核对执行结果。
+配置入口进入 Running 后，通过现有 CONTRIB_CHANGED 回调应用实体组合。
 
 - [x] Channel 与 Harness 分别持有纯内存运行状态，随实例创建、销毁和重建，按 Running → Stopping → Stopped 管理退出。Stopping 停止接收新业务工作，保留既有请求所需的事件、审批、回执及回复通路；使用公共 TIMER 定期复核队列、在途请求／回复和相关后台工作，排空后再关闭资源。Agent 通过公共 TIMER 复核所属实例和会话；繁忙时重新安排，排空后退出，整节点退出取消工作及所属定时器。
 
@@ -2886,3 +2886,31 @@ node-management 的安装态用例经 sidecar 读取 `version()` 与 `available(
 并读到节点的本体版本。app 的 configuration_smoke 不改：去掉 manager、换成其他准备插件的配置照旧提交并 `bcn run`。
 manager、node-management、agent、config-versions 与 app 包 `scripts/ci.py check`、`test` 与 `package` 通过，
 仓库根目录 `uv run --quiet scripts/pyright_lsp_check.py .` 通过，PR 的三平台 CI 通过。
+
+## 删除无用与只供测试的代码（2026-11-03）
+
+按消息 `f80f5ca7-478c-59f0-a64a-2440b9769211`、`3bf18ed9-995f-54a2-8545-d2f11aa3b03c` 与 `1eb96d04-7f47-52f0-a9f1-75720cacae62`，
+0.3 的 workspace 成员（app、core、contrib/*）删去没有调用方的代码，以及只有测试调用的代码；生产代码不为测试预留接口，
+测试改为观察公开行为。判断调用方时一并核对各外部插件仓库。按消息 `62131714-ebf6-5e08-8980-daf389ba855b`，
+组合按安装时选择的 extra 区分（`bcn[agent]`、`bcn[server]`），各自以默认配置新建节点配置，不在运行时把组合并入已有配置；
+本节取代前文与 roadmap 中的组合导入，Task 16 对 `AGENTS.wait_applied` 的描述随之删去。Task 完成后停下等待 review。
+
+### Task 37：删除无用与只供测试的代码
+
+- 没有调用方：sidecar `wire.py` 的 `RESPONSE`，响应帧由 `streams.py` 自行解析；messages-node 与 reminder 命令分发器的 `accepting` 属性。
+- 只有测试调用：
+  - agent 的 `AgentInstances.wait_applied`，以及只供它使用的 `applied` 事件与 `error` 字段；CONTRIB_CHANGED 回调照旧应用实体组合，失败照旧抛出。
+  - schema 的 `Schema.modules`。
+  - config 的 `Configuration.import_defaults`，以及只供其测试使用的示例包 `defaults.toml` 与 `example-added` 入口。
+- 测试改为观察公开行为：
+  - agent 与 agent-command 的安装测试经 CONTRIB_CHANGED 与 hub 快照等待：节点启动后等具名 agent 及其下全部条目进入 Running；
+    provider_smoke 每次改配置后按这一步的变化，等新增条目进入 Running、被替换的条目换成新实例、被移除的条目消失；
+    等待期间出现失败的条目即报错。这一判断放在 agent 的测试工作台中共用。
+  - schema 用例改查 `contrib_schema_tables` 中各表的归属包。
+  - app 的 configuration_smoke 去掉组合导入及其并发冲突一段，直接提交含 status 的用户配置，后续步骤不变。
+- contrib-legacy-node-migrations 的迁移用例去掉对 `schema.modules` 的断言，同一用例对 `contrib_schema_tables` 归属的断言已覆盖模块登记；
+  该改动兼容已发布的 rc，先于含本 Task 的 rc 发布合入。
+
+验证：sidecar、messages-node、reminder、agent、agent-command、schema、config 与 app 包 `scripts/ci.py check`、`test` 与 `package`
+（wheel 与 sdist）通过，仓库根目录 `uv run --quiet scripts/pyright_lsp_check.py .` 通过，PR 的三平台 CI 通过；
+contrib-legacy-node-migrations 的 PR CI 通过。
