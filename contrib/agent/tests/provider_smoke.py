@@ -9,6 +9,7 @@ import shutil
 import sqlite3
 from contextlib import AsyncExitStack, asynccontextmanager, closing
 from copy import deepcopy
+from importlib.metadata import version
 from pathlib import Path
 from time import time_ns
 from typing import Any, cast
@@ -343,6 +344,19 @@ async def attachment_download(
             f"{row['name']} (id:{row['attachment_id']}, state:downloading)"
             in output.decode()
         )
+    process = await asyncio.create_subprocess_exec(
+        command,
+        "node",
+        "version",
+        cwd=draft.parent,
+        env=environment,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    output, _ = await process.communicate()
+    assert process.returncode == 0, output.decode()
+    installed = await asyncio.to_thread(version, "bazaar-compute-node")
+    assert f"running bazaar-compute-node {installed}." in output.decode()
 
     await peer.write({"release_attachment": "companion-note"})
     await peer.write({"release_attachment": "earlier-appendix"})

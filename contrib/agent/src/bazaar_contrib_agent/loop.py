@@ -59,6 +59,7 @@ from bazaar_contrib_messages.models import (
 from bazaar_contrib_messages.results import ThreadNotFoundError
 from bazaar_contrib_messages.states import ChannelTargetKind, MessageDirection, Review
 from bazaar_contrib_reminder import Reminders, resolve_reminder_anchor
+from bazaar_contrib_sidecar import Client, RemoteError
 from bazaar_contrib_storage import Column, Compare, Database, Insert, Select, Value
 from bazaar_contrib_timer import Timer
 from bazaar_core import TaskFailureSignal
@@ -113,6 +114,7 @@ class ActorLoop:
     task: asyncio.Task[None] | None = None
     idle_remaining_ms: int = 0
     active: ActiveTurn | None = None
+    upgrade_announced: str | None = None
 
     def drain(self) -> list[Wakeup]:
         pending: list[Wakeup] = []
@@ -135,6 +137,7 @@ class AgentLoop:
         timer: Timer,
         audit: Audit,
         database: Database,
+        client: Client,
         tool_config: Path,
         instance_id: UUID,
         channel_order: dict[str, int],
@@ -149,6 +152,7 @@ class AgentLoop:
         self.timer = timer
         self.audit = audit
         self.database = database
+        self.client = client
         self.tool_config = tool_config
         self.actors = Actors(agent.id, Mode(config.mode))
         self.sandbox_policy = (
@@ -879,15 +883,37 @@ class AgentLoop:
                 handle.cancel()
         return False
 
+    async def upgrade(self, loop: ActorLoop) -> tuple[str | None, str | None]:
+        """A newer host release this Actor has not been told about yet, and the running one.
+
+        The node service answers through the sidecar; when either is unavailable the
+        notice simply carries no upgrade.
+        """
+        try:
+            available = await self.client.call("node", "available")
+            if available is None:
+                loop.upgrade_announced = None
+                return None, None
+            if loop.upgrade_announced == available:
+                return None, None
+            installed = await self.client.call("node", "version")
+        except RemoteError, OSError:
+            return None, None
+        loop.upgrade_announced = str(available)
+        return str(available), str(installed)
+
     async def notice(self, loop: ActorLoop) -> str | None:
         summary = await self.service.read_unread_summary(loop.actor, limit=100)
         if not summary.messages:
             return None
+        upgrade_version, installed_version = await self.upgrade(loop)
         return await asyncio.to_thread(
             inbox_notice,
             summary.messages,
             total_unread_count=summary.total,
             closing_bracket_on_own_line=True,
+            upgrade_version=upgrade_version,
+            installed_version=installed_version,
         )
 
     async def steer(self, loop: ActorLoop, pending: Sequence[Wakeup]) -> bool:
@@ -904,11 +930,15 @@ class AgentLoop:
         if not fresh:
             return True
         summary = await self.service.read_unread_summary(loop.actor, limit=0)
+        # A message arriving mid-turn is consumed here, so the offer rides along as in 0.2.
+        upgrade_version, installed_version = await self.upgrade(loop)
         text = await asyncio.to_thread(
             inbox_notice,
             tuple(item.message for item in fresh),
             total_unread_count=max(summary.total, len(fresh)),
             closing_bracket_on_own_line=False,
+            upgrade_version=upgrade_version,
+            installed_version=installed_version,
         )
         try:
             accepted = await active.runtime.harness.steer_turn(

@@ -477,7 +477,7 @@ class ContribManager:
         *,
         removed: str | None = None,
         pin: str | None = None,
-        upgrade: bool = False,
+        upgrade: tuple[str, ...] = (),
     ) -> None:
         before = await self.packages.inspect()
 
@@ -586,9 +586,7 @@ class ContribManager:
 
         return await self._submit("bootstrap", action, remote=False)
 
-    async def sync(
-        self, *, only_missing: bool = False, upgrade: bool = False
-    ) -> Operation:
+    async def sync(self, *, only_missing: bool = False) -> Operation:
         """Install the configured environment; startup can skip an already satisfied graph."""
 
         async def action(id: UUID) -> None:
@@ -598,7 +596,7 @@ class ContribManager:
             if only_missing and await self.packages.satisfied(plan):
                 return
             await self.packages.initialize()
-            await self._install(id, plan, document, upgrade=upgrade)
+            await self._install(id, plan, document)
 
         return await self._submit("sync", action, remote=not only_missing)
 
@@ -702,23 +700,72 @@ class ContribManager:
 
         return await self._submit("remove", action, package=package)
 
-    async def upgrade(self, version: str) -> Operation:
+    async def latest_host(self) -> str | None:
+        """The newest host release the configured contribs can be installed with."""
+        await self.packages.initialize()
+        candidate, _ = await self.configuration.read()
+        document = ConfigDocument.model_validate(candidate.payload)
+        plan = await self.packages.plan(document, self.configuration.environment)
+        return await self.packages.latest(plan)
+
+    async def install_host(self, version: str) -> Operation:
+        """Check the configured contribs against a host release, then install both."""
+
+        async def action(id: UUID) -> None:
+            await self.packages.initialize()
+            if not await self.packages.tool():
+                raise ManagementError(
+                    "node upgrades require a uv tool installation of "
+                    "bazaar-compute-node"
+                )
+            candidate, _ = await self.configuration.read()
+            document = ConfigDocument.model_validate(candidate.payload)
+            plan = await self.packages.plan(document, self.configuration.environment)
+            plan = plan.model_copy(
+                update={
+                    "host": plan.host.model_copy(update={"version": f"=={version}"})
+                }
+            )
+            await self._record(id, phase="preflight")
+            await self.packages.resolve(plan)
+            await self._record(id, phase="installing")
+            await self.packages.install_host(version)
+            await self._record(
+                id,
+                installed=True,
+                environment_changed=True,
+                pending_restart=True,
+                version=version,
+            )
+            # uv leaves the tool with the host alone, so the contribs go back at once.
+            await self.packages.install(plan)
+
+        return await self._submit(
+            "upgrade", action, package="bazaar-compute-node", remote=False
+        )
+
+    async def upgrade(self, package: str) -> Operation:
+        """Move one configured contrib package to its latest compatible version."""
+        package = str(canonicalize_name(package))
+
         async def action(id: UUID) -> None:
             await self.packages.initialize()
             candidate, _ = await self.configuration.read()
             document = ConfigDocument.model_validate(candidate.payload)
+            if not any(
+                entry.distribution == package
+                for entry in document.contribs
+                if entry.package
+            ):
+                raise ManagementError(
+                    f"Cannot upgrade {package!r}: it is not listed in the contrib "
+                    "configuration.\n\nRun 'bcn contrib configured' to see the packages "
+                    "that 'bcn contrib upgrade' can manage."
+                )
             plan = await self.packages.plan(document, self.configuration.environment)
-            host = Package(
-                package=plan.host.package,
-                source=plan.host.source,
-                version=f"=={version}",
-            )
-            await self._install(
-                id, plan.model_copy(update={"host": host}), document, upgrade=True
-            )
-            await self._record(id, pending_restart=True)
+            await self._install(id, plan, document, upgrade=(package,))
 
-        return await self._submit("upgrade", action, package="bazaar-compute-node")
+        return await self._submit("upgrade", action, package=package)
 
 
 CONTRIB_MANAGER = ServiceKey[ContribManager]("contrib.manager")

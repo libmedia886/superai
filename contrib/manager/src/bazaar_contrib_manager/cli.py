@@ -134,14 +134,8 @@ def create_commands(manager: ContribManager) -> click.Group:
         pass
 
     @contrib.command("sync", help="Update the contrib environment")
-    @click.option("--upgrade", is_flag=True, help="Upgrade package versions")
-    def sync(upgrade: bool):
-        return execute(
-            manager,
-            lambda manager: manager.sync(upgrade=upgrade),
-            outcome,
-            err=True,
-        )
+    def sync():
+        return execute(manager, lambda manager: manager.sync(), outcome, err=True)
 
     @contrib.command("list", help="List installed packages")
     def list_command():
@@ -411,12 +405,14 @@ def create_commands(manager: ContribManager) -> click.Group:
             err=True,
         )
 
-    @contrib.command("upgrade", help="Upgrade Bazaar Compute Node")
-    @click.argument("version")
-    def upgrade(version: str):
-        return execute(
-            manager, lambda manager: manager.upgrade(version), outcome, err=True
-        )
+    @contrib.command("upgrade", help="Upgrade a contrib package")
+    @click.argument("name", metavar="PACKAGE")
+    def upgrade(name: str):
+        async def action(manager: ContribManager):
+            package = await manager.detail(name)
+            return await manager.upgrade(package.package)
+
+        return execute(manager, action, outcome, err=True)
 
     @contrib.command("operation", help="Show operation details")
     @click.argument("id", type=click.UUID)

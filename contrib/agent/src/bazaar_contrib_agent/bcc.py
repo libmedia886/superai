@@ -5,19 +5,24 @@ from __future__ import annotations
 lazy import asyncio
 lazy import os
 lazy from collections.abc import Mapping, Sequence
+lazy from contextlib import AsyncExitStack
 lazy from pathlib import Path
 lazy from types import SimpleNamespace
+lazy from typing import cast
 
 import click
 from bazaar_contrib_invoke import Commands
 lazy from bazaar_contrib_messages import Actor, Actors, Agent, Mode
-lazy from bazaar_contrib_sidecar import RemoteError
+lazy from bazaar_contrib_sidecar import Client, RemoteError
+lazy from pydantic import JsonValue
 
 lazy from .cli.messages.inbox import inbox
 lazy from .cli.messages.message import message
 lazy from .cli.messages.thread import thread
+lazy from .cli.node.node import node
+lazy from .cli.reminder._client import BccCommandError
 lazy from .cli.reminder.reminder import reminder
-lazy from .tool import request
+lazy from .tool import connect
 
 
 async def dispatch(args: Sequence[str], *, prog_name: str | None) -> None:
@@ -27,7 +32,7 @@ async def dispatch(args: Sequence[str], *, prog_name: str | None) -> None:
         params=main.params,
         context_settings={"help_option_names": ["-h", "--help"]},
     )
-    for command in (message, thread, reminder):
+    for command in (message, thread, reminder, node):
         commands.add_command(command)
     actor: Actor | None = None
     agent_id = os.environ.get("BCN_AGENT_ID")
@@ -42,24 +47,51 @@ async def dispatch(args: Sequence[str], *, prog_name: str | None) -> None:
     if isinstance(actor, Agent):
         commands.add_command(inbox)
 
-    async def send(service: str, payload: Mapping[str, object]) -> Mapping[str, object]:
-        path = os.environ.get("BCN_TOOL_CONFIG")
-        if not path:
-            return {
-                "ok": False,
-                "code": "LOCAL_ENDPOINT_REQUIRED",
-                "error": "BCN_TOOL_CONFIG is not set",
-            }
-        try:
-            return await request(Path(path), service, payload)
-        except RemoteError as error:
-            return {"ok": False, "code": "COMMAND_FAILED", "error": error.message}
+    path = os.environ.get("BCN_TOOL_CONFIG")
+    async with AsyncExitStack() as stack:
+        clients: list[Client] = []
 
-    await commands.dispatch(
-        args,
-        prog_name=prog_name,
-        obj=SimpleNamespace(request=send),
-    )
+        async def connected(path: str) -> Client:
+            # One command starts the session's client once, however many calls it makes.
+            if not clients:
+                clients.append(await stack.enter_async_context(connect(Path(path))))
+            return clients[0]
+
+        async def send(
+            service: str, payload: Mapping[str, object]
+        ) -> Mapping[str, object]:
+            if not path:
+                return {
+                    "ok": False,
+                    "code": "LOCAL_ENDPOINT_REQUIRED",
+                    "error": "BCN_TOOL_CONFIG is not set",
+                }
+            try:
+                # The dispatcher owns this command's wait budget.
+                return cast(
+                    Mapping[str, object],
+                    await (await connected(path)).call(
+                        service, "request", dict(payload), timeout=None
+                    ),
+                )
+            except RemoteError as error:
+                return {"ok": False, "code": "COMMAND_FAILED", "error": error.message}
+
+        async def remote(service: str, method: str, *arguments: object) -> JsonValue:
+            if not path:
+                raise BccCommandError(
+                    "BCN_TOOL_CONFIG is not set", code="LOCAL_ENDPOINT_REQUIRED"
+                )
+            # The called service owns this command's wait budget.
+            return await (await connected(path)).call(
+                service, method, *arguments, timeout=None
+            )
+
+        await commands.dispatch(
+            args,
+            prog_name=prog_name,
+            obj=SimpleNamespace(request=send, call=remote),
+        )
 
 
 @click.command(

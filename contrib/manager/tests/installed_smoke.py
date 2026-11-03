@@ -21,6 +21,7 @@ from bazaar_compute_node import run
 from bazaar_compute_node.boot import bootstrap, build, node
 from bazaar_contrib_config import ConfigDocument, ContribPackage, EnabledContrib
 from bazaar_contrib_invoke import COMMANDS
+from bazaar_contrib_sidecar import CLIENT, Client, RemoteError
 from bazaar_core import (
     Blocked,
     Composition,
@@ -82,6 +83,7 @@ async def invoke(options: dict[str, Any], action) -> Any:
 async def exercise(path: Path, source: str, other_source: str, releases: Path) -> None:
     config = path / "config.toml"
     options: dict[str, Any] = {"configer_options": (str(config),)}
+    tool = Path(os.environ["UV_TOOL_DIR"]) / "bazaar-compute-node" == Path(sys.prefix)
     payload = tomllib.loads(
         await asyncio.to_thread(
             files("bazaar_compute_node").joinpath("defaults.toml").read_text
@@ -252,9 +254,14 @@ async def exercise(path: Path, source: str, other_source: str, releases: Path) -
         f"Normal sync selected {current.version}; previous version {version}",
         flush=True,
     )
-    await cli("sync", "--upgrade")
+    core = await checked(lambda manager: manager.detail("bazaar-core"))
+    await cli("upgrade", "example")
     detail = await checked(lambda manager: manager.detail("example"))
     assert Version(detail.version) > version
+    # An upgrade moves the configured contribs, not the dependencies they share.
+    assert (
+        await checked(lambda manager: manager.detail("bazaar-core"))
+    ).version == core.version
     await asyncio.to_thread(
         print, f"Explicit upgrade selected {detail.version}", flush=True
     )
@@ -619,32 +626,106 @@ async def exercise(path: Path, source: str, other_source: str, releases: Path) -
         )
         digest = sha256(await asyncio.to_thread(wheel.read_bytes)).hexdigest()
         await asyncio.to_thread(
-            print,
-            f"Publish host {versions['target']} into the cached index",
-            flush=True,
+            print, f"Publish host {versions['target']} into the index", flush=True
         )
         await asyncio.to_thread(
             index.write_text,
             await asyncio.to_thread(index.read_text)
             + f'\n<a href="../../files/{wheel.name}#sha256={digest}">{wheel.name}</a>',
         )
-        upgraded = await manager.upgrade(versions["target"])
-        assert upgraded.installed and upgraded.pending_restart, (
-            upgraded.model_dump_json(indent=2)
-        )
-        host = await manager.detail("bazaar-compute-node")
-        assert Version(host.version) > Version(versions["current"])
-        await asyncio.to_thread(
-            print, f"Host upgrade installed {host.version}", flush=True
-        )
-        candidate, _ = await manager.configuration.read()
-        assert any(
-            entry["config"].get("label") == "edited"
-            and entry["config"].get("path") == str(writer)
-            for package in candidate.payload["contribs"]
-            for entry in package["enabled"]
-        )
+        assert await manager.latest_host() == versions["target"]
+        if not tool:
+            refused = await manager.install_host(versions["target"])
+            assert refused.phase == "failed" and "uv tool" in str(refused.error), (
+                refused.model_dump_json(indent=2)
+            )
     assert "released:edited" in await asyncio.to_thread(writer.read_text)
+    if tool:
+        bcn = Path(os.environ["UV_TOOL_BIN_DIR"]) / (
+            "bcn.exe" if os.name == "nt" else "bcn"
+        )
+        clients: list[Client] = []
+
+        @asynccontextmanager
+        async def control(ctx: Context):
+            clients.append(ctx.accept(CLIENT))
+            yield
+
+        def select(document: ConfigDocument) -> Composition:
+            composition = build(document)
+            entry = ContribEntry(
+                name="node-control",
+                definition=Contrib(accepts=[CLIENT], lifespan=control),
+            )
+            return composition.model_copy(
+                update={
+                    "entries": (*composition.entries, entry),
+                    "roots": (entry.name,),
+                }
+            )
+
+        @asynccontextmanager
+        async def serving(executable: Path):
+            process = await asyncio.create_subprocess_exec(
+                str(executable),
+                "--config",
+                str(config),
+                "run",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            try:
+                assert process.stdout is not None
+                while b"bcn ready" not in (line := await process.stdout.readline()):
+                    assert line, "bcn run ended before it was ready"
+                clients.clear()
+                async with node(**options, start=select):
+                    yield clients[0]
+                    await clients[0].call("node", "restart")
+                    output, _ = await process.communicate()
+                assert process.returncode == 0, output.decode()
+            finally:
+                if process.returncode is None:
+                    process.kill()
+                    await process.wait()
+
+        if os.name == "nt":
+            # Windows keeps a running entry point locked, so a foreground node refuses.
+            async with serving(bcn) as client:
+                try:
+                    await client.call(
+                        "node", "install", versions["target"], timeout=None
+                    )
+                except RemoteError as error:
+                    assert error.type == "UnsupportedUpgrade", error
+                else:
+                    raise AssertionError("the foreground node replaced its entry point")
+        # The system service runs a copy, leaving the entry point free for uv to replace.
+        running = path / ("bcn.running.exe" if os.name == "nt" else "bcn.running")
+        await asyncio.to_thread(shutil.copyfile, bcn, running)
+        await asyncio.to_thread(running.chmod, 0o700)
+        async with serving(running) as client:
+            operation = Operation.model_validate(
+                await client.call("node", "install", versions["target"], timeout=None)
+            )
+            assert operation.installed, operation.model_dump_json(indent=2)
+            listing = await asyncio.create_subprocess_exec(
+                sys.executable,
+                "-m",
+                "bazaar_contrib_manager.environment",
+                "--metadata-only",
+                stdout=asyncio.subprocess.PIPE,
+            )
+            output, _ = await listing.communicate()
+            # The contribs are back before the node restarts.
+            assert "bazaar-contrib-example" in {
+                package["package"] for package in json.loads(output)["packages"]
+            }
+        process = await asyncio.create_subprocess_exec(
+            str(bcn), "--version", stdout=asyncio.subprocess.PIPE
+        )
+        output, _ = await process.communicate()
+        assert versions["target"] in output.decode(), output.decode()
     async with (
         node(**options) as hub,
         hub.enable(Composition(entries=[consumer])),
@@ -708,7 +789,6 @@ async def exercise(path: Path, source: str, other_source: str, releases: Path) -
         "UV_TOOL_DIR": str(migrated / "tools"),
         "UV_TOOL_BIN_DIR": str(migrated / "bin"),
     }
-    tool = Path(os.environ["UV_TOOL_DIR"]) / "bazaar-compute-node" == Path(sys.prefix)
     prefix = migrated / ("tools/bazaar-compute-node" if tool else "environment")
 
     async def launch(*arguments: str):

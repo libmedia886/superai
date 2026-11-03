@@ -138,6 +138,7 @@ def migrate_v5(payload: Mapping[str, object]) -> ConfigCandidate:
     add(transport, transport, endpoint)
     add("node-management", "node-management")
     add("node-health", "node-management")
+    add("node-upgrade", "node-management")
     changes.extend(
         [
             FieldChange(
