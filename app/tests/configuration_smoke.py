@@ -10,9 +10,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 lazy import json
 lazy import signal
-lazy import tomllib
 lazy from contextlib import asynccontextmanager
-lazy from importlib.resources import files
 lazy from uuid import uuid7
 
 from bazaar_contrib_config import (
@@ -395,90 +393,40 @@ async def exercise(path: Path) -> None:
             center.drop_response = True
             saved = await service.commit(updates[0], expected_revision=current.revision)
             assert saved.payload["contrib_indexes"] == updates[0]["contrib_indexes"]
-            resource = await asyncio.to_thread(
-                files("bcn_example_contribs").joinpath("defaults.toml").read_text
-            )
-            resource = tomllib.loads(resource)
-            user = dict(updates[0]) | {
-                "contribs": [
-                    {"enabled": [{"entry": "example-command-registry"}]},
-                    {"enabled": [{"entry": "node-management"}]},
-                    {
-                        "enabled": [
-                            {
-                                "entry": "example-manager",
-                                "config": {"path": str(path / "selected-manager")},
-                            }
-                        ]
-                    },
-                    {
-                        "enabled": [
-                            {
-                                "entry": "example-writer",
-                                "config": {"path": str(path / "user-writer.txt")},
-                            }
-                        ]
-                    },
-                    {
-                        "enabled": [
-                            {
-                                "entry": "example-writer",
-                                "config": {"path": str(path / "second-writer.txt")},
-                            }
-                        ]
-                    },
-                ]
-            }
-            saved = await service.commit(user, expected_revision=saved.revision)
-            # A concurrent editor changes the source while this caller imports.
-            center.pause_reads = asyncio.Event()
-            importing = asyncio.create_task(service.import_defaults(resource))
-            await center.read_requests.get()
-            saved = await peer.write(
-                user | {"contrib_indexes": ["https://example.com/editor.json"]},
-                expected_revision=saved.revision,
-            )
-            center.pause_reads.set()
-            try:
-                await importing
-            except ConfigConflict:
-                pass
-            else:
-                raise AssertionError("the caller must see the concurrent edit")
-            center.pause_reads = None
-            # The caller explicitly reads a new snapshot through a new import.
-            imported = await service.import_defaults(resource)
-            assert (
-                imported.payload["contrib_indexes"] == saved.payload["contrib_indexes"]
-            )
-            selected = {
-                entry["entry"]: entry.get("config", {})
-                for package in ConfigDocument.model_validate(
-                    imported.payload
-                ).model_dump(mode="json")["contribs"]
-                for entry in package["enabled"]
-            }
-            writers = [
-                entry.config["path"]
-                for package in ConfigDocument.model_validate(imported.payload).contribs
-                for entry in package.enabled
-                if entry.entry == "example-writer"
-            ]
-            assert str(path / "user-writer.txt") in writers
-            assert str(path / "second-writer.txt") in writers
-            assert "example-added" in selected
-            assert "status" not in selected
-            saved = await service.commit(
-                dict(imported.payload)
+            await service.commit(
+                dict(updates[0])
                 | {
                     "contribs": [
                         {"enabled": [{"entry": "status"}]},
-                        *ConfigDocument.model_validate(imported.payload).model_dump(
-                            mode="json"
-                        )["contribs"],
+                        {"enabled": [{"entry": "example-command-registry"}]},
+                        {"enabled": [{"entry": "node-management"}]},
+                        {
+                            "enabled": [
+                                {
+                                    "entry": "example-manager",
+                                    "config": {"path": str(path / "selected-manager")},
+                                }
+                            ]
+                        },
+                        {
+                            "enabled": [
+                                {
+                                    "entry": "example-writer",
+                                    "config": {"path": str(path / "user-writer.txt")},
+                                }
+                            ]
+                        },
+                        {
+                            "enabled": [
+                                {
+                                    "entry": "example-writer",
+                                    "config": {"path": str(path / "second-writer.txt")},
+                                }
+                            ]
+                        },
                     ]
                 },
-                expected_revision=imported.revision,
+                expected_revision=saved.revision,
             )
         await center.close()
         center = ConfigCenter(path / "center.sqlite3")

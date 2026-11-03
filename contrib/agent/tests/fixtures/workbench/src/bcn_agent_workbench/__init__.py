@@ -11,7 +11,7 @@ import os
 import sys
 import threading
 import tomllib
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Collection, Iterable
 from contextlib import aclosing, asynccontextmanager
 from functools import partial
 from importlib.resources import files
@@ -82,7 +82,18 @@ from bazaar_contrib_harness import (
     TurnStarted,
     harness_builder_key,
 )
-from bazaar_core import Composition, Context, Contrib
+from bazaar_core import (
+    CONTRIB_CHANGED,
+    Composition,
+    Context,
+    Contrib,
+    ContribChange,
+    ContribEntry,
+    ContribHub,
+    ContribStatus,
+    Failed,
+    Running,
+)
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 
@@ -121,6 +132,52 @@ async def configured(path: Path, composition: Composition) -> Composition:
             "roots": composition.roots,
         }
     )
+
+
+def named(
+    records: Iterable[ContribStatus], names: Collection[str]
+) -> list[ContribStatus]:
+    """Select the named entries together with the entries under them."""
+    return [
+        record
+        for record in records
+        if any(
+            record.name == name or record.name.startswith(f"{name}/") for name in names
+        )
+    ]
+
+
+def running(records: Iterable[ContribStatus], names: Collection[str]) -> bool:
+    """Whether each named entry and every entry under it runs."""
+    selected = named(records, names)
+    return {record.name for record in selected} >= set(names) and all(
+        isinstance(record.state, Running) for record in selected
+    )
+
+
+async def started(hub: ContribHub, names: Collection[str]) -> None:
+    """Wait until each named agent runs with all of its entries."""
+    changed = asyncio.Event()
+
+    def notify(ctx: Context, change: ContribChange) -> None:
+        changed.set()
+
+    listener = ContribEntry(
+        name="agents-started", definition=Contrib(listen={CONTRIB_CHANGED: notify})
+    )
+    async with hub.enable(Composition(entries=[listener])):
+        while True:
+            changed.clear()
+            failures = [
+                record.state.error
+                for record in named(hub.snapshots, names)
+                if isinstance(record.state, Failed)
+            ]
+            if failures:
+                raise RuntimeError("; ".join(failures))
+            if running(hub.snapshots, names):
+                return
+            await changed.wait()
 
 
 class ChannelConfig(BaseModel):

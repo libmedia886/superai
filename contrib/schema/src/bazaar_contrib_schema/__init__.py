@@ -5,7 +5,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import Annotated, Self, cast
 lazy import asyncio
-lazy from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+lazy from collections.abc import AsyncIterator, Awaitable, Callable
 lazy from time import monotonic_ns, time_ns
 
 from bazaar_contrib_storage import (
@@ -197,10 +197,6 @@ class Schema:
         self._database = database
         self._modules: dict[str, ModuleSchema] = {}
         self._lock = asyncio.Lock()
-
-    @property
-    def modules(self) -> Mapping[str, ModuleSchema]:
-        return dict(self._modules)
 
     async def start(self) -> None:
         await self._database.apply_schema(

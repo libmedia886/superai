@@ -410,8 +410,6 @@ async def lifespan(ctx: Context, config: Config):
         for provider in item.harness
     }
     service = ctx.accept(AGENTS)
-    service.error = None
-    service.applied.clear()
     service.requests[ctx.id] = config, channels, harnesses
     try:
         yield
