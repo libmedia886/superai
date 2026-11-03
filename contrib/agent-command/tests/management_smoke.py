@@ -316,6 +316,7 @@ async def exercise(path: Path, source: str, tests: Path):
             sys.executable,
             str(Path(__file__).with_name("management_node.py")),
             str(config),
+            *(item["name"] for item in await agents()),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 
 class Message(BaseModel):
@@ -27,6 +27,3 @@ class Failure(Message):
     kind: Literal["error"] = "error"
     type: str
     message: str
-
-
-RESPONSE = TypeAdapter(Annotated[Result | Failure, Field(discriminator="kind")])

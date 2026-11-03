@@ -380,48 +380,6 @@ class Configuration:
         self.snapshot, self.candidate = snapshot, preview.candidate
         return snapshot
 
-    async def import_defaults(self, payload: Mapping[str, object]) -> ConfigSnapshot:
-        """Import a chosen package's combination, keeping saved parameters and choices."""
-        document = ConfigDocument.model_validate(payload)
-        snapshot = await self.store.read()
-        if snapshot is None:
-            return await self.commit(payload, expected_revision=None)
-        current = ConfigDocument.model_validate(snapshot.payload)
-        packages = list(current.contribs)
-        selected = {entry.entry for package in packages for entry in package.enabled}
-        defaults = ConfigDocument.model_validate(self.defaults)
-        shared = {
-            entry.entry for package in defaults.contribs for entry in package.enabled
-        }
-        for package in document.contribs:
-            entries = tuple(
-                entry
-                for entry in package.enabled
-                if entry.entry not in selected and entry.entry not in shared
-            )
-            if package.enabled and not entries:
-                continue
-            index = next(
-                (
-                    index
-                    for index, item in enumerate(packages)
-                    if package.package and item.distribution == package.distribution
-                ),
-                None,
-            )
-            if index is None:
-                packages.append(package.model_copy(update={"enabled": entries}))
-            else:
-                packages[index] = packages[index].model_copy(
-                    update={"enabled": (*packages[index].enabled, *entries)}
-                )
-            selected.update(entry.entry for entry in entries)
-        candidate = current.model_copy(update={"contribs": tuple(packages)})
-        return await self.commit(
-            candidate.model_dump(mode="json", exclude_none=True),
-            expected_revision=snapshot.revision,
-        )
-
 
 CONFIGURATION = ServiceKey[Configuration]("config.configuration")
 remote = RemoteEntry(

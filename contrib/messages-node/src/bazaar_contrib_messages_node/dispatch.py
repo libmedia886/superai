@@ -296,10 +296,6 @@ class CommandDispatcher:
         except ValueError as error:
             raise CommandDispatchError("SESSION_NOT_FOUND", str(error)) from error
 
-    @property
-    def accepting(self) -> bool:
-        return self._state is _State.ACCEPTING
-
     def start_accepting(self) -> None:
         self._state = _State.ACCEPTING
         self._drained.clear()

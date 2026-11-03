@@ -106,9 +106,10 @@ async def test_module_dependencies_and_restart_upgrade_preserve_data_and_ledger(
             await database.insert(
                 Insert(table="labels", rows=({"note_id": 1, "label": "inbox"},))
             )
-            assert set(schema.modules) == {
-                "bazaar-contrib-schema",
-                "bazaar-contrib-storage",
+            owners = await database.select(Select(table="contrib_schema_tables"))
+            assert {row["name"]: row["package"] for row in owners} == {
+                "notes": "bazaar-contrib-schema",
+                "labels": "bazaar-contrib-storage",
             }
         ledger = await database.select(Select(table="contrib_schema_migrations"))
     upgraded = ModuleSchema(

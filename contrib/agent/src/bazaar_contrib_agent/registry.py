@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from uuid import UUID
@@ -45,13 +44,6 @@ class AgentInstances:
             UUID,
             tuple[Config, Mapping[str, ChannelBuilder], Mapping[str, HarnessBuilder]],
         ] = {}
-        self.applied = asyncio.Event()
-        self.error: Exception | None = None
-
-    async def wait_applied(self) -> None:
-        await self.applied.wait()
-        if self.error is not None:
-            raise self.error
 
     async def configure(
         self,
@@ -222,10 +214,4 @@ async def configured(ctx: Context, change: ContribChange) -> None:
     request = service.requests.pop(ctx.id, None)
     if request is None:
         return
-    try:
-        await service.configure(ctx, *request)
-    except Exception as error:
-        service.error = error
-        raise
-    finally:
-        service.applied.set()
+    await service.configure(ctx, *request)

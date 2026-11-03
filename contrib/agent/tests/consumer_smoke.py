@@ -17,12 +17,11 @@ from bazaar_core import (
     Contrib,
     ContribEntry,
     ContribSpec,
-    Running,
     ServiceKey,
     load,
 )
 from bcn_agent_journal import JOURNAL
-from bcn_agent_workbench import configured
+from bcn_agent_workbench import configured, started
 from blockbuster import blockbuster_ctx
 from custom_smoke import exercise as exercise_custom
 from provider_smoke import exercise as exercise_providers
@@ -30,10 +29,8 @@ from recovery_smoke import exercise as exercise_recovery
 
 from bazaar_contrib_agent import (
     AGENT,
-    AGENTS,
     Agent,
     AgentConfig,
-    AgentInstances,
     compose,
 )
 
@@ -41,13 +38,6 @@ REPORT = ServiceKey[AsyncTextIOWrapper]("example.shared-report")
 
 
 async def exercise(path: Path):
-    services: list[AgentInstances] = []
-
-    @asynccontextmanager
-    async def agents_ready(ctx: Context):
-        services.append(ctx.accept(AGENTS))
-        yield
-
     default = path / ".bcn" / "workspaces" / "Cloud"
     project = path / "project"
     await asyncio.to_thread(project.mkdir)
@@ -72,29 +62,12 @@ async def exercise(path: Path):
                 ContribSpec(contrib="agent", config=config),
             ],
         )
-
-        composition = composition.model_copy(
-            update={
-                "entries": (
-                    *composition.entries,
-                    ContribEntry(
-                        name="agents-ready",
-                        definition=Contrib(accepts=[AGENTS], lifespan=agents_ready),
-                    ),
-                )
-            }
-        )
         composition = await configured(path / "consumer.toml", composition)
         async with node(
             configer_options=(str(path / "consumer.toml"),),
             start=lambda _, composition=composition: composition,
         ) as hub:
-            await services[-1].wait_applied()
-            for name in ("Cloud", "Tifa"):
-                assert any(
-                    record.name == name and isinstance(record.state, Running)
-                    for record in hub.snapshots
-                )
+            await started(hub, ("Cloud", "Tifa"))
             assert await asyncio.to_thread(default.is_dir)
         assert "persistent project" in await asyncio.to_thread(
             (project / "notes.txt").read_text

@@ -3,16 +3,13 @@
 import asyncio
 import json
 import sys
-from contextlib import asynccontextmanager
 from pathlib import Path
 
 from bazaar_compute_node.boot import node
 from bazaar_contrib_audit import AUDIT_EVENT, AuditEvent
 from bazaar_core import Context, Contrib, ContribEntry, ContribSpec, load
-from bcn_agent_workbench import configured
+from bcn_agent_workbench import configured, started
 from blockbuster import blockbuster_ctx
-
-from bazaar_contrib_agent import AGENTS, AgentInstances
 
 
 async def run():
@@ -21,13 +18,6 @@ async def run():
     composition = await asyncio.to_thread(
         load, [ContribSpec.model_validate(item) for item in payload["contribs"]]
     )
-
-    services: list[AgentInstances] = []
-
-    @asynccontextmanager
-    async def observe(ctx: Context):
-        services.append(ctx.accept(AGENTS))
-        yield
 
     async def recorded(ctx: Context, event: AuditEvent):
         if event.event_name == "channel.inbound.persisted":
@@ -38,10 +28,6 @@ async def run():
             "entries": (
                 *composition.entries,
                 ContribEntry(
-                    name="application",
-                    definition=Contrib(accepts=[AGENTS], lifespan=observe),
-                ),
-                ContribEntry(
                     name="persisted", definition=Contrib(listen={AUDIT_EVENT: recorded})
                 ),
             )
@@ -50,8 +36,16 @@ async def run():
     composition = await configured(path.with_suffix(".toml"), composition)
     async with node(
         configer_options=(str(path.with_suffix(".toml")),), start=lambda _: composition
-    ):
-        await services[0].wait_applied()
+    ) as hub:
+        await started(
+            hub,
+            [
+                agent["name"]
+                for item in payload["contribs"]
+                if item["contrib"] == "agent"
+                for agent in item["config"]["agents"]
+            ],
+        )
         await asyncio.to_thread(print, json.dumps({"ready": True}), flush=True)
         await asyncio.to_thread(sys.stdin.readline)
 

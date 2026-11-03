@@ -7,13 +7,14 @@ import json
 import os
 import shutil
 import sqlite3
+from collections.abc import Callable, Collection
 from contextlib import AsyncExitStack, asynccontextmanager, closing
 from copy import deepcopy
 from importlib.metadata import version
 from pathlib import Path
 from time import time_ns
 from typing import Any, cast
-from uuid import uuid7
+from uuid import UUID, uuid7
 
 import aiofiles
 from bazaar_compute_node.boot import node
@@ -49,7 +50,9 @@ from bcn_agent_workbench import (
     Attachment,
     HarnessBuilderParameters,
     configured,
+    named,
     read_context_cache,
+    running,
 )
 from bcn_agent_workbench import ChannelMessage as InboundMessage
 from pydantic import TypeAdapter
@@ -724,14 +727,28 @@ async def exercise(path: Path):
             configer_options=(str(path / "config.toml"),), start=lambda _: Composition()
         ) as hub:
 
-            async def applied():
-                await registries[0].wait_applied()
+            async def applied(
+                done: Callable[[], bool], tolerated: Collection[UUID] = ()
+            ) -> None:
+                while True:
+                    ready.clear()
+                    if done():
+                        break
+                    failures = [
+                        record.state.error
+                        for record in hub.snapshots
+                        if isinstance(record.state, Failed)
+                        and record.id not in tolerated
+                    ]
+                    if failures:
+                        raise RuntimeError("; ".join(failures))
+                    await ready.wait()
                 for record in hub.snapshots:
                     assert isinstance(record.state, Running), record
 
             candidate = hub.validate(composition)
             async with hub.enable(candidate) as enabled:
-                await applied()
+                await applied(lambda: running(hub.snapshots, workspaces))
                 connected = {}
                 for name, workspace in workspaces.items():
                     peer = await connect(workspace / "channel.json", ready, hub)
@@ -818,7 +835,11 @@ async def exercise(path: Path):
                     }
                 )
                 await enabled.update(added)
-                await applied()
+                await applied(
+                    lambda: running(
+                        hub.snapshots, ["Cloud/channel:test-channel-secondary:0"]
+                    )
+                )
                 assert registries[0].running["Cloud"] is identity
                 secondary = await connect(
                     workspaces["Cloud"] / "secondary.json", ready, hub
@@ -865,7 +886,9 @@ async def exercise(path: Path):
                 await enabled.update(removed)
                 await report(secondary, drafts["Cloud"])
                 saved = await finish(primary, pending)
-                await applied()
+                await applied(
+                    lambda: not named(hub.snapshots, ["Cloud/channel:test-channel:0"])
+                )
                 reads = await asyncio.gather(
                     *(
                         asyncio.to_thread(item.read_text)
@@ -910,10 +933,21 @@ async def exercise(path: Path):
                         )
                     }
                 )
+                before = {record.id for record in hub.snapshots}
                 await enabled.update(revised)
                 await report(connected["Tifa"], drafts["Tifa"])
                 old = await finish(secondary, pending)
-                await applied()
+                await applied(
+                    lambda: (
+                        running(hub.snapshots, ["Cloud/harness:document:0"])
+                        and all(
+                            record.id not in before
+                            for record in named(
+                                hub.snapshots, ["Cloud/harness:document:0"]
+                            )
+                        )
+                    )
+                )
                 reads = await asyncio.gather(
                     *(
                         asyncio.to_thread(item.read_text)
@@ -999,7 +1033,11 @@ async def exercise(path: Path):
                     }
                 )
                 await enabled.update(idle_config)
-                await applied()
+                await applied(
+                    lambda: running(
+                        hub.snapshots, ["Idle", "Batch", "Context", "Failure"]
+                    )
+                )
                 idle = await connect(idle_workspace / "channel.json", ready, hub)
                 peers.push_async_callback(idle.aclose)
                 _, packet = await submit(idle, idle_draft)
@@ -1152,7 +1190,17 @@ async def exercise(path: Path):
                         }
                     )
                 )
-                await applied()
+                await applied(
+                    lambda: (
+                        not named(hub.snapshots, ["Failure"])
+                        and all(record.parent != provider for record in hub.snapshots)
+                    ),
+                    [
+                        record.id
+                        for record in hub.snapshots
+                        if record.parent == provider
+                    ],
+                )
                 assert await asyncio.to_thread(
                     (failure_workspace / "channel.closed").read_text
                 )
