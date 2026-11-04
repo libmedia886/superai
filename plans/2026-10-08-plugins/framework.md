@@ -2914,3 +2914,68 @@ manager、node-management、agent、config-versions 与 app 包 `scripts/ci.py c
 验证：sidecar、messages-node、reminder、agent、agent-command、schema、config 与 app 包 `scripts/ci.py check`、`test` 与 `package`
 （wheel 与 sdist）通过，仓库根目录 `uv run --quiet scripts/pyright_lsp_check.py .` 通过，PR 的三平台 CI 通过；
 contrib-legacy-node-migrations 的 PR CI 通过。
+
+## 按 extra 选择初始依赖（2026-11-03）
+
+按消息 `d7e335aa-0bd2-51cd-9a48-7105a1743a31`、`ff4a878c-5d2c-5263-b2c0-5697dfcdbc66`、`f9e751b2-aa5f-5f3f-a978-b871e40d583f`、
+`2dab00c2-856f-50a9-ab94-93f827354e7f` 与 `8629e214-e3c7-5bf4-b5e0-9f417e62e082`，节点进程只有一个 hub，server 是普通插件；
+安装时选择的 extra 只决定装哪些带默认配置的包，即初始依赖，几个 extra 可以并存：[node] 对应 agent 与 node 两部分，[server] 随 server 交付，
+只安装 [server] 时环境中不含 node 的包。按消息 `099c1130-2a64-5cfc-a823-198fe11bafff`、`8e052273-dd89-5132-a754-2337b0a4372d` 与
+`b846a422-6206-5210-aeea-15e1df1b345b`，extra 只装带着默认配置的包本身，每个包带着自己的默认配置，配置中的其余包不作为依赖，
+照旧由 manager 按默认配置同步；按消息 `a8c4b4e7-7fa5-5a52-8b44-75cc52eed735`，默认配置中的包不增不减。按消息
+`5869bdb3-226d-553a-ad84-609443bc1724`，插件只有一种入口。按消息 `57eef769-6d01-539c-9a89-90104c759c94`，一个带默认配置的包都没装时默认为 node。
+按消息 `741e9603-e1ac-5ac8-8254-1c472af91556`、`96e09aeb-f8a3-58d9-82a2-9c61a184e0fb` 与 `f18d0e13-5771-5d56-a0f1-f57ac55aee4b`，
+本体发行名改为 bazaar-compute，旧名 bazaar-compute-node 作为 bazaar-compute[node] 的别名，命令行仍为 bcn；声明默认 extra 的 PEP 771
+仍是草案，uv 不支持。按消息 `d7e335aa-0bd2-51cd-9a48-7105a1743a31`，节点自行升级保留安装时的选择。本节在 0.3.0 正式版之前完成；
+按消息 `40ac9a5f-d37e-5319-ac7e-2b49f86b387c` 与 `b5daa819-b426-5602-9739-aa04be5cd9ae`，两个 Task 在同一分支一并完成，完成后停下等待 review。
+
+### Task 38：本体改名为 bazaar-compute，旧名作为 [node] 的别名
+
+- app 的发行名改为 bazaar-compute。Python 模块 `bazaar_compute_node`、入口组 `bazaar_compute_node.contribs`、`bazaar_compute_node.commands`、
+  `bazaar_compute_node.remotes` 与命令 `bcn` 不变，插件无需修改。宿主版本一律取 bazaar-compute 的已装版本，包括 `bcn --version`、
+  node-health 心跳、NODE 的运行版本与 agent 的升级提示。
+- bazaar-compute 增加 extra `node`，只含带着 node 默认配置的 bazaar-contrib-node-management；默认配置中的其余包照旧由 manager
+  按默认配置补装。
+- 新增 workspace 成员 bazaar-compute-node：依赖 `bazaar-compute[node]==<同一版本>`，并声明同一个 `bcn` 命令指向
+  `bazaar_compute_node.cli:main`。uv tool 只链接所点名包自己声明的命令，别名不声明时 uv 拒绝安装；两个包声明同名命令可以共存，
+  运行的是本体代码（uv 0.13 实测）。构建配置为 `module-name = []` 与 `module-root = ""`：wheel 只含元数据，workspace 的可编辑安装
+  写入 sys.path 的是成员目录本身，解释器启动时不再提示路径不存在。
+- 发版时 prepare 把别名的精确依赖改写为发版版本；发布顺序为各插件、bazaar-compute、bazaar-compute-node，旧名的新版本出现在 PyPI 时
+  其依赖均已可装，0.2 节点经自身的升级命令安装旧名即得到 bazaar-compute[node]。PyPI 为 bazaar-compute 配好 trusted publisher 后，
+  才发布首个含本 Task 的版本。
+- 节点自行升级按 uv receipt 中的原始要求重装：receipt 为 bazaar-compute-node 时安装 `bazaar-compute-node==<版本>`，为 bazaar-compute 时
+  连同其 extras 安装 `bazaar-compute[<extras>]==<版本>`；`--refresh-package` 同时刷新 bazaar-compute 与 bazaar-compute-node。
+  最新可装版本与预检以同一要求解析。manager 的启动准备、add、remove 与 sync 以 bazaar-compute 作为宿主包。
+- 宿主经直接引用安装时（CI 与发版验收用本地构建的 wheel），manager 按该引用声明宿主，不再按版本向索引查找；
+  PyPI 上还没有 bazaar-compute 时，自举与包检查同样可用。
+
+验证：manager 的 installed_smoke 分别以 bazaar-compute-node 与 bazaar-compute[node] 两种方式 uv tool 安装，两种安装都提供 bcn
+并装有 node-management，首次启动后默认配置的包由 manager 装齐；经 NODE 升级后 receipt 保持原来的要求与 extras。删除节点正在用的
+配置载体 config-filesystem 被拒绝。app 与 manager 包 `scripts/ci.py check`、`test`
+与 `package` 通过，新成员的 wheel 与 sdist 通过包检查，仓库根目录 `uv run --quiet scripts/pyright_lsp_check.py .` 通过，PR 的三平台 CI 通过。
+
+### Task 39：默认配置随包提供，`bcn run` 移入本体
+
+- 新增入口组 `bazaar_compute_node.defaults`：带默认配置的包登记一个返回默认配置文档的函数。本体的 `boot.defaults()` 按入口名顺序合并
+  已装包的默认配置：`contrib_indexes` 取并集，同一个包只保留一个声明，已经启用的入口不重复启用。新建配置与启动输入都用这份合并结果，
+  本仓库测试读取默认配置时同样经它。
+- defaults.toml 从本体移入 node-management，登记为 `node`；本体不再带任何默认配置。
+- 一个带默认配置的包都没装时，本体像自举缺失的 config-filesystem 那样，先经 manager 装上 node-management，再读它的默认配置；
+  两个包都缺时在同一次自举中安装。
+- `bcn run` 由本体提供：本体把 run 作为自己的命令条目交给 invoke 的 CommandCatalog，与已启用插件的命令一同列出，插件声明同名命令时
+  按重复声明报错；选中 run 时本体把登记 run 的条目加入组合并作为根。启动后激活整个配置组合，打印插件表与 `bcn ready`，等待 RUN 的
+  停止事件；SIGTERM 与 NODE 的 `restart()` 置位该事件。按消息 `a0f9d0f6-74ac-5d0a-89bd-5bbdf8496dc6`，RUN 与 Run 移入
+  bazaar-contrib-invoke，由 invoke 的 `commands` 入口与 COMMANDS 一同提供，启用 `commands` 的组合都有 RUN；node-upgrade 与本体的
+  run 条目都 accept 它。插件表的行与 node-health 心跳共用 invoke 的 `contribs()`。
+  node-management 去掉 `node-management` 入口与 run 命令，保留 node-health 与 node-upgrade，不再用到的 click 与 bazaar-contrib-config
+  依赖一并去掉；默认配置与 V4→V5 转换不再启用 `node-management` 条目，默认配置中其余条目不变。
+- 外部仓库测试中读取本体 defaults.toml 的地方，在含本 Task 的 rc 发布后改为 `boot.defaults()`。
+
+验证：app 测试以测试夹具包登记第二份默认配置，新建的配置合并两份，共用的包只声明一次、共用的入口只启用一次；只装本体时首次运行装上
+node-management，新建的配置声明 node-management，测试中自举与同步向 PyPI 请求的包经 uv 的 `UV_OVERRIDE` 解析为本地构建。按消息
+`8fba6fbb-dacc-5918-a5b1-51caaf1783a7`，测试环境不混用 PyPI 上已发布的 node-management：manager 的 venv 与 tool 部署，以及拷入已有配置的
+新环境（tool 重装之后再装一次），先从测试索引装上 node-management，即 PyPI 已有这次发布时本体自举得到的环境；app 的包检查直接写入
+manager 的官方索引。node-management 的安装态用例
+经本体的 `bcn run` 照旧就绪、插件表列出 node-health、响应 SIGTERM 与 `restart()` 退出。node-management、config-versions、invoke、
+manager、agent、agent-command、collaboration、messages-node、reminder、schema 与 app 包 `scripts/ci.py check`、`test` 与 `package`
+通过，仓库根目录 pyright 通过，PR 的三平台 CI 通过。
