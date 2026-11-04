@@ -136,7 +136,6 @@ def migrate_v5(payload: Mapping[str, object]) -> ConfigCandidate:
     add("sidecar", "sidecar")
     transport = "sidecar-windows" if sys.platform == "win32" else "sidecar-unix"
     add(transport, transport, endpoint)
-    add("node-management", "node-management")
     add("node-health", "node-management")
     add("node-upgrade", "node-management")
     changes.extend(

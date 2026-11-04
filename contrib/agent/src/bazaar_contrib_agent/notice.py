@@ -57,7 +57,7 @@ def inbox_notice(
     rows.sort(key=lambda row: (-row[0], row[1]))
     return template("inbox_notice.tpl").render(
         {
-            "distribution": "bazaar-compute-node",
+            "distribution": "bazaar-compute",
             "total_unread_count": total_unread_count,
             "rows": [row[2] for row in rows],
             "upgrade_version": upgrade_version,

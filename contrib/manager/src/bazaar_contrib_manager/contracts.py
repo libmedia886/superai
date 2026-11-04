@@ -98,7 +98,15 @@ class EnvironmentInfo(BaseModel):
 class EnvironmentPlan(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     host: Package
+    host_url: str | None = None
     packages: tuple[ContribPackage, ...] = ()
+
+    @property
+    def host_requirement(self) -> str:
+        """The host as installed: from its direct reference, or by version from an index."""
+        if self.host_url is not None:
+            return f"{self.host.package} @ {self.host_url}"
+        return self.host.package + self.host.version
 
 
 class Operation(BaseModel):

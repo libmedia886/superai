@@ -1,4 +1,4 @@
-"""Exercise carrier bootstrap in a minimal, independently installed app."""
+"""Exercise carrier and defaults bootstrap in a minimal, independently installed app."""
 
 from __future__ import annotations
 
@@ -15,8 +15,9 @@ import tomli_w
 from bazaar_contrib_config import CONFIGURATION, Configuration
 from bazaar_core import Composition, Context, Contrib, ContribEntry, discover
 from blockbuster import blockbuster_ctx
+from packaging.requirements import Requirement
 
-from bazaar_compute_node.boot import node
+from bazaar_compute_node.boot import build, node
 
 
 async def read(options: dict[str, Any]) -> dict[str, Any]:
@@ -102,6 +103,20 @@ async def exercise(path: Path, mode: str) -> None:
             assert index in candidate["contrib_indexes"]
         finally:
             os.environ["PATH"] = original
+        if mode == "default":
+            fresh = path / "fresh.toml"
+            async with node(
+                configer_options=(str(fresh),),
+                start=lambda document: build(document).model_copy(update={"roots": ()}),
+            ):
+                pass
+            created = tomllib.loads(await asyncio.to_thread(fresh.read_text))
+            assert any(
+                Requirement(package["package"]).name == "bazaar-contrib-node-management"
+                for package in created["contribs"]
+            )
+            installed = await asyncio.to_thread(discover)
+            assert any(source.name == "node-health" for source in installed)
     await asyncio.to_thread(
         print, f"Minimal app carrier bootstrap passed: {mode}", flush=True
     )

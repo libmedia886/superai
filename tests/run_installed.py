@@ -5,13 +5,12 @@ import json
 import os
 import subprocess
 import sys
-import tomllib
 from importlib.metadata import PackageNotFoundError, distribution
-from importlib.resources import files
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import tomli_w
+from bazaar_compute_node.boot import defaults
 from packaging.requirements import Requirement
 from packaging.utils import (
     canonicalize_name,
@@ -38,9 +37,7 @@ for name, distributions in packages.items():
         )
     )
 source = (artifacts / "simple").as_uri()
-document = tomllib.loads(
-    files("bazaar_compute_node").joinpath("defaults.toml").read_text()
-)
+document = defaults()
 for package in document["contribs"]:
     package["source"] = (
         source
@@ -51,7 +48,7 @@ for package in document["contribs"]:
         if entry["entry"] == "contrib-manager":
             entry["config"] = {"host_source": source}
 defaults = {Requirement(package["package"]).name for package in document["contribs"]}
-for name in packages.keys() - defaults - {"bazaar-compute-node", "bazaar-core"}:
+for name in packages.keys() - defaults - {"bazaar-compute", "bazaar-core"}:
     direct = distribution(name).read_text("direct_url.json")
     assert direct is not None
     artifact = json.loads(direct)["url"]

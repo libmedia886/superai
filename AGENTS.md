@@ -34,13 +34,14 @@
 项目在独立 workspace 成员中开发；各成员拥有自己的发行元数据、源码、资源与验证。
 
 ```text
-app/                            # bazaar-compute-node：CLI、启动输入、自举依赖与默认组合
-└── src/bazaar_compute_node/     # 应用入口、自举声明、默认组合与通用命令分派
+app/                            # bazaar-compute：CLI、启动输入、自举依赖与 bcn run
+└── src/bazaar_compute_node/     # 应用入口、自举声明、默认配置合并与通用命令分派
+alias/                          # bazaar-compute-node：旧名，安装 bazaar-compute[node]
 core/                           # bazaar-core：通用 contrib 运行内核
 └── src/bazaar_core/             # 入口发现、声明校验、服务与事件绑定、依赖图和生命周期
 contrib/                        # 各功能的独立发行包
 ├── manager/build.py           # 从共享锁生成随 manager 发行的官方模块索引
-├── node-management/            # run 命令、配置激活与退出信号等待
+├── node-management/            # node 的默认配置、健康心跳与本体升级
 └── ...
 scripts/                        # workspace 发现、逐包检查、构建与 CI 工具
 plans/                          # 已讨论的设计、任务顺序与交付要求
@@ -59,7 +60,7 @@ contrib → core + 所需功能的公共契约包
 
 - core 只处理通用定义、配置模型、typed key、绑定、依赖与生命周期；业务类型、配置字段和功能分支归所属 contrib。
   后续功能先通过已有公共框架装配；需要改 core 时，核对现有接口无法表达的通用能力及已讨论设计。
-- app 提供启动输入、自举依赖和默认组合，调用功能服务；功能模块的业务规则、资源、命令契约和配置归其拥有者。
+- app 提供启动输入、自举依赖和 `bcn run`，合并已装包各自的默认配置，调用功能服务；功能模块的业务规则、资源、命令契约和配置归其拥有者。
 - contrib 自持实现、第三方依赖与资源，通过声明的服务和事件协作；公共契约归功能包，contrib 不导入 app 或访问 Hub 的内部实例记录。
 - 配置载体负责文档存储，版本包负责转换，配置服务负责候选校验、保存和更新请求；manager 消费 CONFIGURATION，
   分别记录包安装、配置保存与运行应用结果，通过公共服务完成操作。

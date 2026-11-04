@@ -380,6 +380,9 @@ def configured_files(root: Path, config: JsonObject) -> list[Path]:
         isinstance(item, str) for item in include
     ):
         raise LspError("Pyright include must be a list of paths")
+    if not include:
+        # A package without Python sources, such as an alias, opts out explicitly.
+        return []
 
     files: set[Path] = set()
     for pattern in include:
@@ -524,6 +527,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         missing: set[str] = set()
         for member in members:
             selected = configured_files(member.path, load_config(member.path))
+            if not selected:
+                continue
             server = PyrightLanguageServer(args.server, member.path, args.timeout)
             try:
                 server.initialize()

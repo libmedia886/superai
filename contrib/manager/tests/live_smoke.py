@@ -11,7 +11,7 @@ from importlib.resources import files
 from pathlib import Path
 
 import tomli_w
-from bazaar_compute_node.boot import node
+from bazaar_compute_node.boot import defaults, node
 from bazaar_contrib_config import ConfigDocument, Configuration
 from packaging.requirements import Requirement
 
@@ -52,11 +52,7 @@ async def running(config: Path):
 async def exercise(path: Path, source: str):
     config = path / "live.toml"
     journal = path / "live.txt"
-    payload = tomllib.loads(
-        await asyncio.to_thread(
-            files("bazaar_compute_node").joinpath("defaults.toml").read_text
-        )
-    )
+    payload = await asyncio.to_thread(defaults)
     catalog = path / "live-catalog.json"
     await asyncio.to_thread(
         catalog.write_text,

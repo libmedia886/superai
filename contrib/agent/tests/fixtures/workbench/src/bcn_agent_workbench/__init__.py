@@ -10,11 +10,9 @@ import json
 import os
 import sys
 import threading
-import tomllib
 from collections.abc import AsyncGenerator, AsyncIterator, Collection, Iterable
 from contextlib import aclosing, asynccontextmanager
 from functools import partial
-from importlib.resources import files
 from pathlib import Path
 from time import time_ns
 from typing import Any, ClassVar, Literal, cast
@@ -99,13 +97,9 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 async def configured(path: Path, composition: Composition) -> Composition:
     """Configure the packaged defaults and add this consumer's public entries."""
-    from bazaar_compute_node.boot import build
+    from bazaar_compute_node.boot import build, defaults
 
-    document = tomllib.loads(
-        await asyncio.to_thread(
-            files("bazaar_compute_node").joinpath("defaults.toml").read_text
-        )
-    )
+    document = await asyncio.to_thread(defaults)
     entries = {entry.name: entry for entry in composition.entries}
     for package in document["contribs"]:
         for entry in package["enabled"]:

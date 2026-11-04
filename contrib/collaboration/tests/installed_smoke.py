@@ -7,17 +7,15 @@ import json
 import os
 import sqlite3
 import sys
-import tomllib
 from contextlib import asynccontextmanager, closing
 from importlib.metadata import distribution
-from importlib.resources import files
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, cast
 from uuid import uuid7
 
 import tomli_w
-from bazaar_compute_node.boot import build
+from bazaar_compute_node.boot import build, defaults
 from bazaar_compute_node.boot import node as application
 from bazaar_contrib_config import ConfigDocument
 from bazaar_contrib_sidecar import CLIENT, Client
@@ -214,11 +212,7 @@ async def exercise(directory: Path):
     assert any(".dist-info/licenses/" in str(file) for file in installed.files or ())
     os.environ["BCN_HOME"] = str(directory)
     config = directory / "config.toml"
-    payload = tomllib.loads(
-        await asyncio.to_thread(
-            files("bazaar_compute_node").joinpath("defaults.toml").read_text
-        )
-    )
+    payload = await asyncio.to_thread(defaults)
     payload["contribs"].append(
         {
             "enabled": [

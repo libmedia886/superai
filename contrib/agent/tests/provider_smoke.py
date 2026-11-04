@@ -358,8 +358,8 @@ async def attachment_download(
     )
     output, _ = await process.communicate()
     assert process.returncode == 0, output.decode()
-    installed = await asyncio.to_thread(version, "bazaar-compute-node")
-    assert f"running bazaar-compute-node {installed}." in output.decode()
+    installed = await asyncio.to_thread(version, "bazaar-compute")
+    assert f"running bazaar-compute {installed}." in output.decode()
 
     await peer.write({"release_attachment": "companion-note"})
     await peer.write({"release_attachment": "earlier-appendix"})

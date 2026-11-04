@@ -2,7 +2,7 @@
 name = "bcn-example-contribs"
 version = "0.1.0"
 requires-python = ">=3.15"
-dependencies = ["bazaar-compute-node~=0.3.0rc1", "bazaar-contrib-agent~=0.3.0rc1", "aiofiles>=25.1.0", "aiosqlite>=0.20.0"]
+dependencies = ["bazaar-compute~=0.3.0rc1", "bazaar-contrib-agent~=0.3.0rc1", "aiofiles>=25.1.0", "aiosqlite>=0.20.0"]
 
 [project.entry-points."bazaar_compute_node.contribs"]
 example-command-registry = "bazaar_contrib_invoke:commands"
@@ -18,6 +18,9 @@ example-broken = "bcn_example_missing:definition"
 example-node-database = "bcn_example_contribs.databases:node_database"
 example-node-records = "bcn_example_contribs.databases:node_records"
 example-server = "bcn_example_contribs.databases:server"
+
+[project.entry-points."bazaar_compute_node.defaults"]
+example = "bcn_example_contribs:defaults"
 
 [build-system]
 requires = ["uv_build>=0.13.0,<0.14.0"]

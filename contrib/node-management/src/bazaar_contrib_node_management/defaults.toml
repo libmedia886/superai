@@ -47,8 +47,6 @@ entry = "commands"
 [[contribs]]
 package = "bazaar-contrib-node-management~=0.3.0rc1"
 [[contribs.enabled]]
-entry = "node-management"
-[[contribs.enabled]]
 entry = "node-health"
 [[contribs.enabled]]
 entry = "node-upgrade"

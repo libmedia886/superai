@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import tomli_w
-from bazaar_compute_node.boot import build, node
+from bazaar_compute_node.boot import build, defaults, node
 from bazaar_contrib_config import ConfigDocument
 from bazaar_contrib_sidecar import CLIENT, Client
 from bazaar_core import (
@@ -84,11 +84,7 @@ async def exercise(path: Path, source: str, tests: Path):
             if entry["entry"] == "agent"
         )
 
-    payload = tomllib.loads(
-        await asyncio.to_thread(
-            files("bazaar_compute_node").joinpath("defaults.toml").read_text
-        )
-    )
+    payload = await asyncio.to_thread(defaults)
     official = json.loads(
         await asyncio.to_thread(
             files("bazaar_contrib_manager").joinpath("catalog.json").read_text

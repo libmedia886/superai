@@ -34,7 +34,7 @@ async def test_installed_node_uses_files_and_a_persistent_remote_carrier(
             "bazaar-contrib-reminder",
             "bazaar-contrib-node-management",
             "bazaar-contrib-sidecar",
-            "bazaar-compute-node",
+            "bazaar-compute",
         ):
             subprocess.run(
                 [
@@ -74,6 +74,13 @@ async def test_installed_node_uses_files_and_a_persistent_remote_carrier(
                 )
             )
         source = (artifacts / "simple").as_uri()
+        # The host bootstraps from PyPI, where these builds are not published yet.
+        overrides = artifacts / "overrides.txt"
+        overrides.write_text(
+            "".join(
+                f"{name} @ {wheels[0].as_uri()}\n" for name, wheels in packages.items()
+            )
+        )
         for mode in ("default", "explicit", "custom"):
             directory = tmp_path / mode
             directory.mkdir()
@@ -94,7 +101,7 @@ async def test_installed_node_uses_files_and_a_persistent_remote_carrier(
                     "--prerelease",
                     "allow",
                     "blockbuster>=1.5.29,<1.6",
-                    str(packages["bazaar-compute-node"][0]),
+                    str(packages["bazaar-compute"][0]),
                     *(
                         [str(packages["bcn-example-contribs"][0])]
                         if mode == "custom"
@@ -111,7 +118,11 @@ async def test_installed_node_uses_files_and_a_persistent_remote_carrier(
                     mode,
                 ],
                 cwd=directory,
-                env={**os.environ, "BCN_HOME": str(directory)},
+                env={
+                    **os.environ,
+                    "BCN_HOME": str(directory),
+                    "UV_OVERRIDE": str(overrides),
+                },
                 check=True,
             )
         environment = tmp_path / "environment"
