@@ -2995,3 +2995,21 @@ Fedora 系统自带的 Python 建出的环境，把同一个 site-packages 以 l
 验证：manager 安装态用例的 venv 部署在 POSIX 上照 Fedora 的布局，把 lib64 下的 site-packages 再加入 sys.path 一次，原有流程中的
 `bcn contrib show`、移除与升级照常通过。manager 包 `scripts/ci.py check`、`test` 与 `package` 通过，仓库根目录 pyright 通过，
 PR 的三平台 CI 通过。
+
+## 删除 0.2 的节点代码并按 0.3 重写 README（2026-11-04）
+
+按消息 `67e1c292-3c8e-5654-827a-da49e4790754`、`c8961a83-daad-5e61-a824-97400c78f615` 与 `105d541e-08d5-5c9f-af29-45f4c2a7851a`，删除仓库中 0.2 的节点代码，server 部分保留到 server 开发完成后再删；README 按 0.3 重写，插件开发文档暂不写。
+
+### Task 41：删除 0.2 的节点代码
+
+- 删除 `src/bazaar_compute_node/`（222 个文件），以及根目录 tests 中只属于节点的部分：`tests/app`、`tests/core`、`tests/contrib`，`tests/e2e` 中除 `test_images.py` 以外的 8 个文件，`tests/package_smoke.py`、`tests/test_bcc.py`、`tests/test_bcc_help.py`、`tests/test_bcc_reminder.py`、`tests/test_cli.py`、`tests/test_i18n.py` 与 `tests/test_support.py`。`.gitattributes` 中指向 `src/bazaar_compute_node/resources` 的一行一并删除。
+- 保留 `src/bazaar_compute_server/`、`tests/server/`、`tests/e2e/test_images.py`、根目录 `tests/conftest.py` 与 `tests/support/`。server 源码不导入节点包；`tests/server` 中 11 个文件与 `tests/support` 的 `bcn_test_support` 导入节点包，删除后不再能运行，作为 server 移植的对照保留。`tests/support` 中的 `bcn_pytest` 插件把 BCN_HOME 指向临时目录，0.3 各包的测试依赖它，保持不变；`tests/run_installed.py` 属于 0.3，保持不变。
+- AGENTS.md 第 18 条中「原 src 中已发布迁移脚本保留为只读验收对照」改为指向 `src/bazaar_compute_server` 中的迁移脚本，节点的 0.2 迁移以 v0.2.3 标签为准。
+
+验证：0.3 的成员、脚本与 CI 配置不引用被删除的路径；全部成员 `scripts/ci.py check` 与 `test` 通过，其中 node-management 与 schema 的安装态用例照旧构建 `tests/support`；仓库根目录 `uv run --quiet scripts/pyright_lsp_check.py .` 通过，PR 的三平台 CI 通过。
+
+### Task 42：README 按 0.3 重写
+
+- 根目录 README 换成讨论中定稿的 0.3 内容。app 与别名包的 README 是指向它的软链接，PyPI 上的项目说明随下次发版更新。
+
+验证：README 中的安装与 contrib 命令在 0.3 中可用；app 与别名包 `scripts/ci.py package` 通过。
