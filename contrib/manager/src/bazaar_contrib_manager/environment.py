@@ -17,8 +17,13 @@ lazy from .contracts import EntryInfo, EnvironmentInfo, InstalledPackage
 
 def inspect(*, definitions: bool = True) -> EnvironmentInfo:
     invalidate_caches()
-    packages: list[InstalledPackage] = []
+    packages: dict[str, InstalledPackage] = {}
     for distribution in distributions():
+        name = str(canonicalize_name(distribution.metadata["Name"]))
+        # A site-packages reached through two sys.path entries, as Fedora's lib64
+        # and lib are, lists each distribution twice; imports use the first.
+        if name in packages:
+            continue
         entries: list[EntryInfo] = []
         for point in distribution.entry_points:
             if point.group != CONTRIB_GROUP:
@@ -46,23 +51,21 @@ def inspect(*, definitions: bool = True) -> EnvironmentInfo:
                     EntryInfo(name=point.name, value=point.value, error=str(error))
                 )
                 continue
-        packages.append(
-            InstalledPackage(
-                package=str(canonicalize_name(distribution.metadata["Name"])),
-                version=distribution.version,
-                summary=distribution.metadata.get("Summary", ""),
-                url=json.loads(distribution.read_text("direct_url.json") or "{}").get(
-                    "url"
-                ),
-                entries=tuple(entries),
-                requirements=tuple(distribution.requires or ()),
-            )
+        packages[name] = InstalledPackage(
+            package=name,
+            version=distribution.version,
+            summary=distribution.metadata.get("Summary", ""),
+            url=json.loads(distribution.read_text("direct_url.json") or "{}").get(
+                "url"
+            ),
+            entries=tuple(entries),
+            requirements=tuple(distribution.requires or ()),
         )
     return EnvironmentInfo(
         prefix=Path(sys.prefix),
         python=Path(sys.executable),
         base_python=Path(getattr(sys, "_base_executable", sys.executable)),
-        packages=tuple(packages),
+        packages=tuple(packages.values()),
     )
 
 

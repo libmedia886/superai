@@ -249,6 +249,15 @@ async def test_real_installed_manager(
                 ["uv", "venv", "--python", "3.15", str(prefix)],
                 check=True,
             )
+            if os.name != "nt":
+                # Fedora's system Python reaches the same site-packages through lib64 and lib.
+                site = next((prefix / "lib").glob("python3.*/site-packages"))
+                lib64 = prefix / "lib64"
+                if not lib64.exists():
+                    lib64.symlink_to("lib")
+                (site / "lib64.pth").write_text(
+                    f"{lib64 / site.relative_to(prefix / 'lib')}\n"
+                )
             command = [
                 "uv",
                 "pip",
