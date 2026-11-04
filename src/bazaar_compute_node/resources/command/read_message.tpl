@@ -1,1 +1,0 @@
-[{{ index }}/{{ count }} seq={{ seq }} msg={{ message_id }} time={{ timestamp }} type={{ sender_kind }} replyTarget={{ target }}{% if reply_to_message_id is not none %} replyTo={{ reply_to_message_id }}{% endif %}] {% if sender is not none %}{{ sender }}: {% endif %}{{ body }}{{ attachment_suffix }}{{ "" -}}
