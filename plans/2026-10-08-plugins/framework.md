@@ -2979,3 +2979,19 @@ manager 的官方索引。node-management 的安装态用例
 经本体的 `bcn run` 照旧就绪、插件表列出 node-health、响应 SIGTERM 与 `restart()` 退出。node-management、config-versions、invoke、
 manager、agent、agent-command、collaboration、messages-node、reminder、schema 与 app 包 `scripts/ci.py check`、`test` 与 `package`
 通过，仓库根目录 pyright 通过，PR 的三平台 CI 通过。
+
+## 已装包按包名去重（2026-11-04）
+
+Fedora 系统自带的 Python 建出的环境，把同一个 site-packages 以 lib64 与 lib 两个路径各放进一次 sys.path，
+`importlib.metadata.distributions()` 因而把每个发行包返回两次（这台机器上正式节点的工具环境即是此布局）。manager 的已装包清单随之重复，
+`bcn contrib show` 等按名字选择已装包的命令报「select one installed package」。按消息 `e6a23249-9ee9-5e03-b89e-596e7df7580d`
+修这里的去重。
+
+### Task 40：manager 列已装包时按包名去重
+
+- manager 的 `environment.inspect()` 按规范化后的包名去重：同名发行包只保留 sys.path 中先出现的那份，与导入时实际生效的一致，
+  重复的那份不再读取入口。
+
+验证：manager 安装态用例的 venv 部署在 POSIX 上照 Fedora 的布局，把 lib64 下的 site-packages 再加入 sys.path 一次，原有流程中的
+`bcn contrib show`、移除与升级照常通过。manager 包 `scripts/ci.py check`、`test` 与 `package` 通过，仓库根目录 pyright 通过，
+PR 的三平台 CI 通过。
