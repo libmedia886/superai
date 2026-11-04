@@ -19,6 +19,9 @@ example-node-database = "bcn_example_contribs.databases:node_database"
 example-node-records = "bcn_example_contribs.databases:node_records"
 example-server = "bcn_example_contribs.databases:server"
 
+[project.entry-points."bazaar_compute_node.defaults"]
+example = "bcn_example_contribs:defaults"
+
 [build-system]
 requires = ["uv_build>=0.13.0,<0.14.0"]
 build-backend = "uv_build"

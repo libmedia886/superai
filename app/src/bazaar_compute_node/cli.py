@@ -2,14 +2,65 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 lazy import asyncio
+lazy import signal
+lazy import sys
 lazy from collections.abc import Sequence
 
 import click
-from bazaar_contrib_config import ConfigDocument, Configuration
-from bazaar_contrib_invoke import COMMANDS, CommandCatalog, Commands
+from bazaar_contrib_config import CONFIGURATION, ConfigDocument, Configuration
+from bazaar_contrib_invoke import (
+    COMMANDS,
+    RUN,
+    CommandCatalog,
+    CommandEntry,
+    Commands,
+    Run,
+    contribs,
+    table,
+)
 from bazaar_core import Composition, Context, Contrib, ContribEntry
 
 lazy from .boot import build, node
+
+
+async def serve(ctx: Context, configuration: Configuration, run: Run) -> None:
+    loop = asyncio.get_running_loop()
+    if sys.platform != "win32":
+        loop.add_signal_handler(signal.SIGTERM, run.stopped.set)
+    try:
+        await configuration.activate()
+        await asyncio.to_thread(
+            click.echo,
+            table(contribs(ctx.snapshots), ("Contrib", "State", "Result")),
+        )
+        await asyncio.to_thread(click.echo, "bcn ready")
+        await run.stopped.wait()
+    finally:
+        if sys.platform != "win32":
+            loop.remove_signal_handler(signal.SIGTERM)
+
+
+@asynccontextmanager
+async def lifespan(ctx: Context):
+    commands = ctx.accept(COMMANDS)
+    configuration = ctx.accept(CONFIGURATION)
+    serving = ctx.accept(RUN)
+
+    @click.command("run", help=command_entry.help, short_help=command_entry.help)
+    def run():
+        return serve(ctx, configuration, serving)
+
+    with commands.register(run):
+        yield
+
+
+command_entry = CommandEntry(
+    contrib="run", help="Run the node, serving until it is stopped."
+)
+running = ContribEntry(
+    name=command_entry.contrib,
+    definition=Contrib(accepts=[COMMANDS, CONFIGURATION, RUN], lifespan=lifespan),
+)
 
 
 async def dispatch(
@@ -33,16 +84,22 @@ async def dispatch(
                     for entry in package.enabled
                 ),
             ),
+            entries={"run": command_entry},
             help=main.help,
             params=main.params,
         )
+        composition = build(document)
         try:
             entry = catalog.select(args, prog_name=prog_name)
+            if entry is command_entry:
+                composition = composition.model_copy(
+                    update={"entries": (*composition.entries, running)}
+                )
             if entry is not None:
                 roots.append(entry.contrib)
         except (click.ClickException, click.exceptions.Exit, click.Abort) as error:
             failures.append(error)
-        return build(document).model_copy(update={"roots": tuple(roots)})
+        return composition.model_copy(update={"roots": tuple(roots)})
 
     @asynccontextmanager
     async def observe(ctx: Context):

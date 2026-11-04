@@ -15,7 +15,7 @@ from importlib.resources import files
 from pathlib import Path
 
 import tomli_w
-from bazaar_compute_node.boot import build, node
+from bazaar_compute_node.boot import build, defaults, node
 from bazaar_contrib_config import ConfigDocument
 from bazaar_contrib_sidecar import CLIENT, Client
 from bazaar_core import Composition, Context, Contrib, ContribEntry
@@ -44,15 +44,11 @@ def installed(payload: dict) -> None:
 
 async def exercise(path: Path, source: str, releases: Path) -> None:
     before = await asyncio.to_thread(requested)
-    # The extra brings the node hub; the manager installs the rest from its defaults.
+    # The extra brings the node's defaults; the manager installs the rest they declare.
     await asyncio.to_thread(distribution, "bazaar-contrib-node-management")
 
     config = path / "config.toml"
-    payload = tomllib.loads(
-        await asyncio.to_thread(
-            files("bazaar_compute_node").joinpath("defaults.toml").read_text
-        )
-    )
+    payload = await asyncio.to_thread(defaults)
     official = json.loads(
         await asyncio.to_thread(
             files("bazaar_contrib_manager").joinpath("catalog.json").read_text

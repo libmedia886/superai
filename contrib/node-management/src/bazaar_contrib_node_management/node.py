@@ -10,6 +10,7 @@ lazy from pathlib import Path
 
 from bazaar_core import ServiceKey
 lazy from bazaar_contrib_audit import Audit, AuditContext, AuditError
+lazy from bazaar_contrib_invoke import Run
 lazy from bazaar_contrib_manager import ContribManager, ManagementError, Operation
 lazy from pydantic import JsonValue
 
@@ -29,13 +30,6 @@ def foreground() -> bool:
         os.path.normcase(Path(entry["install-path"]).resolve()) == running
         for entry in tomllib.loads(receipt.read_text("utf-8"))["tool"]["entrypoints"]
     )
-
-
-class Run:
-    """The `bcn run` this process serves until it is stopped."""
-
-    def __init__(self) -> None:
-        self.stopped = asyncio.Event()
 
 
 class Node:
@@ -108,5 +102,4 @@ class Node:
         )
 
 
-RUN = ServiceKey[Run]("node.run")
 NODE = ServiceKey[Node]("node")

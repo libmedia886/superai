@@ -10,6 +10,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 lazy import json
 lazy import signal
+lazy import tomllib
 lazy from contextlib import asynccontextmanager
 lazy from uuid import uuid7
 
@@ -35,6 +36,7 @@ from bcn_example_contribs import RemoteConfig, RemoteStore
 from bcn_example_contribs.center import ConfigCenter
 from bcn_example_contribs.databases import RECORDS, Records
 from blockbuster import blockbuster_ctx
+from packaging.requirements import Requirement
 lazy import aiosqlite
 lazy import tomli_w
 
@@ -170,6 +172,17 @@ async def exercise_server(path: Path) -> None:
 async def exercise(path: Path) -> None:
     async with node(configer_options=(str(path / "defaults.toml"),)):
         pass
+    created = tomllib.loads(await asyncio.to_thread((path / "defaults.toml").read_text))
+    names = [Requirement(package["package"]).name for package in created["contribs"]]
+    assert {"bcn-example-contribs", "bazaar-contrib-node-management"} <= set(names)
+    assert len(names) == len(set(names))
+    enabled = [
+        entry["entry"]
+        for package in created["contribs"]
+        for entry in package.get("enabled", ())
+    ]
+    assert enabled.count("status") == 1
+    assert "https://example.com/contribs.json" in created["contrib_indexes"]
     await exercise_server(path)
     config = path / "config.toml"
     directory = path / "journals"
@@ -399,7 +412,6 @@ async def exercise(path: Path) -> None:
                     "contribs": [
                         {"enabled": [{"entry": "status"}]},
                         {"enabled": [{"entry": "example-command-registry"}]},
-                        {"enabled": [{"entry": "node-management"}]},
                         {
                             "enabled": [
                                 {

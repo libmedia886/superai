@@ -264,18 +264,36 @@ async def test_real_installed_manager(
             ]
         try:
             subprocess.run(command, env=environment, check=True)
+            python = subprocess.run(
+                ["uv", "python", "find", "--no-project", str(prefix)],
+                env=environment,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            if deployment in ("venv", "tool"):
+                # As the first run of a host installed alone leaves it.
+                subprocess.run(
+                    [
+                        "uv",
+                        "pip",
+                        "install",
+                        "--python",
+                        python,
+                        "--index",
+                        source,
+                        "--prerelease",
+                        "allow",
+                        "bazaar-contrib-node-management~=0.3.0rc1",
+                    ],
+                    env=environment,
+                    check=True,
+                )
         except BaseException:
             server.shutdown()
             server.server_close()
             thread.join()
             raise
-        python = subprocess.run(
-            ["uv", "python", "find", "--no-project", str(prefix)],
-            env=environment,
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
         return python, environment, source, other, server, thread
 
     python, environment, source, other, server, thread = await asyncio.to_thread(setup)

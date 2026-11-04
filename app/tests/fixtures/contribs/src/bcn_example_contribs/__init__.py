@@ -219,3 +219,21 @@ preparation = Contrib(
     lifespan=directory_lifespan,
     listen={CONFIG_PREPARE: prepare},
 )
+
+
+def defaults() -> dict[str, Any]:
+    """A second default configuration, sharing a package with the node's."""
+    return {
+        "version": "5",
+        "contrib_indexes": [
+            "resource://bazaar_contrib_manager/catalog.json",
+            "https://example.com/contribs.json",
+        ],
+        "contribs": [
+            {"package": "bcn-example-contribs"},
+            {
+                "package": "bazaar-contrib-status~=0.3.0rc1",
+                "enabled": [{"entry": "status"}],
+            },
+        ],
+    }

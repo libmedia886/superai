@@ -395,26 +395,22 @@ version = "0.3.0rc16"
 source = { editable = "contrib/node-management" }
 dependencies = [
     { name = "bazaar-contrib-audit" },
-    { name = "bazaar-contrib-config" },
     { name = "bazaar-contrib-invoke" },
     { name = "bazaar-contrib-manager" },
     { name = "bazaar-contrib-sidecar" },
     { name = "bazaar-contrib-timer" },
     { name = "bazaar-core" },
-    { name = "click" },
     { name = "packaging" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "bazaar-contrib-audit", editable = "contrib/audit" },
-    { name = "bazaar-contrib-config", editable = "contrib/config" },
     { name = "bazaar-contrib-invoke", editable = "contrib/invoke" },
     { name = "bazaar-contrib-manager", editable = "contrib/manager" },
     { name = "bazaar-contrib-sidecar", editable = "contrib/sidecar" },
     { name = "bazaar-contrib-timer", editable = "contrib/timer" },
     { name = "bazaar-core", editable = "core" },
-    { name = "click", specifier = ">=8.1.0" },
     { name = "packaging", specifier = ">=26.0" },
 ]
 

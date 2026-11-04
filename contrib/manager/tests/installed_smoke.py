@@ -18,7 +18,7 @@ lazy from uuid import uuid4
 
 import tomli_w
 from bazaar_compute_node import run
-from bazaar_compute_node.boot import bootstrap, build, node
+from bazaar_compute_node.boot import bootstrap, build, defaults, node
 from bazaar_contrib_config import ConfigDocument, ContribPackage, EnabledContrib
 from bazaar_contrib_invoke import COMMANDS
 from bazaar_contrib_sidecar import CLIENT, Client, RemoteError
@@ -84,11 +84,7 @@ async def exercise(path: Path, source: str, other_source: str, releases: Path) -
     config = path / "config.toml"
     options: dict[str, Any] = {"configer_options": (str(config),)}
     tool = Path(os.environ["UV_TOOL_DIR"]) / "bazaar-compute" == Path(sys.prefix)
-    payload = tomllib.loads(
-        await asyncio.to_thread(
-            files("bazaar_compute_node").joinpath("defaults.toml").read_text
-        )
-    )
+    payload = await asyncio.to_thread(defaults)
     official = json.loads(
         await asyncio.to_thread(
             files("bazaar_contrib_manager").joinpath("catalog.json").read_text
@@ -838,6 +834,21 @@ async def exercise(path: Path, source: str, other_source: str, releases: Path) -
             "bazaar-contrib-sidecar-windows",
         }
     )
+
+    async def bootstrapped() -> None:
+        """Install node-management as the host's bootstrap would once PyPI has this build."""
+        await launch(
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            python,
+            "--index",
+            source,
+            "bazaar-contrib-node-management~=0.3.0rc1",
+        )
+
+    await bootstrapped()
     note = migrated / "copied-command.json"
     # A tool node runs through its entry point, which the manager must leave in place.
     bcn = (
@@ -869,6 +880,7 @@ async def exercise(path: Path, source: str, other_source: str, releases: Path) -
             source,
             "bazaar-compute",
         )
+        await bootstrapped()
         await launch(
             *bcn,
             "--config",

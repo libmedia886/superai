@@ -5,9 +5,9 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 lazy import asyncio
 lazy import importlib
-lazy import tomllib
 lazy from collections.abc import AsyncIterator, Callable, Mapping, Sequence
-lazy from importlib.resources import files
+lazy from importlib.metadata import entry_points
+lazy from typing import Any
 
 lazy from bazaar_contrib_config import (
     CONFIG_PREPARE,
@@ -37,6 +37,38 @@ lazy from bazaar_core import (
 
 lazy from . import run
 
+DEFAULTS = "bazaar_compute_node.defaults"
+
+
+def defaults() -> dict[str, Any]:
+    """Merge the default configurations of installed packages in entry name order.
+
+    A package several of them declare is declared once, enabling each entry once."""
+    merged: dict[str, Any] = {}
+    declared: dict[str, dict[str, Any]] = {}
+    enabled: set[str] = set()
+    for point in sorted(entry_points(group=DEFAULTS), key=lambda point: point.name):
+        document = point.load()()
+        merged.setdefault("version", document["version"])
+        indexes = merged.setdefault("contrib_indexes", [])
+        for index in document.get("contrib_indexes", ()):
+            if index not in indexes:
+                indexes.append(index)
+        for package in document.get("contribs", ()):
+            entries = [
+                entry
+                for entry in package.get("enabled", ())
+                if entry["entry"] not in enabled
+            ]
+            enabled.update(entry["entry"] for entry in entries)
+            name = ContribPackage.model_validate(package).distribution
+            if name in declared:
+                declared[name]["enabled"].extend(entries)
+            else:
+                declared[name] = package | {"enabled": entries}
+                merged.setdefault("contribs", []).append(declared[name])
+    return merged
+
 
 def build(document: ConfigDocument) -> Composition:
     """Load enabled contrib declarations without interpreting their business input."""
@@ -59,9 +91,8 @@ def bootstrap(
     configer: str = "config-filesystem",
     configer_options: Sequence[str] = (),
     start: Callable[[ConfigDocument], Composition] | None = None,
-    defaults: Mapping[str, object] | None = None,
+    document: Mapping[str, object] | None = None,
 ) -> tuple[Composition, ContribEntry]:
-    resource = files(__package__)
     definitions = load(
         [
             ContribSpec(
@@ -88,14 +119,14 @@ def bootstrap(
                 config=config.model_dump(mode="json") if config is not None else {},
             )
         )
-    if defaults is None:
-        defaults = tomllib.loads(resource.joinpath("defaults.toml").read_text())
+    if document is None:
+        document = defaults()
     return (
         definitions,
         ContribEntry(
             name="node-configuration",
             definition=configuration(
-                defaults,
+                document,
                 build,
                 environment=ConfigurationEnvironment(
                     hub="bazaar_core:ContribHub",
@@ -103,7 +134,7 @@ def bootstrap(
                 ),
                 start=start,
             ),
-            location="defaults.toml",
+            location=DEFAULTS,
         ),
     )
 
@@ -117,9 +148,19 @@ async def node(
 ) -> AsyncIterator[ContribHub]:
     """Prepare configured dependencies before selecting business definitions."""
 
+    packages: list[ContribPackage] = []
     if configer == "config-filesystem" and not any(
         source.name == configer for source in await asyncio.to_thread(discover)
     ):
+        packages.append(
+            ContribPackage(package="bazaar-contrib-config-filesystem~=0.3.0rc1")
+        )
+    # The host installed alone runs as a node.
+    if not await asyncio.to_thread(entry_points, group=DEFAULTS):
+        packages.append(
+            ContribPackage(package="bazaar-contrib-node-management~=0.3.0rc1")
+        )
+    if packages:
         managers: list[ContribManager] = []
 
         @asynccontextmanager
@@ -129,7 +170,7 @@ async def node(
 
         document = ConfigDocument(
             contribs=(
-                ContribPackage(package="bazaar-contrib-config-filesystem~=0.3.0rc1"),
+                *packages,
                 ContribPackage(
                     enabled=(
                         EnabledContrib(entry="commands"),
@@ -141,7 +182,7 @@ async def node(
         entries, loader = await asyncio.to_thread(
             bootstrap,
             configer="config-memory",
-            defaults=document.model_dump(mode="json"),
+            document=document.model_dump(mode="json"),
         )
         async with (
             run(entries, loader) as hub,

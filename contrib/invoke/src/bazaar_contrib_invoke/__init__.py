@@ -6,12 +6,14 @@ from contextlib import asynccontextmanager, contextmanager
 lazy import asyncio
 lazy import copy
 lazy import inspect
+lazy import re
 lazy from collections.abc import (
     Awaitable,
     Callable,
     Collection,
     Iterable,
     Iterator,
+    Mapping,
     Sequence,
 )
 lazy from concurrent.futures import CancelledError as FutureCancelledError
@@ -25,13 +27,17 @@ lazy from typing import Any, cast
 import click
 from bazaar_core import Context, Contrib, ServiceKey, discover
 from pydantic import BaseModel, ConfigDict, Field
+lazy from bazaar_core import ContribStatus, Stopping
 
 __all__ = [
     "COMMANDS",
+    "RUN",
     "CommandCatalog",
     "CommandEntry",
     "Commands",
+    "Run",
     "commands",
+    "contribs",
     "table",
 ]
 
@@ -81,6 +87,30 @@ def table(rows: Iterable[tuple[str, ...]], headers: tuple[str, ...]) -> str:
     )
 
 
+def contribs(snapshots: Iterable[ContribStatus]) -> list[tuple[str, str, str]]:
+    """Each configured contrib's state and what it ended with."""
+    rows = []
+    for record in snapshots:
+        if re.fullmatch(r"contribs\[\d+\]\.enabled\[\d+\]", record.location) is None:
+            continue
+        error = record.state.error if isinstance(record.state, Stopping) else None
+        rows.append(
+            (
+                record.name,
+                type(record.state).__name__.lower(),
+                "" if error is None else str(error).splitlines()[0],
+            )
+        )
+    return rows
+
+
+class Run:
+    """The `bcn run` this process serves until it is stopped."""
+
+    def __init__(self) -> None:
+        self.stopped = asyncio.Event()
+
+
 class CommandCatalog(click.Group):
     """Invoke's own entry-point protocol, independent of the core discovery group."""
 
@@ -88,11 +118,14 @@ class CommandCatalog(click.Group):
         self,
         *,
         contribs: Collection[str],
+        entries: Mapping[str, CommandEntry],
         entry_point_group: str = "bazaar_compute_node.commands",
         **options: Any,
     ) -> None:
         super().__init__(context_settings=HELP, **options)
         self.failures: dict[str, CommandLoadError] = {}
+        for name, entry in entries.items():
+            self._add(name, entry)
         packages = {source.package for source in discover() if source.name in contribs}
         for point in entry_points(group=entry_point_group):
             if cast(Distribution, point.dist).metadata["Name"] not in packages:
@@ -104,28 +137,30 @@ class CommandCatalog(click.Group):
                 entry = CommandEntry.model_validate(entry)
                 if entry.contrib not in contribs:
                     continue
-                if point.name in self.commands:
-                    raise ValueError(
-                        f"command entry {point.name!r} is declared more than once"
-                    )
-                self.add_command(
-                    click.Command(
-                        point.name,
-                        help=entry.help,
-                        short_help=entry.help,
-                        callback=lambda entry=entry: entry,
-                        add_help_option=False,
-                        context_settings={
-                            "allow_extra_args": True,
-                            "ignore_unknown_options": True,
-                        },
-                    )
-                )
+                self._add(point.name, entry)
             except Exception as error:  # noqa: BLE001 - A broken command entry must not disable healthy commands.
                 self.failures[point.name] = CommandLoadError(
                     point.name, cast(Distribution, point.dist).metadata["Name"], error
                 )
                 self.commands.pop(point.name, None)
+
+    def _add(self, name: str, entry: CommandEntry) -> None:
+        """List a command that its contrib registers once it starts."""
+        if name in self.commands:
+            raise ValueError(f"command entry {name!r} is declared more than once")
+        self.add_command(
+            click.Command(
+                name,
+                help=entry.help,
+                short_help=entry.help,
+                callback=lambda: entry,
+                add_help_option=False,
+                context_settings={
+                    "allow_extra_args": True,
+                    "ignore_unknown_options": True,
+                },
+            )
+        )
 
     def get_command(self, ctx: click.Context, name: str) -> click.Command | None:
         if name in self.failures:
@@ -279,12 +314,14 @@ class Commands(click.Group):
 
 
 COMMANDS = ServiceKey[Commands]("invoke.commands")
+RUN = ServiceKey[Run]("invoke.run")
 
 
 @asynccontextmanager
 async def lifespan(ctx: Context):
     ctx.offer(COMMANDS, Commands(context_settings=HELP))
+    ctx.offer(RUN, Run())
     yield
 
 
-commands = Contrib(offers=[COMMANDS], lifespan=lifespan)
+commands = Contrib(offers=[COMMANDS, RUN], lifespan=lifespan)
