@@ -79,7 +79,7 @@ async def upgrade(obj: SimpleNamespace, message_id: str) -> None:
     click.echo(
         _UPGRADE.render(
             {
-                "distribution": "bazaar-compute-node",
+                "distribution": "bazaar-compute",
                 "installed_version": installed,
                 "upgrade_version": version,
                 "reminder_id": reminder_id,
@@ -101,7 +101,7 @@ async def version(obj: SimpleNamespace) -> None:
     click.echo(
         _VERSION.render(
             {
-                "distribution": "bazaar-compute-node",
+                "distribution": "bazaar-compute",
                 "version": await obj.call("node", "version"),
             }
         )

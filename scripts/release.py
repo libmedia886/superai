@@ -44,6 +44,9 @@ class Project(BaseModel):
     version: str
     license: str
     dependencies: list[str] = Field(default_factory=list)
+    optional_dependencies: dict[str, list[str]] = Field(
+        default_factory=dict, alias="optional-dependencies"
+    )
 
 
 class Package(BaseModel):
@@ -51,6 +54,7 @@ class Package(BaseModel):
     path: str
     license: str
     dependencies: list[str]
+    optional_dependencies: dict[str, list[str]] = Field(default_factory=dict)
     platforms: tuple[str, ...]
     smoke: str | None
 
@@ -118,9 +122,10 @@ def plan(request: Request) -> Source:
     root = Path.cwd()
     metadata = load_metadata(root)
     packages: dict[str, Package] = {}
+    versions: dict[str, str] = {}
     for member in metadata.members:
         path = member.path.relative_to(root)
-        if path.parts[0] not in {"app", "core", "contrib"}:
+        if path.parts[0] not in {"app", "alias", "core", "contrib"}:
             continue
         project = Project.model_validate(
             tomllib.loads((member.path / "pyproject.toml").read_text())["project"]
@@ -137,22 +142,38 @@ def plan(request: Request) -> Source:
             ),
             None,
         )
+        versions[member.name] = project.version
         packages[member.name] = Package(
             name=member.name,
             path=path.as_posix(),
             license=project.license,
             dependencies=project.dependencies,
+            optional_dependencies=project.optional_dependencies,
             platforms=member.ci.platforms,
             smoke=smoke.relative_to(root).as_posix() if smoke is not None else None,
         )
     graph: dict[str, set[str]] = {}
     for package in packages.values():
         dependencies: set[str] = set()
-        for value in package.dependencies:
+        for value in [
+            *package.dependencies,
+            *(
+                value
+                for values in package.optional_dependencies.values()
+                for value in values
+            ),
+        ]:
             requirement = Requirement(value)
             name = canonicalize_name(requirement.name)
             if name in packages:
-                if not requirement.specifier.contains(
+                if any(spec.operator == "==" for spec in requirement.specifier):
+                    # An exact pin moves with every release; prepare rewrites it.
+                    if str(requirement.specifier) != f"=={versions[name]}":
+                        raise ValueError(
+                            f"{package.name}: {value} must pin {name} to "
+                            f"its current version {versions[name]}"
+                        )
+                elif not requirement.specifier.contains(
                     request.version, prereleases=True
                 ):
                     raise ValueError(
@@ -161,6 +182,11 @@ def plan(request: Request) -> Source:
                     )
                 dependencies.add(name)
         graph[package.name] = dependencies
+    # The host follows every contrib, and the bazaar-compute-node alias follows the host,
+    # so each name appears on PyPI only once what it installs is there.
+    graph["bazaar-compute"].update(
+        packages.keys() - {"bazaar-compute", "bazaar-compute-node"}
+    )
     graph["bazaar-compute-node"].update(packages.keys() - {"bazaar-compute-node"})
     return Source(
         version=request.version,
@@ -182,6 +208,7 @@ def prepare(request: Request, source_commit: str, output: Path) -> None:
     else:
         if source.source_commit != source_commit:
             raise ValueError("the selected branch advanced; start a new workflow run")
+        names = {package.name for package in source.packages}
         for package in source.packages:
             subprocess.run(
                 [
@@ -194,6 +221,26 @@ def prepare(request: Request, source_commit: str, output: Path) -> None:
                 ],
                 check=True,
             )
+            project = Path(package.path) / "pyproject.toml"
+            document = project.read_text()
+            for index, value in enumerate(package.dependencies):
+                requirement = Requirement(value)
+                pinned = [
+                    spec.version
+                    for spec in requirement.specifier
+                    if spec.operator == "=="
+                ]
+                if not pinned or canonicalize_name(requirement.name) not in names:
+                    continue
+                if document.count(f'"{value}"') != 1:
+                    raise ValueError(f"{package.name}: {value} is not written once")
+                package.dependencies[index] = value.replace(
+                    f"=={pinned[0]}", f"=={request.version}"
+                )
+                document = document.replace(
+                    f'"{value}"', f'"{package.dependencies[index]}"'
+                )
+            project.write_text(document)
         subprocess.run(["uv", "lock"], check=True)
         mode = "new"
         if not subprocess.check_output(["git", "diff", "--name-only"], text=True) and (
@@ -306,10 +353,23 @@ def build(path: Path, directory: Path) -> None:
             raise ValueError(
                 f"{artifact.name}: version or license differs from the release plan"
             )
-        requirements = {
-            str(Requirement(value)) for value in metadata.get_all("Requires-Dist", [])
-        }
-        if requirements != {str(Requirement(value)) for value in package.dependencies}:
+        requirements = [
+            Requirement(value) for value in metadata.get_all("Requires-Dist", [])
+        ]
+        # Metadata writes each extra into its markers, so extras compare by name.
+        if {
+            str(requirement)
+            for requirement in requirements
+            if requirement.marker is None or "extra" not in str(requirement.marker)
+        } != {str(Requirement(value)) for value in package.dependencies} or {
+            canonicalize_name(requirement.name)
+            for requirement in requirements
+            if requirement.marker is not None and "extra" in str(requirement.marker)
+        } != {
+            canonicalize_name(Requirement(value).name)
+            for values in package.optional_dependencies.values()
+            for value in values
+        }:
             raise ValueError(
                 f"{artifact.name}: dependencies differ from the release plan"
             )

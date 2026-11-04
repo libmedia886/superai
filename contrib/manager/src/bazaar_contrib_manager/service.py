@@ -52,7 +52,7 @@ from .contracts import (
 )
 lazy from .cli import create_commands
 lazy from .files import write
-lazy from .packages import Packages
+lazy from .packages import HOST, Packages
 
 
 def merge(current: Any, changes: Any) -> Any:
@@ -715,15 +715,20 @@ class ContribManager:
             await self.packages.initialize()
             if not await self.packages.tool():
                 raise ManagementError(
-                    "node upgrades require a uv tool installation of "
-                    "bazaar-compute-node"
+                    f"node upgrades require a uv tool installation of {HOST}"
                 )
             candidate, _ = await self.configuration.read()
             document = ConfigDocument.model_validate(candidate.payload)
             plan = await self.packages.plan(document, self.configuration.environment)
             plan = plan.model_copy(
                 update={
-                    "host": plan.host.model_copy(update={"version": f"=={version}"})
+                    "host": plan.host.model_copy(
+                        update={
+                            "package": await self.packages.requirement(),
+                            "version": f"=={version}",
+                        }
+                    ),
+                    "host_url": None,
                 }
             )
             await self._record(id, phase="preflight")
@@ -740,9 +745,7 @@ class ContribManager:
             # uv leaves the tool with the host alone, so the contribs go back at once.
             await self.packages.install(plan)
 
-        return await self._submit(
-            "upgrade", action, package="bazaar-compute-node", remote=False
-        )
+        return await self._submit("upgrade", action, package=HOST, remote=False)
 
     async def upgrade(self, package: str) -> Operation:
         """Move one configured contrib package to its latest compatible version."""

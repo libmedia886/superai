@@ -39,6 +39,7 @@ def wheels(tmp_path_factory):
     members = [
         "core",
         "app",
+        "alias",
         *[
             f"contrib/{name}"
             for name in (
@@ -89,6 +90,10 @@ def wheels(tmp_path_factory):
             project = source / member / "pyproject.toml"
             document = tomllib.loads(project.read_text())
             document["project"]["version"] = version
+            if member == "alias":
+                document["project"]["dependencies"] = [
+                    f"bazaar-compute[node]=={version}"
+                ]
             project.write_text(tomli_w.dumps(document))
             subprocess.run(
                 [
@@ -167,15 +172,25 @@ def wheels(tmp_path_factory):
                 "\n".join(
                     f'<a href="../../files/{file}#sha256={sha256((registry / "files" / file).read_bytes()).hexdigest()}">{file}</a>'
                     for file in files
-                    if name != "bazaar-compute-node"
+                    if name not in ("bazaar-compute", "bazaar-compute-node")
                     or f"-{versions['current']}-" in file
                 )
             )
     return path
 
 
-@pytest.mark.parametrize("deployment", ["venv", "tool"])
-@pytest.mark.parametrize("workflow", ["installed_smoke.py", "live_smoke.py"])
+@pytest.mark.parametrize(
+    ("deployment", "workflow"),
+    [
+        *(
+            (deployment, workflow)
+            for deployment in ("venv", "tool")
+            for workflow in ("installed_smoke.py", "live_smoke.py")
+        ),
+        ("alias", "extras_smoke.py"),
+        ("extra", "extras_smoke.py"),
+    ],
+)
 async def test_real_installed_manager(
     wheels: Path, tmp_path: Path, deployment: str, workflow: str
 ):
@@ -207,7 +222,12 @@ async def test_real_installed_manager(
             "UV_CACHE_DIR": str(tmp_path / "cache"),
         }
         versions = json.loads((wheels / "versions.json").read_text())
-        if deployment == "tool":
+        if deployment != "venv":
+            tool = {
+                "tool": "bazaar-compute",
+                "extra": "bazaar-compute[node]",
+                "alias": "bazaar-compute-node",
+            }[deployment]
             command = [
                 "uv",
                 "tool",
@@ -220,9 +240,9 @@ async def test_real_installed_manager(
                 "allow",
                 "--with",
                 "blockbuster>=1.5.29,<1.6",
-                f"bazaar-compute-node<{versions['target']}",
+                f"{tool}<{versions['target']}",
             ]
-            prefix = tmp_path / "tools" / "bazaar-compute-node"
+            prefix = tmp_path / "tools" / tool.split("[", 1)[0]
         else:
             prefix = tmp_path / "environment"
             subprocess.run(
@@ -240,7 +260,7 @@ async def test_real_installed_manager(
                 "--prerelease",
                 "allow",
                 "blockbuster>=1.5.29,<1.6",
-                f"bazaar-compute-node<{versions['target']}",
+                f"bazaar-compute<{versions['target']}",
             ]
         try:
             subprocess.run(command, env=environment, check=True)

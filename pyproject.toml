@@ -24,6 +24,7 @@ dev = [
 package = false
 
 [tool.uv.sources]
+bazaar-compute = { workspace = true }
 bazaar-compute-node = { workspace = true }
 bazaar-core = { workspace = true }
 bazaar-contrib-status = { workspace = true }
@@ -48,7 +49,7 @@ bazaar-contrib-sidecar = { workspace = true }
 bcn-test-support = { path = "tests/support", editable = true }
 
 [tool.uv.workspace]
-members = ["app", "core", "contrib/*"]
+members = ["app", "alias", "core", "contrib/*"]
 
 [tool.ruff.lint]
 extend-select = ["ASYNC"]

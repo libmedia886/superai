@@ -124,7 +124,7 @@ async def test_node_service_reports_and_restarts_the_node(
             )
 
         async with node(configer_options=(str(configured),), start=select):
-            current = await asyncio.to_thread(version, "bazaar-compute-node")
+            current = await asyncio.to_thread(version, "bazaar-compute")
             assert await clients[0].call("node", "version") == current
             available = await clients[0].call("node", "available")
             assert available is None or Version(str(available)) > Version(current)

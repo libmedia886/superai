@@ -51,7 +51,7 @@ for package in document["contribs"]:
         if entry["entry"] == "contrib-manager":
             entry["config"] = {"host_source": source}
 defaults = {Requirement(package["package"]).name for package in document["contribs"]}
-for name in packages.keys() - defaults - {"bazaar-compute-node", "bazaar-core"}:
+for name in packages.keys() - defaults - {"bazaar-compute", "bazaar-core"}:
     direct = distribution(name).read_text("direct_url.json")
     assert direct is not None
     artifact = json.loads(direct)["url"]

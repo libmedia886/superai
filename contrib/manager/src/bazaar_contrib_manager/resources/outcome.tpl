@@ -1,5 +1,5 @@
 {% if result.installed %}
-{% set package = result.package or "bazaar-compute-node" %}
+{% set package = result.package or "bazaar-compute" %}
 {% if result.version %}
 {% set package = package ~ "==" ~ result.version %}
 {% endif %}

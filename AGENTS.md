@@ -34,8 +34,9 @@
 项目在独立 workspace 成员中开发；各成员拥有自己的发行元数据、源码、资源与验证。
 
 ```text
-app/                            # bazaar-compute-node：CLI、启动输入、自举依赖与默认组合
+app/                            # bazaar-compute：CLI、启动输入、自举依赖与默认组合
 └── src/bazaar_compute_node/     # 应用入口、自举声明、默认组合与通用命令分派
+alias/                          # bazaar-compute-node：旧名，安装 bazaar-compute[node]
 core/                           # bazaar-core：通用 contrib 运行内核
 └── src/bazaar_core/             # 入口发现、声明校验、服务与事件绑定、依赖图和生命周期
 contrib/                        # 各功能的独立发行包

@@ -94,7 +94,7 @@ NODE_OPTIONS = {
         "allow_interspersed_args": False,
     },
 )
-@click.version_option(package_name="bazaar-compute-node")
+@click.version_option(package_name="bazaar-compute")
 @click.option(
     "--configer",
     default="config-filesystem",

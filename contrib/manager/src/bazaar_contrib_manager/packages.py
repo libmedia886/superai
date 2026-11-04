@@ -7,6 +7,7 @@ lazy import asyncio
 lazy import re
 lazy import shutil
 lazy import sys
+lazy import tomllib
 lazy from collections.abc import AsyncIterator
 lazy from pathlib import Path
 lazy from tempfile import TemporaryDirectory
@@ -31,6 +32,8 @@ lazy from .contracts import (
 lazy from .environment import inspect
 
 PYPI = "https://pypi.org/simple"
+HOST = "bazaar-compute"
+ALIAS = "bazaar-compute-node"
 
 
 class Packages:
@@ -90,9 +93,7 @@ class Packages:
     ) -> EnvironmentPlan:
         installed = await self.inspect(definitions=False)
         host = next(
-            package
-            for package in installed.packages
-            if package.package == "bazaar-compute-node"
+            package for package in installed.packages if package.package == HOST
         )
         declared = {
             entry.distribution
@@ -125,6 +126,7 @@ class Packages:
             host=Package(
                 package=host.package, source=self.source, version=f"=={host.version}"
             ),
+            host_url=host.url,
             packages=(
                 *(entry for entry in document.contribs if entry.package),
                 *bootstrap,
@@ -140,7 +142,7 @@ class Packages:
         pending = [
             Requirement(entry.package) for entry in plan.packages if entry.applies
         ]
-        pending.append(Requirement(plan.host.package + plan.host.version))
+        pending.append(Requirement(plan.host_requirement))
         expanded: list[tuple[Requirement, InstalledPackage | None]] = []
         checked: set[tuple[str, frozenset[str]]] = set()
         while pending:
@@ -177,9 +179,7 @@ class Packages:
         from a public index; the host source and PyPI follow, uv's own default index last.
         """
         packages = (
-            ContribPackage(
-                package=plan.host.package + plan.host.version, source=plan.host.source
-            ),
+            ContribPackage(package=plan.host_requirement, source=plan.host.source),
             *plan.packages,
         )
         declared = dict.fromkeys(
@@ -267,7 +267,9 @@ class Packages:
                 "--no-header",
                 "--no-annotate",
                 "--refresh-package",
-                plan.host.package,
+                HOST,
+                "--refresh-package",
+                ALIAS,
                 cwd=project.parent,
             )
         return {
@@ -280,19 +282,38 @@ class Packages:
     async def latest(self, plan: EnvironmentPlan) -> str | None:
         """The newest host version the declared contribs can be installed with."""
         host = plan.host.model_copy(
-            update={"version": ">" + plan.host.version.removeprefix("==")}
+            update={
+                "package": await self.requirement(),
+                "version": ">" + plan.host.version.removeprefix("=="),
+            }
         )
         try:
-            resolved = await self.resolve(plan.model_copy(update={"host": host}))
+            resolved = await self.resolve(
+                plan.model_copy(update={"host": host, "host_url": None})
+            )
         except ManagementError as error:
             if "No solution found" in str(error):
                 return None
             raise
-        return resolved.get(plan.host.package)
+        return resolved.get(HOST)
 
     async def tool(self) -> bool:
         """Whether this environment is the uv tool the host was installed as."""
         return await asyncio.to_thread((self.prefix / "uv-receipt.toml").is_file)
+
+    async def requirement(self) -> str:
+        """The host as the uv tool was installed, with the extras chosen then."""
+        receipt = self.prefix / "uv-receipt.toml"
+        if not await asyncio.to_thread(receipt.is_file):
+            return HOST
+        document = tomllib.loads(await asyncio.to_thread(receipt.read_text, "utf-8"))
+        installed = next(
+            item
+            for item in document["tool"]["requirements"]
+            if canonicalize_name(item["name"]) == canonicalize_name(self.prefix.name)
+        )
+        extras = installed.get("extras", [])
+        return installed["name"] + (f"[{','.join(extras)}]" if extras else "")
 
     async def install_host(self, version: str) -> None:
         """Install a host release the way 0.2 did, as the uv tool it was installed as."""
@@ -301,9 +322,11 @@ class Packages:
             "tool",
             "install",
             "--refresh-package",
-            "bazaar-compute-node",
+            HOST,
+            "--refresh-package",
+            ALIAS,
             *(("--index", self.source) if self.source.rstrip("/") != PYPI else ()),
-            f"bazaar-compute-node=={version}",
+            f"{await self.requirement()}=={version}",
         )
 
     async def uninstall(self, package: str) -> None:

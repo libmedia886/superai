@@ -61,7 +61,7 @@ async def health(ctx: Context):
     Two beats missed tell a consumer the node is gone."""
     audit = ctx.accept(AUDIT)
     timer = ctx.accept(TIMER)
-    running = await asyncio.to_thread(version, "bazaar-compute-node")
+    running = await asyncio.to_thread(version, "bazaar-compute")
 
     async def beat() -> None:
         while True:
@@ -132,7 +132,7 @@ async def upgrade(ctx: Context):
         ctx.accept(CONTRIB_MANAGER),
         ctx.accept(AUDIT),
         ctx.accept(RUN),
-        await asyncio.to_thread(version, "bazaar-compute-node"),
+        await asyncio.to_thread(version, "bazaar-compute"),
     )
 
     async def watch() -> None:

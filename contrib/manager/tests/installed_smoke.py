@@ -83,7 +83,7 @@ async def invoke(options: dict[str, Any], action) -> Any:
 async def exercise(path: Path, source: str, other_source: str, releases: Path) -> None:
     config = path / "config.toml"
     options: dict[str, Any] = {"configer_options": (str(config),)}
-    tool = Path(os.environ["UV_TOOL_DIR"]) / "bazaar-compute-node" == Path(sys.prefix)
+    tool = Path(os.environ["UV_TOOL_DIR"]) / "bazaar-compute" == Path(sys.prefix)
     payload = tomllib.loads(
         await asyncio.to_thread(
             files("bazaar_compute_node").joinpath("defaults.toml").read_text
@@ -618,12 +618,10 @@ async def exercise(path: Path, source: str, other_source: str, releases: Path) -
         )
         wheel = next(
             (path / "registry" / "one" / "files").glob(
-                f"bazaar_compute_node-{versions['target']}-*.whl"
+                f"bazaar_compute-{versions['target']}-*.whl"
             )
         )
-        index = (
-            path / "registry" / "one" / "simple" / "bazaar-compute-node" / "index.html"
-        )
+        index = path / "registry" / "one" / "simple" / "bazaar-compute" / "index.html"
         digest = sha256(await asyncio.to_thread(wheel.read_bytes)).hexdigest()
         await asyncio.to_thread(
             print, f"Publish host {versions['target']} into the index", flush=True
@@ -789,7 +787,7 @@ async def exercise(path: Path, source: str, other_source: str, releases: Path) -
         "UV_TOOL_DIR": str(migrated / "tools"),
         "UV_TOOL_BIN_DIR": str(migrated / "bin"),
     }
-    prefix = migrated / ("tools/bazaar-compute-node" if tool else "environment")
+    prefix = migrated / ("tools/bazaar-compute" if tool else "environment")
 
     async def launch(*arguments: str):
         await asyncio.to_thread(print, "Run", *arguments, flush=True)
@@ -814,7 +812,7 @@ async def exercise(path: Path, source: str, other_source: str, releases: Path) -
             "3.15",
             "--index",
             source,
-            "bazaar-compute-node",
+            "bazaar-compute",
         )
     else:
         await launch("uv", "venv", "--python", "3.15", str(prefix))
@@ -826,7 +824,7 @@ async def exercise(path: Path, source: str, other_source: str, releases: Path) -
             str(prefix),
             "--index",
             source,
-            "bazaar-compute-node",
+            "bazaar-compute",
         )
     python = (await launch("uv", "python", "find", "--no-project", str(prefix))).strip()
     before = json.loads(
@@ -869,7 +867,7 @@ async def exercise(path: Path, source: str, other_source: str, releases: Path) -
             "--reinstall",
             "--index",
             source,
-            "bazaar-compute-node",
+            "bazaar-compute",
         )
         await launch(
             *bcn,
@@ -1043,6 +1041,10 @@ async def exercise(path: Path, source: str, other_source: str, releases: Path) -
         carrier, lambda manager: manager.remove("bazaar-contrib-example-carrier")
     )
     assert protected.error and protected.phase == "failed"
+    kept = await invoke(
+        options, lambda manager: manager.remove("bazaar-contrib-config-filesystem")
+    )
+    assert kept.error and kept.phase == "failed", kept.model_dump_json(indent=2)
     assert (
         await invoke(carrier, lambda manager: manager.detail("example-carrier"))
     ).entries

@@ -92,10 +92,10 @@ async def test_real_agent_commands(
         requirements = [
             name
             for name in packages
-            if name.startswith("bazaar-") and name != "bazaar-compute-node"
+            if name.startswith("bazaar-") and name != "bazaar-compute"
         ]
         if deployment == "tool":
-            prefix = tmp_path / "tools" / "bazaar-compute-node"
+            prefix = tmp_path / "tools" / "bazaar-compute"
             command = [
                 "uv",
                 "tool",
@@ -104,7 +104,7 @@ async def test_real_agent_commands(
                 "3.15",
                 "--index",
                 source,
-                "bazaar-compute-node",
+                "bazaar-compute",
                 "--with",
                 "blockbuster>=1.5.29,<1.6",
             ]
@@ -124,7 +124,7 @@ async def test_real_agent_commands(
                 str(prefix),
                 "--index",
                 source,
-                "bazaar-compute-node",
+                "bazaar-compute",
                 "blockbuster>=1.5.29,<1.6",
                 *requirements,
             ]
