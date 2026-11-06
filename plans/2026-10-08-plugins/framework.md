@@ -2869,14 +2869,17 @@ Windows 上 uv 替换不了正在运行的工具入口 bcn.exe，失败后连工
     失败时错误为 uv 的原始输出。
 - 按消息 `6e344175-68b7-5c7d-851c-c7e5b5cc8877` 与 `8617de0d-ae9f-5b4b-b59e-703357dad90e`，`bcn run` 不依赖 manager：
   node-management 的 `node-management` 入口仍只依赖 COMMANDS 与 CONFIGURATION，另提供 RUN，即 `bcn run` 等待的停止事件；
-  同一包新增 `node-upgrade` 入口提供 NODE 服务，依赖 RUN、CONTRIB_MANAGER、TIMER 与 AUDIT，默认配置与 V4→V5 转换都启用它：
+  同一包新增 `node-upgrade` 入口提供 NODE 服务，依赖 CONTRIB_MANAGER、TIMER 与 AUDIT，默认配置与 V4→V5 转换都启用它：
   - `version()` 返回节点启动时记下的运行版本，装完未重启时仍是原版本；node-health 心跳中的版本同样取启动时的运行版本。
     `available()` 返回每小时检查一次得到的最新可装版本。
   - `info()` 返回运行版本与节点所在机器的信息：系统、系统名称与版本号、架构、节点进程的启动时间、CPU、内存与各磁盘，供 server-computer 的电脑页面使用；字段与磁盘的取法见 [server.md](server.md#机器信息)。
   - `install(版本)` 预检后安装，版本缺省时取 `available()`；在节点自己的任务中执行，调用方断开时照样装完并发布审计事件。
     Windows 上解释器所运行的启动器（`sys.orig_argv[1]`）就是 receipt 所列的工具入口（前台 `bcn.exe run`）时，
     在预检前抛 UnsupportedUpgrade；`sys.argv[0]` 在这里不带 .exe，不能用来比较（contrib-system-service 诊断 run 41589428916）。
-  - `restart()` 置位 RUN 的停止事件，节点按正常关停流程退出，各平台一致。
+  - 按消息 `1e36d3b0-d199-5d7e-b101-d1845566e3cd`、`c8ce6450-d1dd-50a7-8b02-feea93a05db7`、`1cca004d-6b4a-55a7-8e70-1cac0507dde1` 与 `897f1d71-9e4f-5394-97e5-659d9f2387d1`，重启不分平台都由 system-service 提供，NODE 去掉 `restart()`：
+    system-service 登记 remote `system-service` 的成员 `restart`，在节点自己的进程中发 SIGINT，节点像按下 Ctrl+C 一样正常退出，
+    由 system-service 的 supervisor 以新装的版本再拉起。按消息 `87081cbe-1f93-52bd-a5fe-6827a76cd72b`、`6b106d96-77e5-573e-afba-c28454386c8f` 与 `c2513e09-ab73-5f38-88bf-a5250f9312a2`，前台运行的节点
+    收到这个调用同样正常退出；节点没装 system-service 时，sidecar 报该成员未开放。
   - 安装开始、完成与失败都发布审计事件 `node.upgrade`，带版本，失败时带 uv 的原始输出。
   - 这些方法经 `bazaar_compute_node.remotes` 登记的 RemoteEntry 由 sidecar 开放。
   - contrib-manager、timer 或 audit 入口停用时只有 node-upgrade 不可用，`bcn run` 不受影响。
@@ -2886,8 +2889,9 @@ Windows 上 uv 替换不了正在运行的工具入口 bcn.exe，失败后连工
   不联网也不跑 uv，sidecar 或 NODE 不可用时视为没有新版本：
   - 回合开始与回合中 steer 的 inbox 提示在 `available()` 有版本时附 0.2 的 Upgrade available 一行，每个会话同一版本只提示一次。
   - bcc 增加 `node upgrade --message-id`（必填）与 `node version`。upgrade 依次调用 NODE 的 `install`，经 reminder 服务挂 60 秒后的
-    「Report the outcome of upgrading to <版本>」提醒并锚定该消息，再调用 NODE 的 `restart`；安装失败时报错，不挂提醒、不重启；
-    提醒挂不上时照常重启，输出说明没有提醒。NODE 抛 UnsupportedUpgrade 时报 UPGRADE_UNSUPPORTED，
+    「Report the outcome of upgrading to <版本>」提醒并锚定该消息，再调用 system-service 的 `restart`；安装失败时报错，不挂提醒、不重启；
+    提醒挂不上时照常重启，输出说明没有提醒；调用 `restart` 失败时报 UPGRADE_RESTART_UNAVAILABLE，Next action 让 agent 转告用户新版本
+    已装好、请自己重启 bcn 或改用系统服务运行。NODE 抛 UnsupportedUpgrade 时报 UPGRADE_UNSUPPORTED，
     Next action 让 agent 转告用户停机后执行 `uv tool install bazaar-compute-node==<版本>`，或改用系统服务运行。
     version 照 0.2 只输出运行版本。
   - 按消息 `e35821f1-0417-5a79-8675-412a1034ae33`，bcc 进程只在第一次调用时启动一次会话记录的客户端 hub，
@@ -2895,10 +2899,10 @@ Windows 上 uv 替换不了正在运行的工具入口 bcn.exe，失败后连工
 
 验证：manager 的 installed_smoke 中，`bcn contrib upgrade example` 把 example 升到新发布的版本，而索引里同时有更新版本的
 bazaar-core 保持原版本；uv tool 部署在索引发布本体新版本后，最新可装版本为该版本；像系统服务那样把工具入口复制成
-bcn.running 再运行 `bcn run`，经 sidecar 调用 `install()` 后插件仍在环境中，再调用 `restart()` 后正常退出，
+bcn.running 再运行 `bcn run`，经 sidecar 调用 `install()` 后插件仍在环境中，以 SIGTERM 停下后正常退出（Windows 上结束进程），
 工具入口的 `bcn --version` 为新版本，再次启动后插件照常运行；Windows 上在此之前先直接以工具入口前台运行，
 `install()` 报 UnsupportedUpgrade；venv 部署的安装报不支持。
-node-management 的安装态用例经 sidecar 读取 `version()` 与 `available()`，`restart()` 让 `bcn run` 正常退出，
+node-management 的安装态用例经 sidecar 读取 `version()`、`available()` 与 `info()`，
 非 uv tool 部署的 `install()` 报不支持，三个平台都运行。agent 的 provider_smoke 在会话环境中执行 `bcc node version`
 并读到节点的本体版本。app 的 configuration_smoke 不改：去掉 manager、换成其他准备插件的配置照旧提交并 `bcn run`。
 manager、node-management、agent、config-versions 与 app 包 `scripts/ci.py check`、`test` 与 `package` 通过，
@@ -2980,10 +2984,11 @@ contrib-legacy-node-migrations 的 PR CI 通过。
 - 一个带默认配置的包都没装时，本体像自举缺失的 config-filesystem 那样，先经 manager 装上 node-management，再读它的默认配置；
   两个包都缺时在同一次自举中安装。
 - `bcn run` 由本体提供：本体把 run 作为自己的命令条目交给 invoke 的 CommandCatalog，与已启用插件的命令一同列出，插件声明同名命令时
-  按重复声明报错；选中 run 时本体把登记 run 的条目加入组合并作为根。启动后激活整个配置组合，打印插件表与 `bcn ready`，等待 RUN 的
-  停止事件；SIGTERM 与 NODE 的 `restart()` 置位该事件。按消息 `a0f9d0f6-74ac-5d0a-89bd-5bbdf8496dc6`，RUN 与 Run 移入
-  bazaar-contrib-invoke，由 invoke 的 `commands` 入口与 COMMANDS 一同提供，启用 `commands` 的组合都有 RUN；node-upgrade 与本体的
-  run 条目都 accept 它。插件表的行与 node-health 心跳共用 invoke 的 `contribs()`。
+  按重复声明报错；选中 run 时本体把登记 run 的条目加入组合并作为根。启动后激活整个配置组合，打印插件表与 `bcn ready`，一直运行到
+  Ctrl+C 取消它；Linux 与 macOS 上的 SIGTERM 同样结束它。按消息 `a0f9d0f6-74ac-5d0a-89bd-5bbdf8496dc6` 曾把停止事件 RUN 移入
+  bazaar-contrib-invoke；按消息 `1a9a3b44-ff29-50dc-acf4-154f886a3468`、`5fc7a4c3-cef8-5c37-90ac-02b1bf0e223d`、`b8ec28c3-6c69-57d1-915a-5b44d85ea180` 与 `c1ded550-5e5d-5e2e-a801-b963f32d71d0`，
+  本体只有 run，RUN 去掉，重启归 system-service（见 NODE 一节）。
+  插件表的行与 node-health 心跳共用 invoke 的 `contribs()`。
   node-management 去掉 `node-management` 入口与 run 命令，保留 node-health 与 node-upgrade，不再用到的 click 与 bazaar-contrib-config
   依赖一并去掉；默认配置与 V4→V5 转换不再启用 `node-management` 条目，默认配置中其余条目不变。
 - 外部仓库测试中读取本体 defaults.toml 的地方，在含本 Task 的 rc 发布后改为 `boot.defaults()`。
@@ -2992,8 +2997,9 @@ contrib-legacy-node-migrations 的 PR CI 通过。
 node-management，新建的配置声明 node-management，测试中自举与同步向 PyPI 请求的包经 uv 的 `UV_OVERRIDE` 解析为本地构建。按消息
 `8fba6fbb-dacc-5918-a5b1-51caaf1783a7`，测试环境不混用 PyPI 上已发布的 node-management：manager 的 venv 与 tool 部署，以及拷入已有配置的
 新环境（tool 重装之后再装一次），先从测试索引装上 node-management，即 PyPI 已有这次发布时本体自举得到的环境；app 的包检查直接写入
-manager 的官方索引。node-management 的安装态用例
-经本体的 `bcn run` 照旧就绪、插件表列出 node-health、响应 SIGTERM 与 `restart()` 退出。node-management、config-versions、invoke、
+manager 的官方索引。`scripts/ci.py package` 把工作区中不在被检查包依赖闭包内的包经 `UV_OVERRIDE` 指向本次构建的 wheel，
+app 的包检查首次运行时自举的 node-management 因此是本次构建。node-management 的安装态用例
+经本体的 `bcn run` 照旧就绪、插件表列出 node-health、响应 SIGTERM 退出。node-management、config-versions、invoke、
 manager、agent、agent-command、collaboration、messages-node、reminder、schema 与 app 包 `scripts/ci.py check`、`test` 与 `package`
 通过，仓库根目录 pyright 通过，PR 的三平台 CI 通过。
 

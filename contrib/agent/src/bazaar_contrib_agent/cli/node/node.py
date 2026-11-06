@@ -75,7 +75,22 @@ async def upgrade(obj: SimpleNamespace, message_id: str) -> None:
         reminder_id = None
     else:
         reminder_id = cast(Mapping[str, object], scheduled["reminder"])["reminder_id"]
-    await obj.call("node", "restart")
+    # Restarting is the system service's: its supervisor starts the node again
+    # on the new release once the node exits.
+    try:
+        await obj.call("system-service", "restart")
+    except RemoteError as error:
+        raise BccCommandError(
+            f"bazaar-compute {version} is installed, but this node is not run by "
+            "the system service, so it cannot restart itself."
+            if error.type == "LookupError"
+            else error.message,
+            code="UPGRADE_RESTART_UNAVAILABLE",
+            next_action=(
+                "Tell the user to restart bcn to run the new release, or to run it "
+                "as a system service."
+            ),
+        ) from error
     click.echo(
         _UPGRADE.render(
             {

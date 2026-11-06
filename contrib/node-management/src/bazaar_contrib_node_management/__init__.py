@@ -13,7 +13,7 @@ lazy from importlib.resources import files
 lazy from typing import Any
 
 from bazaar_contrib_audit import AUDIT, AuditContext
-from bazaar_contrib_invoke import RUN, contribs
+from bazaar_contrib_invoke import contribs
 from bazaar_contrib_manager import CONTRIB_MANAGER
 from bazaar_contrib_sidecar import RemoteEntry
 from bazaar_contrib_timer import TIMER
@@ -81,7 +81,6 @@ async def upgrade(ctx: Context):
     node = Node(
         ctx.accept(CONTRIB_MANAGER),
         ctx.accept(AUDIT),
-        ctx.accept(RUN),
         await asyncio.to_thread(version, "bazaar-compute"),
     )
 
@@ -107,6 +106,6 @@ async def upgrade(ctx: Context):
 
 node_health = Contrib(accepts=[AUDIT, TIMER], lifespan=health)
 node_upgrade = Contrib(
-    offers=[NODE], accepts=[RUN, CONTRIB_MANAGER, TIMER, AUDIT], lifespan=upgrade
+    offers=[NODE], accepts=[CONTRIB_MANAGER, TIMER, AUDIT], lifespan=upgrade
 )
-remote = RemoteEntry(NODE, ("version", "available", "info", "install", "restart"))
+remote = RemoteEntry(NODE, ("version", "available", "info", "install"))

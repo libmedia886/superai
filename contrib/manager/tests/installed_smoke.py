@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import shutil
+import signal
 import sys
 import time
 import tomllib
@@ -675,9 +676,15 @@ async def exercise(path: Path, source: str, other_source: str, releases: Path) -
                 clients.clear()
                 async with node(**options, start=select):
                     yield clients[0]
-                    await clients[0].call("node", "restart")
-                    output, _ = await process.communicate()
-                assert process.returncode == 0, output.decode()
+                # SIGTERM ends the node as Ctrl+C would; Windows has no such
+                # signal, so there the process is ended.
+                if os.name == "nt":
+                    process.terminate()
+                else:
+                    process.send_signal(signal.SIGTERM)
+                output, _ = await process.communicate()
+                if os.name != "nt":
+                    assert process.returncode == 0, output.decode()
             finally:
                 if process.returncode is None:
                     process.kill()
