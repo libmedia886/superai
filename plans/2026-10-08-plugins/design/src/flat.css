@@ -31,3 +31,10 @@ body { background: var(--bg); }
 .awning-svg { display: block; }
 .stall.off .awning-svg { filter: grayscale(1) brightness(.7); }
 .live::before { box-shadow: 0 0 0 3px rgba(52, 195, 160, .25); }
+
+/* usage meters: cells in the lanterns' three colours */
+.cells { display: inline-flex; gap: 2px; }
+.cells i { width: 4px; height: 12px; border-radius: 1px; background: var(--line); }
+.cells i.lo { background: var(--jade); }
+.cells i.mid { background: var(--saffron); }
+.cells i.hi { background: var(--crimson); }

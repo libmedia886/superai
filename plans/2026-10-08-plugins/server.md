@@ -1,6 +1,6 @@
 # server 框架、登录与两端通信（第 11、12 阶段，2026-11-04）
 
-依据消息 `063a69a7-4466-5989-987d-72340ff87d15`、`4a3df703-d8ba-52fd-8386-a80636c7ebd3`、`4a1410e9-fdd9-5e6d-9258-2b6524c85030`、`54a06153-2c7a-50d8-be38-d83215bb119f`、`a71294e0-d7b2-55ad-b070-0d39c6615bfc`、`361bd816-6861-5387-9de3-db06a0221bff`、`4a61b278-dbba-5110-b22a-1a48be84ee85`、`35a6f778-8313-5345-b815-dd56aadb82f4`、`5b10044f-5d13-593f-bdc1-f702f38d28c1`、`61a8fb0b-6faf-5b41-9845-5ce2b6255f50`、`0152f366-79a3-58a2-a4b8-097b74292762`、`048927d2-bcdb-5149-b3cd-74ba46652bd6`、`46bf2276-bd23-5186-a0e7-2e7fe36c32f6`、`6c355ba6-0bad-5525-92d7-0763f87ba60b`、`1f12a86a-5b7a-5cd1-8ab0-ab30cd64cbd4`、`75056a17-d242-53e0-b3d3-5541c3f8c2d0`、`c51fe75f-080c-5bbb-a5d4-73ebf2b05257`、`680370b8-e577-5ff8-86f0-8e7711ff16a2`、`34dd6558-b928-5db1-8744-dc150f1bcb1c`、`9fbda575-6578-574f-a885-eca2e6781f14`、`9b4c789d-27b9-52c0-a480-da6f675b957f`、`7392d984-82ef-5b71-a2dd-0f82fc8404bd`、`ae4a2fb3-637c-51f1-8661-9b00d43896c0`、`74cca34d-90c1-550a-ac3b-a75da7596efa`、`dec88203-3335-53ad-8f32-f599838099b5`、`732ad76b-eb60-5441-8c98-3c101345f20d`、`2377ea79-daee-5aff-8af4-efd3335a0a63`、`1ca34615-3618-57f4-a74c-a5de417fce7d`、`a00b3959-3fb4-5bd1-b080-ad718285cf71`、`96787fb9-cffc-545b-9637-cb35c238d7fc`、`72759245-29a2-5f1c-8420-f586190ac434`、`227a718a-65ce-55b2-bd6b-718bc585370f`、`9c4b2829-5eab-51e6-be65-ffacd7230ac2`、`8fe23c62-55a0-5ad2-9c8f-486f3459136d`、`60b4a535-b2cc-5ee2-954d-42cdd48ada8b`、`0848f322-562e-52d0-be22-8b2a5dbcc317`、`6d7ef808-9bbb-54d2-ba03-ab2ecfba8b79`、`11e6a63e-2572-5129-8f62-42c46e3844ca`、`4a309095-83e0-505e-be68-c6a0f6fe1c2b`、`c78439a5-8fcb-5c72-99b5-3fb718c03e55`、`ee83ba8e-da47-5385-b23a-bc34e7a6f58f`、`a088f3ea-c6c2-5f14-8831-3f1844592172`、`62072b45-7a4e-5a3a-b33b-ada5f46fa02a`、`2128b685-1165-5ffc-ae59-1bf377c0d729`、`a9707a85-61c1-5b2f-8212-6501f4a27597`、`89409f44-6c7f-5559-98dd-3c92e023980c`、`9a8a560e-ea1a-5b92-af21-27c315705f4f`、`04ebe6bb-3fde-5699-9478-cd4f92b06d0f`、`069a6203-552c-58c5-b57c-53b3dd5f055f`、`fe92f9bd-d2a3-5ee9-98ac-d05dfb4de85b`、`c829259a-d24e-5658-8862-8340fa564e6a`、`d929e3b7-1560-5a59-9d89-bb9bb0638eab`、`df181db4-2fb1-5bf6-9f35-13804366c141`、`fe7e2369-5a98-5338-b704-cc100dee30c9`、`145bdfe5-a2ba-5d54-98ee-b5a4c7fcf064`、`ea154f6b-e6ab-5e37-b761-21b8d3ba417d`、`0f163715-de78-5dda-ae47-86f1122c45d8`、`cca4a947-a5ad-51d8-8a61-8e890c84e2f8`、`c343e7fe-6a21-58a4-ba78-e4e9b031145d`、`2777ee0e-7dc2-5078-b8c8-26b36785fa88`、`c4993a58-dad1-5fb5-91a0-49252e01399c`、`2e906727-a570-51b8-b30d-dc5badd3b7b0`、`713d4cb5-ce3d-57a5-b325-ed96cc9d9b48`、`3cae9028-3f2d-552b-b954-adde6281dc51`、`e3d0a24f-d713-56f8-ad56-54af4e76f72f`、`eb67ecd4-cfc7-539b-8e4b-53608b0f134f`、`f9b97a53-3853-52dc-819c-9e669fdfeba1`、`617a0fd1-b2a3-50e9-86a0-edaacc3d31bd`、`0f086c35-1137-5163-81fc-8b175395b42e`、`ad1081e6-5140-5fe4-a0f6-0ec0cb58afb4`、`ccc3383f-6d1f-578e-a87f-36fd93a35d58`、`9dd2dc7d-666f-5ce3-9d64-d17cc57f2987`、`09872486-2607-5d05-bee4-a6a1387b1bd4`、`4ad7059a-2d64-5d5e-ae0d-5a3deb9a9366`、`2a8906da-4f07-5bb5-9bfd-1baab7146b33`、`13ecfc45-fbf6-583f-90ca-883d5aac1b6a`、`e1be9e30-31be-593a-afc4-056a711625f5`、`e0f47cec-5443-514b-b6d2-0a1c645071c7`、`18bee733-8431-54f9-945c-51158293a018`、`cbcdf14c-ef83-5766-b74b-17b8184f723b`、`1c8d85e7-863f-56d5-8664-2a2fb75270fa` 与 `7d53ab4b-35f8-56d7-8fa1-b60303bfa780`：
+依据消息 `063a69a7-4466-5989-987d-72340ff87d15`、`4a3df703-d8ba-52fd-8386-a80636c7ebd3`、`4a1410e9-fdd9-5e6d-9258-2b6524c85030`、`54a06153-2c7a-50d8-be38-d83215bb119f`、`a71294e0-d7b2-55ad-b070-0d39c6615bfc`、`361bd816-6861-5387-9de3-db06a0221bff`、`4a61b278-dbba-5110-b22a-1a48be84ee85`、`35a6f778-8313-5345-b815-dd56aadb82f4`、`5b10044f-5d13-593f-bdc1-f702f38d28c1`、`61a8fb0b-6faf-5b41-9845-5ce2b6255f50`、`0152f366-79a3-58a2-a4b8-097b74292762`、`048927d2-bcdb-5149-b3cd-74ba46652bd6`、`46bf2276-bd23-5186-a0e7-2e7fe36c32f6`、`6c355ba6-0bad-5525-92d7-0763f87ba60b`、`1f12a86a-5b7a-5cd1-8ab0-ab30cd64cbd4`、`75056a17-d242-53e0-b3d3-5541c3f8c2d0`、`c51fe75f-080c-5bbb-a5d4-73ebf2b05257`、`680370b8-e577-5ff8-86f0-8e7711ff16a2`、`34dd6558-b928-5db1-8744-dc150f1bcb1c`、`9fbda575-6578-574f-a885-eca2e6781f14`、`9b4c789d-27b9-52c0-a480-da6f675b957f`、`7392d984-82ef-5b71-a2dd-0f82fc8404bd`、`ae4a2fb3-637c-51f1-8661-9b00d43896c0`、`74cca34d-90c1-550a-ac3b-a75da7596efa`、`dec88203-3335-53ad-8f32-f599838099b5`、`732ad76b-eb60-5441-8c98-3c101345f20d`、`2377ea79-daee-5aff-8af4-efd3335a0a63`、`1ca34615-3618-57f4-a74c-a5de417fce7d`、`a00b3959-3fb4-5bd1-b080-ad718285cf71`、`96787fb9-cffc-545b-9637-cb35c238d7fc`、`72759245-29a2-5f1c-8420-f586190ac434`、`227a718a-65ce-55b2-bd6b-718bc585370f`、`9c4b2829-5eab-51e6-be65-ffacd7230ac2`、`8fe23c62-55a0-5ad2-9c8f-486f3459136d`、`60b4a535-b2cc-5ee2-954d-42cdd48ada8b`、`0848f322-562e-52d0-be22-8b2a5dbcc317`、`6d7ef808-9bbb-54d2-ba03-ab2ecfba8b79`、`11e6a63e-2572-5129-8f62-42c46e3844ca`、`4a309095-83e0-505e-be68-c6a0f6fe1c2b`、`c78439a5-8fcb-5c72-99b5-3fb718c03e55`、`ee83ba8e-da47-5385-b23a-bc34e7a6f58f`、`a088f3ea-c6c2-5f14-8831-3f1844592172`、`62072b45-7a4e-5a3a-b33b-ada5f46fa02a`、`2128b685-1165-5ffc-ae59-1bf377c0d729`、`a9707a85-61c1-5b2f-8212-6501f4a27597`、`89409f44-6c7f-5559-98dd-3c92e023980c`、`9a8a560e-ea1a-5b92-af21-27c315705f4f`、`04ebe6bb-3fde-5699-9478-cd4f92b06d0f`、`069a6203-552c-58c5-b57c-53b3dd5f055f`、`fe92f9bd-d2a3-5ee9-98ac-d05dfb4de85b`、`c829259a-d24e-5658-8862-8340fa564e6a`、`d929e3b7-1560-5a59-9d89-bb9bb0638eab`、`df181db4-2fb1-5bf6-9f35-13804366c141`、`fe7e2369-5a98-5338-b704-cc100dee30c9`、`145bdfe5-a2ba-5d54-98ee-b5a4c7fcf064`、`ea154f6b-e6ab-5e37-b761-21b8d3ba417d`、`0f163715-de78-5dda-ae47-86f1122c45d8`、`cca4a947-a5ad-51d8-8a61-8e890c84e2f8`、`c343e7fe-6a21-58a4-ba78-e4e9b031145d`、`2777ee0e-7dc2-5078-b8c8-26b36785fa88`、`c4993a58-dad1-5fb5-91a0-49252e01399c`、`2e906727-a570-51b8-b30d-dc5badd3b7b0`、`713d4cb5-ce3d-57a5-b325-ed96cc9d9b48`、`3cae9028-3f2d-552b-b954-adde6281dc51`、`e3d0a24f-d713-56f8-ad56-54af4e76f72f`、`eb67ecd4-cfc7-539b-8e4b-53608b0f134f`、`f9b97a53-3853-52dc-819c-9e669fdfeba1`、`617a0fd1-b2a3-50e9-86a0-edaacc3d31bd`、`0f086c35-1137-5163-81fc-8b175395b42e`、`ad1081e6-5140-5fe4-a0f6-0ec0cb58afb4`、`ccc3383f-6d1f-578e-a87f-36fd93a35d58`、`9dd2dc7d-666f-5ce3-9d64-d17cc57f2987`、`09872486-2607-5d05-bee4-a6a1387b1bd4`、`4ad7059a-2d64-5d5e-ae0d-5a3deb9a9366`、`2a8906da-4f07-5bb5-9bfd-1baab7146b33`、`13ecfc45-fbf6-583f-90ca-883d5aac1b6a`、`e1be9e30-31be-593a-afc4-056a711625f5`、`e0f47cec-5443-514b-b6d2-0a1c645071c7`、`18bee733-8431-54f9-945c-51158293a018`、`cbcdf14c-ef83-5766-b74b-17b8184f723b`、`1c8d85e7-863f-56d5-8664-2a2fb75270fa`、`7d53ab4b-35f8-56d7-8fa1-b60303bfa780`、`8212bc19-143e-5d78-97e5-70c3c74a43fc`、`3863d98c-c549-54eb-8edf-8ee607015e18`、`1f1f3c09-9828-51b3-8841-6e66f0645a09`、`cd0d485e-e55d-55c4-8ecf-e8b99a10b355`、`b85f0b10-310b-5770-8568-fecb79b3d4cf`、`4e0c6800-19d0-55de-927b-c8fc865c5cc7`、`1c2fc42d-da82-50b7-8c80-532008f78dd8`、`d7bd5618-3bfb-5721-9b2b-076b5657d172`、`b4fe9a9a-edd1-545d-a99d-c1fd30535d81`、`e2c30e82-dfea-5ac9-963f-581b093bfe12`、`be8a0129-a813-545d-861a-caf9e65171e7`、`3635b11e-1ada-5ae2-a6aa-4e5831a67d24`、`329cbbe6-0081-56f5-a671-d55992044274`、`5e52ede8-6af3-5c97-87a7-893aee7ae924`、`5e16fc9a-dd9d-54a4-8c5e-268f5b27dd36`、`078e3fe1-9b1c-50ef-93db-ec15faef03fa`、`e7f4fc3e-9052-5fbc-9dd9-133b398c89a2`、`df3c0868-77bf-52fe-8c70-0cdd81388ab5`、`dfd204ee-c750-5286-9b61-1e6101260e74`、`e87141a6-52f0-5170-9e2b-7f3fc394956a`、`bf63081c-17a8-5756-b418-7ce8ad07cdf8`、`b6e85bac-d38c-53fc-a8fc-3a5011f2a668`、`4ed365e2-198e-5816-bc16-05d2db22a5cf`、`3c6c1309-9a04-5665-9af3-dc4794c82b86`、`94db16e3-38c8-526a-b333-a0f7380b4ba3`、`7ff6f598-b4e6-5482-8adf-df771cf6dac2` 与 `1c7fc7a7-1fd5-575a-bf28-336acbf4bc5b`：
 
 - 节点协议不兼容 0.2；server 的功能与数据结构保持一致，实现可以重新设计。
 - server 按功能模块拆成 contrib：每个模块提供自己的 API 与页面，accept 所依赖的模块；server 本体提供页面框架与基础 API 服务。
@@ -8,11 +8,12 @@
 - 私有绑定只用于同一接口的第二个实例：server 的数据库是 STORAGE、DB 与 SCHEMA 的第二个实例，以私有绑定装配后以 SERVER_DB 与 SERVER_SCHEMA 提供，与 harness 的多个实现同理。node 与 server 的数据库各自独立，可以选用不同的后端。
 - server 的设置写在各自所属条目的 config 里。
 - server 的结构与节点对应，遇到问题先参考节点的做法：节点由 storage 的 database 条目提供 DB、legacy-node-migrations 接续 0.2 的历史；server 由 server-database 提供 SERVER_DB 与 SERVER_SCHEMA、server-migrations 接续 0.2 的历史。
-- 侧边栏、概览与权限点的登记入口由 server 本体提供。模块登记带名称与图标的页面后，页面出现在侧边栏；概览只展示各模块登记的内容，顺序按账户调整。
+- 侧边栏与权限点的登记入口由 server 本体提供，概览内容的登记由 server-overview 提供。模块登记带名称与图标的页面后，页面出现在侧边栏；概览在问候之下展示各模块登记的内容，顺序按账户调整。
 - 模块页面运行在同源 iframe 中，前端框架由模块选择，主题、语言与导航经框架的嵌入工具取得。iframe 用于前端框架的独立；服务端以只安装可信的 contrib 为边界。
 - 主题经 THEME 接口由主题插件提供，在设置页的外观部分选择；语言由框架统一给出，是否提供多语言由模块决定。
 - 页面以 [design](design/README.md) 中的效果图为准：桌面与窄屏、夜市与晨市，包括登录页插画与摊位卡片棚子的画法。
 - 电脑的登记、身份、在线状态与对电脑的调用归 server-computer 模块，节点协议的三个接口由它注册。
+- 电脑详情所需的机器信息由节点的 node-management 经 RemoteEntry 提供，server-computer 经调用取得并缓存，页面经统一总线刷新；电脑可以改名。
 - 0.2 的表结构由 server-migrations 按原历史接续，之后各模块持有自己的表，并按需新增。
 - 节点经三个相互独立的 HTTP 接口接收调用、回传结果、上报事件，结果不混入事件上报；server 对节点的调用经节点 sidecar 分发。
 - 副本之间的协作由可替换的中转 contrib 实现。
@@ -20,7 +21,7 @@
 - 页面写入的凭据进入 0.3 配置；server 的数据全部位于 ~/.bcn，首次启动从 ~/.bcs 导入。
 - 缺少的节点能力由新的 contrib 补齐。
 - 所有计时经 TIMER。
-- server 的功能都由 contrib 实现，server-management 也在自己的仓库中维护；BCN 仓库只有 config-versions 的 V4→V5 转换，其他逻辑不变。
+- server 的功能都由 contrib 实现，server-management 也在自己的仓库中维护；BCN 仓库只有 config-versions 的 V4→V5 转换，以及 node-management 为电脑提供的机器信息，其他逻辑不变。
 - 宿主读取各已安装包在自身 pyproject.toml 中声明的 `bazaar_compute_node.defaults` 入口并合并默认配置，主仓库只按包名引用 server-management；其他 management 包同样在各自的仓库发行，与 bazaar-compute 一起安装即可使用，不需要改动主仓库。
 
 ## 分支
@@ -36,7 +37,7 @@ BCN 仓库的改动在 `0.3-server` 上进行，该分支从 `0.3` 的 cd8470d �
 | bazaar-contrib-server-database | open-bazaar/contrib-server-database | server-database | 以私有绑定装配 server 的数据库（storage、所选后端、database 与 schema），以 SERVER_DB 与 SERVER_SCHEMA 提供；打开数据库前从 ~/.bcs 复制数据库与 session.key |
 | bazaar-contrib-server-migrations | open-bazaar/contrib-server-migrations | server-migrations | 以原 v01–v07 为历史接续 0.2 的 BCS 表结构，以 upgrade_only 登记，完成后提供 SERVER_MIGRATIONS |
 | bazaar-contrib-server | open-bazaar/contrib-server | server、server-theme-night、server-theme-day | server 是 server 本体，提供外壳、嵌入工具、侧边栏、设置页、统一总线、权限点登记、主题接口、语言、refs 与 API 挂载；server-theme-night 与 server-theme-day 是默认带上的两个主题插件 |
-| bazaar-contrib-server-overview | open-bazaar/contrib-server-overview | server-overview | 概览页、概览内容的登记与每个账户的排序 |
+| bazaar-contrib-server-overview | open-bazaar/contrib-server-overview | server-overview | 概览页与问候、概览内容的登记与每个账户的排序 |
 | bazaar-contrib-server-access | open-bazaar/contrib-server-access | server-access | 会话、登录页、账户、角色、分享与权限检查，并定义第三方登录方式的接口 |
 | bazaar-contrib-server-github | open-bazaar/contrib-server-github | server-github | 以 GitHub 账户登录，实现第三方登录方式的接口 |
 | bazaar-contrib-server-computer | open-bazaar/contrib-server-computer | server-computer、server-relay-memory | server-computer 持有电脑的登记、身份与在线状态，注册节点协议的三个接口，定义中转契约，提供对电脑的调用以及电脑的 API 与页面；server-relay-memory 是中转的单进程内存实现 |
@@ -124,7 +125,10 @@ BCN 仓库的改动在 `0.3-server` 上进行，该分支从 `0.3` 的 cd8470d �
 - 首页跳到当前账户能看到的第一个侧边栏链接。
 - 设置固定在侧边栏底部。底部的账户卡片显示头像与名称，并带白天与黑夜的切换，点选即为总是白天或总是黑夜；退出在设置页目录的末尾。
 - 侧边栏还可以登记组件，包括位置（某个分组之下，或侧边栏最上方）、内容地址、查看所需的权限点与顺序。宽屏时内容在分组下以 iframe 载入，窄屏时放在底部导航上方的一条中；插件按嵌入页面的 data-layout 画两种样子，内容经统一总线更新。例如 agent 模块的「正在工作」在宽屏列出工作中的 agent；在手机上轮播，每次显示一个 agent 的灯笼、名字、会话与时长，点按进入该 agent。
-- 概览由 server-overview 提供：它以 OVERVIEW 提供概览内容的登记，想在概览上显示内容的插件 accept 它。登记项包括键、标题的文案键、在 iframe 中加载的内容地址，以及查看所需的权限点。概览页按当前账户保存的顺序展示，没有调整过的按登记顺序；它把总览登记在侧边栏的工作台分组中。
+- 概览由 server-overview 提供：它以 OVERVIEW 提供概览内容的登记，想在概览上显示内容的插件 accept 它。登记项包括键、标题的文案键、在 iframe 中加载的内容地址、查看所需的权限点，以及占用的列数（1–3，缺省 1）。概览页按当前账户保存的顺序展示，没有调整过的按登记顺序；它把总览登记在侧边栏的工作台分组中。
+  - 页面顶部是问候：按浏览器的当地时间，5–10 点为早上好，11–12 点为中午好，13–17 点为下午好，其余为晚上好，后接账户名。
+  - 内容排在宽屏三列、窄屏一列的网格中，各占登记的列数。server-overview 不给内容加卡片与标题，分区标题与外框由登记的模块按 design 自己画。
+  - 顶栏的「调整顺序」打开后，每块内容显示前移与后移按钮，点「完成」收起。
   - 排序表记录账户、登记键与位置，登记在 server-overview 的版本链上。
 - 设置页由 server 本体提供，外观部分由它自己登记；其他模块登记设置页中的部分，登记项包括键、标题的文案键、在 iframe 中加载的内容地址，以及查看所需的权限点或仅 admin 可见。
 - 权限点登记项包括权限点与说明。权限点写作「模块.动作」，同时是文案键。server-access 读取登记生成角色页的选项并执行检查；0.2 已有的权限点名字保持不变。
@@ -180,9 +184,10 @@ server-access 接受 server 本体，登记登录页，在设置页登记安全�
   - 缺少权限点返回 403，目标不可见返回 404。
 - 分享：
   - relations 记录 computer_owner、agent_owner、computer_share_role 与 agent_share_role 四种关系，分享的权限点放在 ext 中。
-  - 账户可操作的目标，是它拥有的目标，加上分享给它某个角色、且带有该权限点的目标；前提是账户的角色具备这个权限点。
-  - 可分享的权限点：电脑为 computers.view、agents.create、computers.delete；agent 为 agents.view、agents.update、agents.delete、agents.approve。computers.share 只作用于自己拥有的电脑。
-  - 编辑分享时只能授予自己在该目标上具备的权限点。
+  - 持有目标的模块经 ACCESS 登记一类可分享的目标：类别（如 computer）、分享所需的权限点、可分享的权限点，以及按 id 取目标名称的函数。归属由模块在建立目标的事务中经 ACCESS 记下；删除目标时，在同一事务中删除它的归属与分享。
+  - 账户可操作的目标，是它拥有的目标，加上分享给它某个角色、且带有该权限点的目标；前提是账户的角色具备这个权限点。admin 可操作全部目标。
+  - 可分享的权限点：电脑为 computers.view、computers.update、computers.delete，agents.create 随第 13 阶段的 agent 模块加入；agent 为 agents.view、agents.update、agents.delete、agents.approve。分享所需的权限点（如 computers.share）只作用于自己拥有的目标，admin 可以分享任何目标。
+  - 分享页由 server-access 提供，地址为 `/ui/access/shares/<类别>/<目标的短编号>`，模块在自己的页面中以 iframe 载入。页面按角色列出可分享的权限点，可以搜索角色，标出全局默认角色，提示未保存的修改。编辑时只能授予自己在该目标上具备的权限点；保存时只替换这些权限点，其余保持不变，权限点全部取消的角色删除分享。保存或取消后，页面向所在的 iframe 派发 `bazaar:done`。
 - 设置页：外观（主题与语言，所有账户可用）由 server 本体登记，经登录模块写入账户，保存后外壳整页重新载入；安全部分只对 admin 显示；角色、账户与登录方式部分分别由 settings.roles、settings.accounts 与 settings.oidc 控制。
 - session.key 归 server-access，它同时以带标签的 HMAC 为其他模块签名，例如 0.2 中以 `image:` 为标签的图片地址。
 
@@ -278,12 +283,33 @@ http、server-computer、server-relay-memory 与 starlink 的计时都经 TIMER�
 
 ### server-computer
 
-- server-computer 持有 computers 表的身份与登记。登记电脑返回一次性 token，节点以它鉴权；登记由 server-computer 的页面与 API 发起，并经 server-access 把登记者记为该电脑的 computer_owner，与 0.2 相同。
-- server-computer 的页面与 API 包括电脑列表、登记、删除与分享，在侧边栏登记，并登记自己的概览内容；权限点沿用 0.2 的 computers.view、computers.create、computers.delete 与 computers.share。
-- 供其他 contrib 调用节点的接口为 `call(电脑, service, method, 参数)`，与 sidecar Client 的 call 同名同参。
-- 调用与在线状态经中转契约完成，server-computer 不在进程内假定节点连在哪个副本。
-- 节点 report 上来的事件以一个事件 key 在 Hub 内 announce，供后续的 agent、会话与活动模块以 listen 订阅；本阶段不写 events 表。
-- 节点协议的三个接口由 server-computer 经 http 直接注册，以 token 鉴权，不经过登录检查。
+- server-computer 持有 computers 表的身份与登记。登记电脑返回一次性 token，节点以它鉴权；登记由 server-computer 的页面与 API 发起，并经 server-access 把登记者记为该电脑的 computer_owner，与 0.2 相同。token 为 `<电脑 id>:<secret>`，secret 是 32 字节随机数的 base64url，表中只存它的 scrypt 摘要。
+- server-computer 的页面与 API 包括电脑列表、登记、改名、删除与分享，在侧边栏登记，并登记自己的概览内容；权限点为 0.2 的 computers.view、computers.create、computers.delete 与 computers.share，以及改名所需的 computers.update。电脑经 server-access 登记为可分享的目标。
+- 名称去掉首尾空白后不能为空，超过 100 个字符截断，不要求唯一；登记与改名使用同一规则。
+- 删除电脑时，在同一事务中删除它的归属与分享、0.2 的 events 表中它的事件（该表存在时）以及电脑本身，token 随之失效。
+- 供其他 contrib 调用节点的接口为 COMPUTERS 的 `call(电脑, service, method, 参数)`，与 sidecar Client 的 call 同名同参；节点上失败时抛 RemoteError，60 秒内没有结果时抛 TimeoutError。
+- 调用与在线状态经中转契约完成，server-computer 不在进程内假定节点连在哪个副本。三个接口中任一请求鉴权成功即记为电脑出现；最后一次出现在 60 秒以内的电脑为在线：长轮询每次最多保持 25 秒，失败后的重试间隔不超过 60 秒。
+- 节点 report 上来的事件以 REPORTED 在 Hub 内 announce，带电脑 id 与审计事件，供后续的 agent、会话与活动模块以 listen 订阅；本阶段不把事件写入 events 表。
+- 节点协议的三个接口由 server-computer 经 http 直接注册，以 token 鉴权，不经过登录检查；token 无效返回 401，请求体超过 1 MiB 返回 413，内容不合法返回 422。
+
+#### 机器信息
+
+- 节点的 node-management 在 NODE 上提供 `info()`，加入它的 RemoteEntry。info 返回运行版本、系统（platform.system）、系统名称与版本号、release（Windows 取 platform.version，其他取 platform.release）、架构、节点进程的启动时间、CPU 核数与一秒内的占用、内存总量与已用（总量减可用），以及各磁盘的挂载点、总量与已用。系统名称在 Linux 取 os-release 的 NAME 与 VERSION_ID，读不到时为 platform.system；macOS 为 macOS 加 mac_ver；Windows 为 Windows 加 platform.release。
+- 磁盘逐个读取 psutil 列出的分区，跳过 squashfs、iso9660、udf 与 cdfs 以及读取失败的分区；总量与可用量都相同的分区视为同一块磁盘，只列第一个挂载点，例如 btrfs 子卷与 APFS 容器。node-management 因此依赖 psutil。
+- server-computer 经 call 取得 info，缓存在处理请求的 server 进程中：电脑出现时，若此前没有出现过或已离线超过 60 秒，下发一次；页面渲染或经统一总线刷新时读到在线的电脑，缓存满 60 秒就再下发一次，同一台电脑同时只有一次在途。没有人看页面时不再下发。节点没有回应或回应不合法时，保留上次的结果。
+
+#### 页面
+
+页面以 design 中电脑的效果图为准：
+
+- 侧边栏在工作台分组登记「电脑」，徽标为账户可见的电脑数量。
+- 列表的列为电脑（系统图标、名称、系统名称与架构）、状态、内存、硬盘、版本与最后在线。内存与硬盘为 btop 式的 16 格进度条，硬盘取占用最高的一块；格子按所在位置着色，前 60% 为 jade，到 85% 为 saffron，其余为 crimson，即灯笼的三种状态色。版本只写版本号；离线的电脑以横线代替进度条。列表按 id 分页，每页 50 台，滚动到底时载入下一页；列表与徽标经统一总线随电脑的登记、改名、删除、上下线与机器信息更新。
+- 窄屏时每台电脑一张卡片：系统图标、名称与状态，在线时名称下方是 8 格的内存与硬盘。
+- 行末的菜单按账户在该电脑上的权限点给出重命名、分享与删除；点击行打开详情。
+- 详情在宽屏为右侧抽屉，窄屏为整页：标题为名称，旁边的铅笔原地改名，回车保存，Esc 取消；其下为系统名称、版本号与架构；事实为状态、已运行（按启动时间计算）与版本；资源为 CPU、内存与每块磁盘各一条进度条，磁盘以挂载点标注，并注明何时更新；底部为分享与删除。离线时说明重新连上后显示系统与资源。
+- 登记在抽屉中分三步：起名；给出在电脑上运行的命令；等待电脑连上，连上后抽屉转为它的详情。命令为 `uv tool install "bazaar-compute[node]"` 与 `bcn contrib add bazaar-contrib-starlink --enable starlink --option server=<页面的 origin> --option token=<token>`，按 Linux／macOS 与 Windows 的写法分行；token 的中段以圆点遮住，复制按钮复制完整命令，token 只显示这一次。
+- 分享在抽屉中以 iframe 载入 server-access 的分享页；删除前确认，并说明 token 立即失效、分享一并删除。
+- 概览内容占两列：分区标题为「摊位」，副标题为电脑数量，有离线的电脑时加上离线数量，右侧链接到全部电脑；其下每台电脑一张摊位卡片，两张一行，顶部是与插画同一画法的棚子，颜色取名称的 tint；标题行为系统图标、名称、系统名称与版本，右侧为在线，或「离线」加离线时长的最大单位（分钟、小时或天）。
 
 ### 节点侧
 
@@ -323,14 +349,17 @@ http、server-computer、server-relay-memory 与 starlink 的计时都经 TIMER�
   - 验证：第三方登录以测试中按接口实现的一种登录方式验证：授权事务只能使用一次，过期或浏览器令牌不符时被拒；首次登录建账户并带登录方式或全局的默认角色，都没有时失败；会话过期后续期在授权有效时延续登录，失效时回到登录页；被登录方式用作默认角色的角色不能删除；有第三方登录时账号密码收在右上角，可以往返切换。
   - 验证：server-github 的测试对本地 TLS 服务进行，做法与 Dex 的 GitHub connector 相同：该服务以测试证书提供插件用到的 GitHub 接口（授权后带 code 回调、换取令牌、/user 与 /user/emails），覆盖首次登录建账户、再次登录、续期、授权失效后续期失败、拒绝授权与 GitHub 不可用；配置页保存配置并按页面 origin 给出回调地址。
   - 验证：以维护者的 GitHub 账户与在其名下建立的 OAuth App 手工验收一次：测试实例运行在浏览器可以访问的机器上，以真实浏览器完成登录与续期，在 GitHub 上取消授权后续期失败并回到登录页。
-- Task 48：server-computer 与 server-relay-memory：身份与登记、三个接口、中转契约、调用与在线状态，以及电脑的页面、API、权限点与概览内容；server-access 的分享随它的第一个使用者一起交付，包括可见与可操作范围的检查和分享的编辑。
+- Task 48：新仓库 contrib-server-computer 的 server-computer 与 server-relay-memory：身份与登记、三个接口、中转契约、调用与在线状态、机器信息，以及电脑的页面、API、权限点、改名与概览内容；server-access 的分享随它的第一个使用者一起交付，包括分享的登记、可见与可操作范围的检查和分享页；node-management 的 `info()` 与 psutil 依赖；server-overview 的问候、内容的列数与调整顺序；config-versions 的 V4→V5 转换与 server-management 的默认配置加入 server-computer 与 server-relay-memory。发版顺序为 bazaar-contrib-server-access、bazaar-contrib-server-overview、bazaar-contrib-server-computer、bazaar-contrib-server-management。
   - 验证：登记电脑后得到一次性 token，错误 token 被拒。
   - 验证：长轮询的保持、返回与退出时释放；调用与结果的关联、在途去重与 60 秒超时。
   - 验证：事件确认与重放跳过；在线时间的记录与查询；电脑页面与 API 按权限点与分享显示。
+  - 验证：只分享了查看的角色不能改名，分享了修改后可以改名，空名称被拒；分享页只能授予自己具备的权限点，保存后可见与可操作的范围随之变化。
+  - 验证：node-management 的 info 在三平台返回系统、CPU、内存与磁盘；server 经 call 取得后显示在列表、详情与概览中。
+  - 验证：以真实浏览器在 1440px 与 390px 宽度下完成登记、改名、分享与删除，与 design 中电脑的效果图一致。
 - Task 49：bazaar-contrib-starlink。
   - 验证：sidecar 分发只到声明成员，结果回传与失败重试，上报的确认与重放。
   - 验证：token 与 token_env 的选择，server 不可达时的退避重试，退出时结束在途调用与后台任务。
-- Task 50：V4→V5 转换中的 starlink 迁移，并在 contrib-index 登记九个新包。
+- Task 50：V4→V5 转换中的 starlink 迁移，并在 contrib-index 登记十个新包。
 - Task 51：两端联合验收。
   - 在独立进程中分别运行 server 与节点，各自使用自己的配置、数据库、端口与运行目录。
   - 经真实 HTTP 验证身份、调用 agent-activity 与 node 的已声明成员、结果、事件确认与重放、server 重启后的恢复，以及两端退出。

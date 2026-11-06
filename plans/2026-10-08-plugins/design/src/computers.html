@@ -11,18 +11,21 @@
 <script src="awning.js"></script>
 <style>
   .main { position: relative; }
-  .tbl { overflow: hidden; }
-  .tr { display: grid; grid-template-columns: 2.1fr 1fr 1.6fr 1fr 1fr 1fr 40px; gap: 14px; align-items: center; padding: 14px 20px; }
+  .tbl { overflow: visible; }
+  .tbl .tr.h { border-radius: var(--r-lg) var(--r-lg) 0 0; }
+  .tr { display: grid; grid-template-columns: 1.9fr .8fr 1.4fr 1.4fr .8fr .9fr 40px; gap: 14px; align-items: center; padding: 14px 20px; }
   .tr + .tr { border-top: 1px solid var(--line-soft); }
   .tr.h { padding-top: 12px; padding-bottom: 12px; font-size: 12px; color: var(--faint); font-weight: 600; letter-spacing: .04em; background: var(--surface-2); }
   .pc { display: flex; align-items: center; gap: 12px; }
   .pc .os { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; background: var(--sunken); border: 1px solid var(--line); color: var(--text-2); position: relative; overflow: hidden; }
-  .pc .os::before { content: ""; position: absolute; inset: 0 0 auto; height: 6px; background: repeating-linear-gradient(90deg, var(--stripe) 0 6px, transparent 6px 12px); }
-  .pc .os svg { width: 16px; height: 16px; fill: currentColor; stroke: none; margin-top: 4px; }
+  .pc .os svg { width: 16px; height: 16px; fill: currentColor; stroke: none; }
   .pc b { display: block; font-size: 14px; }
   .pc span { font-size: 12px; color: var(--muted); }
-  .lrow { display: flex; align-items: center; gap: 5px; }
-  .lrow .n { margin-left: 6px; font-size: 12.5px; color: var(--muted); }
+  /* memory and disk as a row of cells, as btop draws them, in the lanterns' three colours by where each cell sits */
+  .use { display: grid; grid-template-columns: auto auto; justify-content: start; align-items: center; column-gap: 8px; row-gap: 4px; }
+  .use b { font: 600 12px var(--font-mono); color: var(--text-2); }
+  .use small { grid-column: 1 / -1; font: 11.5px var(--font-mono); color: var(--muted); }
+  .use.none { font-size: 13px; color: var(--faint); }
   .cell { font-size: 13px; color: var(--text-2); }
   .cell.mono { font-size: 12.5px; }
   .backdrop { position: absolute; inset: 68px 0 0 0; background: rgba(5, 7, 10, .62); backdrop-filter: blur(2px); }
@@ -44,7 +47,103 @@
   .waiting span { font-size: 12.5px; color: var(--muted); }
   .d-ft { padding: 16px 24px; border-top: 1px solid var(--line-soft); display: flex; align-items: center; gap: 10px; }
   .d-ft .muted { font-size: 12.5px; }
+  /* ?view= shows one of: enrol (the default), list, menu, share, delete, detail; detail-plugins adds the marketplace's section (stage 15) */
+  .backdrop, .drawer, .pop, .confirm { display: none; }
+  :root[data-view="enrol"] .backdrop, :root[data-view="enrol"] .drawer.enrol,
+  :root[data-view="share"] .backdrop, :root[data-view="share"] .drawer.share,
+  :root[data-view="delete"] .backdrop, :root[data-view="delete"] .confirm,
+  :root[data-view="detail"] .drawer.detail, :root[data-view="detail-plugins"] .drawer.detail { display: flex; }
+  :root[data-view="menu"] .pop { display: block; }
+  .backdrop { display: none; }
+  :root[data-view="enrol"] .backdrop, :root[data-view="share"] .backdrop, :root[data-view="delete"] .backdrop, :root[data-view="detail"] .backdrop, :root[data-view="detail-plugins"] .backdrop { display: block; }
+  /* a row's actions: what the account may do with that computer */
+  .acts { position: relative; display: grid; place-items: center; }
+  .acts .more { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: var(--muted); }
+  :root[data-view="menu"] .tr.picked .acts .more { background: var(--surface-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--line); }
+  .pop { position: absolute; top: 36px; right: 0; z-index: 3; min-width: 168px; padding: 6px; border-radius: var(--r-md); background: var(--raised); border: 1px solid var(--line); box-shadow: var(--shadow); }
+  .pop .it { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; font-size: 13.5px; color: var(--text-2); }
+  .pop .it.hover { background: var(--surface-2); color: var(--text); }
+  .pop .it.danger { color: var(--crimson); }
+  .pop .sep { height: 1px; margin: 4px 6px; background: var(--line-soft); }
+  /* sharing: each role a row, each point a column the account itself holds on this computer */
+  .share .d-bd { gap: 16px; }
+  .share .hint { margin: 0; font-size: 13px; line-height: 1.6; color: var(--text-2); }
+  .grants { border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+  .grants .gr { display: grid; grid-template-columns: 1fr 72px 72px; align-items: center; gap: 8px; padding: 11px 16px; }
+  .grants .gr + .gr { border-top: 1px solid var(--line-soft); }
+  .grants .gr.h { padding: 9px 16px; background: var(--surface-2); font-size: 12px; font-weight: 600; letter-spacing: .04em; color: var(--faint); }
+  .grants .gr.h span:not(:first-child), .grants .gr .ck { justify-self: center; }
+  .grants .rn b { display: block; font-size: 13.5px; font-weight: 600; }
+  .grants .rn small { font-size: 12px; color: var(--muted); }
+  .grants .gr.changed { background: color-mix(in srgb, var(--saffron) 7%, transparent); }
+  .ck { width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid var(--line-strong); background: var(--surface); display: grid; place-items: center; color: var(--saffron-ink); }
+  .ck.on { background: var(--saffron); border-color: var(--saffron); }
+  .ck svg { width: 12px; height: 12px; stroke-width: 3; }
+  .share .d-ft .dirty { display: flex; align-items: center; gap: 6px; color: var(--saffron); font-size: 12.5px; }
+  .share .d-ft .dirty::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--saffron); }
+  /* removing: asked once, in the middle */
+  .confirm { position: absolute; z-index: 3; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 440px; flex-direction: column; gap: 14px; padding: 24px; border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); }
+  .confirm .ic { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: var(--crimson-soft); color: var(--crimson); }
+  .confirm h3 { margin: 0; font-family: var(--font-display); font-size: 19px; font-weight: 650; }
+  .confirm p { margin: 0; font-size: 13.5px; line-height: 1.65; color: var(--text-2); }
+  .confirm .row { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
+  .btn.danger { background: var(--crimson); color: #fff; border-color: transparent; }
+  /* a computer opened from its row: how it is now, and what the account may do with it */
+  .detail { width: 540px; }
+  .detail .d-hd .pc b { font-family: var(--font-display); font-size: 19px; font-weight: 650; }
+  .detail .d-bd { gap: 22px; overflow: hidden; }
+  .facts { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line); border-radius: var(--r-md); }
+  .facts > div { display: flex; flex-direction: column; gap: 6px; padding: 12px 16px; }
+  .facts > div + div { border-left: 1px solid var(--line-soft); }
+  .facts small { font-size: 12px; color: var(--faint); }
+  .facts b { font-size: 14px; font-weight: 600; }
+  .facts b.mono { font-size: 13.5px; }
+  .sec h4 { display: flex; align-items: baseline; margin: 0 0 12px; font-size: 13px; font-weight: 650; }
+  .sec h4 small { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--faint); }
+  .meter { display: grid; grid-template-columns: 18px 40px 1fr 40px; align-items: center; column-gap: 10px; row-gap: 5px; }
+  .meter + .meter { margin-top: 14px; }
+  .meter > svg { width: 16px; height: 16px; color: var(--muted); }
+  .meter span { font-size: 13px; color: var(--text-2); }
+  .meter b { justify-self: end; font: 600 12.5px var(--font-mono); color: var(--text); }
+  .meter small { grid-column: 3 / -1; font: 11.5px var(--font-mono); color: var(--muted); }
+  .cells.wide { display: flex; }
+  .cells.wide i { flex: 1; height: 14px; }
+  /* plugins, the marketplace's section (stage 15): a card a package, in a box that keeps its height and scrolls inside */
+  .detail .d-bd > .grow { flex: 1; min-height: 0; display: none; flex-direction: column; }
+  :root[data-view="detail-plugins"] .detail .d-bd > .grow { display: flex; }
+  .plug { position: relative; flex: 1; min-height: 0; overflow: hidden; padding: 10px 16px 10px 10px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--sunken); }
+  .plug .thumb { position: absolute; top: 10px; right: 5px; width: 4px; height: 64px; border-radius: 2px; background: var(--line-strong); }
+  .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .pcard { display: flex; flex-direction: column; gap: 9px; padding: 12px; border-radius: var(--r-md); background: var(--surface); border: 1px solid var(--line); }
+  .pcard.no { border-color: color-mix(in srgb, var(--crimson) 45%, var(--line)); }
+  .pcard .ch { display: flex; align-items: center; gap: 10px; }
+  .pcard .src { width: 30px; height: 30px; flex: none; border-radius: 8px; display: grid; place-items: center; background: var(--surface-2); border: 1px solid var(--line); color: var(--text-2); }
+  .pcard .src svg { width: 16px; height: 16px; }
+  .pcard .src.pypi { color: #5b9bd5; }
+  .pcard .src.git { color: #f05032; }
+  :root[data-theme="day"] .pcard .src.pypi { color: #3775a9; }
+  .pcard .cn { min-width: 0; }
+  .pcard .cn b { display: block; font: 600 13px var(--font-mono); }
+  .pcard .cn span { font: 11px var(--font-mono); color: var(--faint); }
+  .pcard p { margin: 0; min-height: 34px; font-size: 12px; line-height: 1.45; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .pcard .es { display: flex; flex-direction: column; gap: 8px; padding-top: 9px; border-top: 1px solid var(--line-soft); }
+  .pcard .e { display: flex; align-items: center; gap: 8px; font: 12px var(--font-mono); color: var(--text-2); }
+  .pcard .e i { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--jade); }
+  .pcard .e i.no { background: var(--crimson); }
+  .pcard .e span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pcard .e em { font: normal 11px var(--font-sans); color: var(--saffron); }
+  .pcard .err { font: 11px var(--font-mono); line-height: 1.4; color: var(--crimson); }
+  .sw { width: 32px; height: 18px; border-radius: 999px; background: var(--line-strong); position: relative; }
+  .sw::after { content: ""; position: absolute; left: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; }
+  .sw.on { background: var(--jade); }
+  .sw.on::after { left: auto; right: 2px; }
+  .btn.danger-o { color: var(--crimson); border-color: color-mix(in srgb, var(--crimson) 35%, transparent); }
 </style>
+<script>
+  document.documentElement.dataset.view = new URLSearchParams(location.search).get('view') || 'enrol';
+  // the agents counted in the rows below: 12 + 2 + 2 + 2
+  addEventListener('load', () => { for (const n of document.querySelectorAll('.side .nav')) if (n.textContent.includes('智能体')) n.querySelector('.count').textContent = '18'; });
+</script>
 </head>
 <body>
 <div class="app">
@@ -57,36 +156,38 @@
     </header>
     <section class="content">
       <div class="card tbl">
-        <div class="tr h"><span>电脑</span><span>状态</span><span>智能体</span><span>版本</span><span>待同步事件</span><span>最后在线</span><span></span></div>
+        <div class="tr h"><span>电脑</span><span>状态</span><span>内存</span><span>硬盘</span><span>版本</span><span>最后在线</span><span></span></div>
         <div class="tr">
           <div class="pc" style="--stripe:#f5b342"><div class="os"><i data-l="linux"></i></div><div><b>kana-vm</b><span>Fedora 44 · x86_64</span></div></div>
           <span class="online">在线</span>
-          <div class="lrow"><span class="lantern work"></span><span class="lantern on"></span><span class="lantern fail"></span><span class="n">3 位 · 1 位异常</span></div>
-          <span class="cell mono">bcn 0.3.0</span><span class="cell mono">0</span><span class="cell">刚刚</span><span class="muted"><i data-i="more" class="sm"></i></span>
+          <div class="use"><span class="cells" data-v="41"></span><b>41%</b><small>13.1 / 32 GB</small></div><div class="use"><span class="cells" data-v="63"></span><b>63%</b><small>302 / 476 GB</small></div>
+          <span class="cell mono">0.3.0</span><span class="cell">刚刚</span><div class="acts"><span class="more"><i data-i="more" class="sm"></i></span></div>
         </div>
         <div class="tr">
           <div class="pc" style="--stripe:#34c3a0"><div class="os"><i data-l="apple"></i></div><div><b>aqua-mbp</b><span>macOS 26 · arm64</span></div></div>
           <span class="online">在线</span>
-          <div class="lrow"><span class="lantern work"></span><span class="lantern on"></span><span class="n">2 位</span></div>
-          <span class="cell mono">bcn 0.3.0</span><span class="cell mono">0</span><span class="cell">刚刚</span><span class="muted"><i data-i="more" class="sm"></i></span>
+          <div class="use"><span class="cells" data-v="72"></span><b>72%</b><small>11.5 / 16 GB</small></div><div class="use"><span class="cells" data-v="38"></span><b>38%</b><small>190 / 494 GB</small></div>
+          <span class="cell mono">0.3.0</span><span class="cell">刚刚</span><div class="acts"><span class="more"><i data-i="more" class="sm"></i></span></div>
         </div>
-        <div class="tr">
+        <div class="tr picked">
           <div class="pc" style="--stripe:#8f9dff"><div class="os"><i data-i="windows"></i></div><div><b>win-desk</b><span>Windows 11 · x86_64</span></div></div>
           <span class="online">在线</span>
-          <div class="lrow"><span class="lantern work"></span><span class="lantern on"></span><span class="n">2 位</span></div>
-          <span class="cell mono">bcn 0.3.0</span><span class="cell mono" style="color:var(--saffron)">12</span><span class="cell">刚刚</span><span class="muted"><i data-i="more" class="sm"></i></span>
+          <div class="use"><span class="cells" data-v="78"></span><b>78%</b><small>25.1 / 32 GB</small></div><div class="use"><span class="cells" data-v="91"></span><b>91%</b><small>466 / 512 GB</small></div>
+          <span class="cell mono">0.3.0</span><span class="cell">刚刚</span><div class="acts"><span class="more"><i data-i="more" class="sm"></i></span>
+            <div class="pop"><div class="it hover"><i data-i="share" class="sm"></i>分享</div><div class="sep"></div><div class="it danger"><i data-i="trash" class="sm"></i>删除</div></div>
+          </div>
         </div>
         <div class="tr" style="opacity:.75">
           <div class="pc" style="--stripe:#7d8595"><div class="os"><i data-l="linux"></i></div><div><b>ci-runner-01</b><span>Ubuntu 24.04 · x86_64</span></div></div>
           <span class="online off">离线</span>
-          <div class="lrow"><span class="lantern off"></span><span class="lantern off"></span><span class="n">2 位</span></div>
-          <span class="cell mono">bcn 0.3.0</span><span class="cell mono">—</span><span class="cell">2 小时前</span><span class="muted"><i data-i="more" class="sm"></i></span>
+          <div class="use none">—</div><div class="use none">—</div>
+          <span class="cell mono">0.3.0</span><span class="cell">2 小时前</span><div class="acts"><span class="more"><i data-i="more" class="sm"></i></span></div>
         </div>
       </div>
     </section>
 
     <div class="backdrop"></div>
-    <aside class="drawer">
+    <aside class="drawer enrol">
       <div class="d-hd"><h3>接入新电脑</h3><div class="icon-btn"><i data-i="x" class="sm"></i></div></div>
       <div class="d-bd">
         <div class="dstep">
@@ -115,6 +216,48 @@
       </div>
       <div class="d-ft"><i data-i="terminal" class="xs muted"></i><span class="muted">首次使用？之后运行 <span class="mono">bcn system-service install</span> 让它开机自启。</span><div class="btn" style="margin-left:auto">关闭</div></div>
     </aside>
+
+    <aside class="drawer share">
+      <div class="d-hd"><h3>分享 win-desk</h3><div class="icon-btn"><i data-i="x" class="sm"></i></div></div>
+      <div class="d-bd">
+        <p class="hint">选择分享给哪些角色、可以做什么。角色里的成员还要有对应的功能权限才用得上；你只能分享自己在这台电脑上有的操作。</p>
+        <div class="input"><i data-i="search" class="xs muted"></i><span class="ph">搜索角色</span></div>
+        <div class="grants">
+          <div class="gr h"><span>角色</span><span>查看</span><span>删除</span></div>
+          <div class="gr"><div class="rn"><b>成员</b><small>全局默认角色</small></div><span class="ck on"><i data-i="check"></i></span><span class="ck"></span></div>
+          <div class="gr changed"><div class="rn"><b>运维</b></div><span class="ck on"><i data-i="check"></i></span><span class="ck on"><i data-i="check"></i></span></div>
+          <div class="gr"><div class="rn"><b>设计组</b></div><span class="ck"></span><span class="ck"></span></div>
+          <div class="gr"><div class="rn"><b>访客</b></div><span class="ck"></span><span class="ck"></span></div>
+        </div>
+      </div>
+      <div class="d-ft"><span class="dirty">有未保存的修改</span><div class="btn" style="margin-left:auto">取消</div><div class="btn primary">保存</div></div>
+    </aside>
+
+    <aside class="drawer detail">
+      <div class="d-hd"><div class="pc"><div class="os"><i data-i="windows"></i></div><div><b>win-desk</b><span>Windows 11 · 10.0.26100 · x86_64</span></div></div><div class="icon-btn"><i data-i="x" class="sm"></i></div></div>
+      <div class="d-bd">
+        <div class="facts"><div><small>状态</small><span class="online">在线</span></div><div><small>已运行</small><b>3 天 4 小时</b></div><div><small>版本</small><b class="mono">0.3.0</b></div></div>
+        <div class="sec">
+          <h4>资源<small>12 秒前更新</small></h4>
+          <div class="meter"><i data-i="cpu"></i><span>CPU</span><span class="cells wide" data-n="32" data-v="23"></span><b>23%</b><small>8 核</small></div>
+          <div class="meter"><i data-i="memory"></i><span>内存</span><span class="cells wide" data-n="32" data-v="78"></span><b>78%</b><small>25.1 / 32 GB</small></div>
+          <div class="meter"><i data-i="disk"></i><span>硬盘</span><span class="cells wide" data-n="32" data-v="91"></span><b>91%</b><small>C: · 466 / 512 GB</small></div>
+          <div class="meter"><i data-i="disk"></i><span>硬盘</span><span class="cells wide" data-n="32" data-v="60"></span><b>60%</b><small>D: · 1.2 / 2 TB</small></div>
+        </div>
+        <div class="sec grow">
+          <h4>插件<small>共 25 个 · 1 个出错</small></h4>
+          <div class="plug"><div class="cards"><div class="pcard no"><div class="ch"><span class="src pypi"><i data-l="pypi"></i></span><div class="cn"><b>telegram</b><span>0.3.0rc4</span></div></div><p>Telegram Channel provider for Bazaar Compute Node</p><div class="es"><div class="e"><i class="no"></i><span>telegram-builder</span><b class="sw on"></b></div><div class="err">ConnectError: All connection attempts failed</div></div></div><div class="pcard"><div class="ch"><span class="src pypi"><i data-l="pypi"></i></span><div class="cn"><b>system-service</b><span>0.3.0rc2</span></div></div><p>System service management for Bazaar Compute Node</p><div class="es"><div class="e"><i></i><span>system-service</span><b class="sw on"></b></div><div class="e"><i></i><span>system-service-readiness</span><em>重启后停用</em><b class="sw"></b></div></div></div><div class="pcard"><div class="ch"><span class="src private"><i data-i="lock"></i></span><div class="cn"><b>ops-tools</b><span>1.4.0</span></div></div><p>Our team's deployment and backup commands</p><div class="es"><div class="e"><i></i><span>ops-tools</span><b class="sw on"></b></div></div></div><div class="pcard"><div class="ch"><span class="src git"><i data-l="git"></i></span><div class="cn"><b>lark</b><span>main@3f2a9c1</span></div></div><p>Lark Channel provider for Bazaar Compute Node</p><div class="es"><div class="e"><i></i><span>lark-builder</span><b class="sw on"></b></div></div></div><div class="pcard"><div class="ch"><span class="src local"><i data-i="folder"></i></span><div class="cn"><b>workbench</b><span>0.1.0</span></div></div><p>A scripted harness for trying agents locally</p><div class="es"><div class="e"><i></i><span>workbench-builder</span><b class="sw on"></b></div></div></div><div class="pcard"><div class="ch"><span class="src pypi"><i data-l="pypi"></i></span><div class="cn"><b>claude-code</b><span>0.3.0rc6</span></div></div><p>Claude Code stream-json harness provider for Bazaar Compute Node</p><div class="es"><div class="e"><i></i><span>claudecode-builder</span><b class="sw on"></b></div></div></div><div class="pcard"><div class="ch"><span class="src pypi"><i data-l="pypi"></i></span><div class="cn"><b>agent</b><span>0.3.0rc12</span></div></div><p>Agent configuration, instances and local composition</p><div class="es"><div class="e"><i></i><span>agent</span><b class="sw on"></b></div><div class="e"><i></i><span>agent-execution</span><b class="sw on"></b></div><div class="e"><i></i><span>agent-activity</span><b class="sw on"></b></div></div></div><div class="pcard"><div class="ch"><span class="src pypi"><i data-l="pypi"></i></span><div class="cn"><b>audit</b><span>0.3.0rc9</span></div></div><p>Complete agent execution events and their publisher</p><div class="es"><div class="e"><i></i><span>audit</span><b class="sw on"></b></div></div></div></div><span class="thumb"></span></div>
+        </div>
+      </div>
+      <div class="d-ft"><div class="btn danger-o"><i data-i="trash" class="xs"></i>删除</div><div class="btn" style="margin-left:auto"><i data-i="share" class="xs"></i>分享</div></div>
+    </aside>
+
+    <div class="confirm">
+      <div class="ic"><i data-i="trash"></i></div>
+      <h3>删除电脑 ci-runner-01？</h3>
+      <p>删除后它的接入令牌立即失效，这台电脑会断开连接；分享给各角色的设置也会一并删除。</p>
+      <div class="row"><div class="btn">取消</div><div class="btn danger"><i data-i="trash" class="xs"></i>删除</div></div>
+    </div>
   </main>
 </div>
 </body>
