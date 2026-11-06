@@ -13,6 +13,7 @@ dependencies = [
     "bazaar-contrib-sidecar~=0.3.0rc8",
     "bazaar-contrib-timer~=0.3.0rc7",
     "packaging>=26.0",
+    "psutil>=7.2",
 ]
 
 [project.entry-points."bazaar_compute_node.contribs"]
