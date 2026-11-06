@@ -3,7 +3,7 @@
 ## 版本目标
 
 BCN 的业务能力、平台 provider、存储查询、控制入口和界面扩展都通过公共模块范式装配。
-所有组合使用同一个宿主和 `bcn run`：`bazaar-contrib-server` 提供 server 本体与页面框架，各功能模块包提供自己的 API 与页面，`bazaar-contrib-starlink` 提供节点连接。
+所有组合使用同一个宿主和 `bcn run`：`bazaar-contrib-server` 提供 server 本体与页面框架，各功能模块包提供自己的页面，`bazaar-contrib-starlink` 提供节点连接。
 应用入口、核心框架、公共契约与节点业务 contrib 留在 BCN 仓库，各包分别构建 wheel，以同一版本发行，首版为 `0.3.0`。
 具体 provider、server 与其功能模块及服务端迁移等官方可选 contrib 在 open-bazaar 的独立仓库维护，声明对 core 与公共接口包的兼容范围，独立构建和发行。
 `open-bazaar/contrib-server-migrations` 中的 `bazaar-contrib-server-migrations` 持有 `server-migrations` 入口，`open-bazaar/contrib-server` 中的 `bazaar-contrib-server` 持有 `server`、`server-theme-night` 与 `server-theme-day` 入口。
