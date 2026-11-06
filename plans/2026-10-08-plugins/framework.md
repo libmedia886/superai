@@ -866,7 +866,7 @@ starlink = "bazaar_contrib_starlink:starlink"
 ```
 
 server-database 以私有绑定装配 server 自己的数据库，以 SERVER_DB 与 SERVER_SCHEMA 提供；server 的其余条目在顶层启用，设置写在各自的条目里。
-server 本体接受 HTTP，挂载外壳与嵌入工具，提供侧边栏、概览、权限点与主题的登记入口；server-access 提供登录与权限；功能模块在同源 iframe 中提供各自的页面，在 /api/<模块> 下提供 API。
+server 本体接受 HTTP，挂载外壳与嵌入工具，提供侧边栏、权限点与主题的登记入口；server-overview 提供概览内容的登记；server-access 提供登录与权限；功能模块在同源 iframe 中提供各自的页面。
 server-computer 注册与节点 starlink 通信的三个 HTTP 接口，持有电脑身份、中转契约与 call。
 starlink 是独立发行包和普通节点插件，持有 listen 长轮询、announce 结果回传、report 事件上报、身份、请求关联及退避重试资源。
 新建节点默认不启用 starlink；用户配置目标 server 后启用其入口。第 12 阶段完成 starlink 后，再按原 audit／control 选择补充 V4 的事件上报和远端请求迁移。
@@ -879,7 +879,7 @@ agent 依赖 NodeAudit 始终发布，记录方按组合选择订阅；BCS 活�
 审计事件处理和请求响应分别管理；announce 直接回传调用结果，审计记录由业务独立发布并经 report 上报。
 HTTP 输入模型、身份校验、传输和请求关联由 starlink 与 server-computer 管理，服务接口及业务规则仍归提供 offer 的功能包。
 包的 pyproject.toml 声明代码依赖并导出入口，节点配置保存所选入口及参数；运行时按 accepts 建图。
-这两种依赖分别管理：server 本体先提供登记入口，功能模块再登记页面、API、权限点与概览内容，避免组合与业务之间形成运行循环。
+这两种依赖分别管理：server 本体先提供登记入口，功能模块再登记页面、权限点与概览内容，避免组合与业务之间形成运行循环。
 HTTP 与页面框架的公共类型分别由 bazaar-contrib-http 与 bazaar-contrib-server 导出，功能包导入公共契约；server-management 的默认配置选择功能模块。
 完整包清单、运行依赖、用户安装流程及各阶段验收见 [统一组合计划](roadmap.md#统一宿主与-server-组合)。
 
@@ -910,7 +910,7 @@ async def server_lifespan(ctx: Context):
         yield
 ```
 
-HTTP 包提供共用的路由、挂载和监听能力；server 本体登记外壳与静态资源，功能模块登记各自的界面与 API，server-computer 登记两端协议的接口。
+HTTP 包提供共用的路由、挂载和监听能力；server 本体登记外壳、静态资源与统一总线，功能模块登记各自的界面，server-computer 登记两端协议的接口。
 每项登记在 async with 退出时撤销，并等待在途请求结束。登记入口的归属由同一 ContribHub 的 server 实例管理，功能模块退出后才退出 server 本体的 lifespan 并撤销服务。
 
 分开部署时使用独立配置分别执行 bcn run，各进程拥有自己的数据库、socket、端口和运行目录。

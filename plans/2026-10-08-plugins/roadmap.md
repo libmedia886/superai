@@ -33,7 +33,7 @@ Actor 是内部流通的身份原语，内部身份参数、业务调用与归�
 | 9 | harness provider | Codex、Claude Code 的启动、模型、能力检查、事件解析与审批对接 | 通过 harness builder 与执行契约接入；真实 TestChannel 验证端到端行为 |
 | 10 | 节点与平台管理 | 节点配置、workspace / 文件、模型与 skills 查询、版本检查、升级、系统服务和健康；agent 配置由第 7 项的 agent 插件拥有 | RPC / 命令注册可用；各管理能力自行提供服务和入口；安装与升级共用包管理机制 |
 | 11 | server 框架与登录 | HTTP、server 本体（外壳与嵌入工具、侧边栏、权限点登记、主题、语言、refs、API 挂载）、概览、主题插件、登录与权限（会话、账户、角色、分享、第三方登录方式的接口与 GitHub 登录）、server-database、server-migrations、server-management 与 ~/.bcs 导入 | 功能模块经 server 本体登记页面与权限点、经 server-overview 登记概览内容，页面运行在同源 iframe 中；0.2 的账户、密码哈希、角色、分享、session.key 与有效 cookie 导入后照常可用，见 [server.md](server.md) |
-| 12 | server-computer 与两端通信 | server-computer（登记、身份、在线状态、机器信息、改名、call、节点协议、中转契约、页面与 API）、server-relay-memory、starlink、重试、事件上报、调用及结果 | starlink 经 listen／announce／report 接收调用、回传结果和上报事件，调用经节点 sidecar 分发；真实隔离两端验证，见 [server.md](server.md) |
+| 12 | server-computer 与两端通信 | server-computer（登记、身份、在线状态、机器信息、改名、call、节点协议、中转契约、页面）、server-relay-memory、starlink、重试、事件上报、调用及结果 | starlink 经 listen／announce／report 接收调用、回传结果和上报事件，调用经节点 sidecar 分发；真实隔离两端验证，见 [server.md](server.md) |
 | 13 | agent 模块 | agent 的列表、详情、新建、配置、删除与近况，渠道配置表单 | accept server-computer，经 call 管理各电脑上的 agent；渠道表单由各渠道插件的 UI 入口提供；agents.* 权限点与分享生效 |
 | 14 | 会话与活动 | 会话模块（会话列表、会话详情、审批、图片）、活动模块（events 持久化、近况与当日用量）与用量插件（概览中的 agent 概况与用量） | 会话模块 accept agent，经 call 从节点读取会话；活动模块 listen 节点事件，按电脑、run_id 与 seq 去重；各自登记页面、权限点与概览内容；用量插件只登记概览内容 |
 | 15 | [contrib 市场](bazaar.md) | 每台电脑各自的模块索引、已装 contrib、详情与安装、入口配置、启停、升级和卸载 | 市场模块 accept server-computer，经 call 操作目标电脑；contribs.view、contribs.install、contribs.update、contribs.delete 权限点由它登记；真实包源安装、多入口配置、后端选择与下次启动生效状态可验证 |
@@ -147,14 +147,14 @@ WeCom 从消息内的 quote 补录安静入站消息时，保留当前消息发�
 | `bazaar-contrib-starlink` | `starlink` | 节点主动连接目标 server：listen 长轮询接收调用，经私有 sidecar 实例分发到 RemoteEntry 声明的成员，announce 回传结果，listen 审计事件后经 report 上报；持有 token／token_env、请求关联与退避重试 | 12 | 可选；默认停用，配置 server 后启用 |
 | `bazaar-contrib-server-access` | `server-access` | 在 open-bazaar/contrib-server-access 维护；提供会话、登录页、账户、角色、分享与权限检查，定义第三方登录方式的接口；接管 0.2 的账户、角色与分享表 | 11 | server 默认组合；第三方登录方式由各自的插件提供 |
 | `bazaar-contrib-server-github` | `server-github` | 在 open-bazaar/contrib-server-github 维护；以 GitHub 账户登录，配置与 GitHub 用户的对应保存在自己的表中 | 11 | 可选；需要 GitHub 登录时加入 |
-| `bazaar-contrib-server-computer` | `server-computer`、`server-relay-memory` | 在 open-bazaar/contrib-server-computer 维护；server-computer 持有电脑的登记、身份、在线状态与机器信息，注册 listen／announce／report，定义中转契约并提供对电脑的 call，以及电脑的页面与 API；server-relay-memory 是中转的单进程实现；接管 computers 表 | 12 | server 默认组合 |
-| `bazaar-contrib-server-agent` | `server-agent` | agent 模块：accept server-computer，经 call 管理各电脑上的 agent，提供列表、详情、新建、配置、删除与近况的页面和 API；渠道表单来自渠道插件的 UI 入口 | 13 | server 默认组合 |
+| `bazaar-contrib-server-computer` | `server-computer`、`server-relay-memory` | 在 open-bazaar/contrib-server-computer 维护；server-computer 持有电脑的登记、身份、在线状态与机器信息，注册 listen／announce／report，定义中转契约并提供对电脑的 call，以及电脑的页面；server-relay-memory 是中转的单进程实现；接管 computers 表 | 12 | server 默认组合 |
+| `bazaar-contrib-server-agent` | `server-agent` | agent 模块：accept server-computer，经 call 管理各电脑上的 agent，提供列表、详情、新建、配置、删除与近况的页面；渠道表单来自渠道插件的 UI 入口 | 13 | server 默认组合 |
 | `bazaar-contrib-server-conversation` | `server-conversation` | 会话模块：accept agent，经 call 读取会话列表与会话详情，审批联系人，代取聊天中的图片；登记 agents.approve | 14 | server 默认组合 |
 | `bazaar-contrib-server-activity` | `server-activity` | 活动模块：listen server-computer 发布的节点事件，持久化到 events 并按电脑、run_id 与 seq 去重，投影近况与当日用量；接管 events 表 | 14 | server 默认组合 |
 | `bazaar-contrib-server-usage` | `server-usage` | 用量插件：accept agent 模块与活动模块，在概览登记占三列的一行卡片：运行中的智能体、正在工作、处理轮次与用量（tokens、费用及输入、缓存命中与输出的占比），右上角在今天、近 7 天与近 30 天之间切换 | 14 | server 默认组合 |
 | `bazaar-contrib-server-market` | `server-market` | 市场模块：accept server-computer，按电脑展示各自的索引与已装 contrib，经 call 安装、升级、配置、启停与卸载；登记 contribs.* 权限点 | 15 | server 默认组合 |
 
-server 的功能模块持有自己的模型、schema、查询、服务、API 与页面，经 server 本体登记侧边栏与权限点、经 server-overview 登记概览内容，页面运行在同源 iframe 中。
+server 的功能模块持有自己的模型、schema、查询、服务与页面，经 server 本体登记侧边栏与权限点、经 server-overview 登记概览内容，页面运行在同源 iframe 中。
 模块之间按业务需要 accept：agent 模块接受 server-computer，会话模块接受 agent 模块，活动与市场模块接受 server-computer，用量插件接受 agent 与活动模块。
 HTTP 与 server 本体的公共契约供功能模块导入；功能模块的发行依赖指向这些契约包，与 server 组合形成单向关系。
 
@@ -168,7 +168,7 @@ HTTP 与 server 本体的公共契约供功能模块导入；功能模块的发�
 app 按兼容范围直接依赖 bazaar-core 与实际使用的自举、配置、命令和安装管理接口；业务插件按配置安装，各自声明消费的公共契约依赖。core 的包依赖保持通用。
 应用基础先作为独立任务交付：run(bootstrap, load) 启动自举条目及提供 COMPOSITION 的加载器，bcn run 启用已交付的 status；
 随后在相同应用入口接入配置发现、载体、版本链与默认配置资源。
-server 的迁移、配置载体、存储组合、API、业务与页面，以及 starlink 与具体 provider 等可选包在 open-bazaar 的独立仓库开发，可选安装并各自持有依赖与配置资源。
+server 的迁移、配置载体、存储组合、业务与页面，以及 starlink 与具体 provider 等可选包在 open-bazaar 的独立仓库开发，可选安装并各自持有依赖与配置资源。
 BCN 必要包的 project.version 使用共同版本，首版为 0.3.0；这些包随 BCN 发行升版。
 仓库内正式依赖按实际所需的最低版本声明三段式兼容范围，首版为 ~=0.3.0；仅使用更新接口时提高对应依赖下限。
 独立官方可选包和第三方包维护自己的版本，并声明 core 最低版本／上限和所需公共接口包的兼容范围。
@@ -179,7 +179,7 @@ app 直接安装 config-filesystem 和 config-versions，后者以 VERSIONS 保�
 默认顶层 contribs 启用状态查询、日志、模块管理、调用、channel／harness 注册、storage、SQLite、database、schema、消息、协作、时间轮、
 Reminder、agent 及节点管理。agent 组合拥有 `config.agents`，明确构造执行及 provider 实例；
 用户选装 provider 后，启用该包组合中的 builder／运行定义，具体 channel／harness 由 agent 的 provider 选择及 builder 登记关系匹配创建。
-服务端 API 与页面包作为可选组合安装，普通节点按需安装 starlink 包，配置目标 server 并启用 starlink；默认节点组合不启用远端连接。
+server 的包作为可选组合安装，普通节点按需安装 starlink 包，配置目标 server 并启用 starlink；默认节点组合不启用远端连接。
 与 bazaar-compute 一起安装 server-management 后，它提供 server 的默认配置，在顶层启用日志、调用、模块管理、timer、http、server-database、server-migrations、server、server-theme-night、server-theme-day、server-overview、server-access，
 以及后续阶段的 server-computer、server-relay-memory、agent、会话、活动与市场模块；server-database 以私有绑定装配 server 自己的 storage、后端、database 与 schema。
 用户选择包导出的 starlink 入口并填写 server 地址与 token 或 token_env；server 的调用经 starlink 的私有 sidecar 实例分发到 RemoteEntry 声明的成员。
@@ -395,7 +395,7 @@ timer 的替代 provider 直接提供共享 `TIMER`；在目标组合停用原�
 6. 通过完整组合升级验证额外包来源、版本要求、连接参数及后端选择继续有效，原版本账本保留，统一迁移按版本接续并保留业务数据。
 
 加载与配置接口提供所选后端缺失、重复后端名、重复 DB 服务、模块类型与目标运行上下文不匹配的诊断。
-普通节点、纯 API 节点及混合节点分别验证各自注册表，agent 消费与节点相同绑定的 DB。
+普通节点、只运行 server 的节点及混合节点分别验证各自注册表，agent 消费与节点相同绑定的 DB。
 
 ## 统一宿主与 server 组合
 
@@ -410,7 +410,7 @@ server 的数据位于 ~/.bcn；0.2 BCS 升级时，~/.bcs 的设置由 server-m
 
 | 提供者 | 提供 | 消费者与职责 |
 | --- | --- | --- |
-| http | HTTP | 提供路由、中间件、ASGI 应用挂载与监听；server 本体挂载外壳与嵌入工具，功能模块挂载各自的界面与 API，server-computer 注册节点协议的三个接口 |
+| http | HTTP | 提供路由、中间件、ASGI 应用挂载与监听；server 本体挂载外壳、嵌入工具与统一总线，功能模块挂载各自的界面，server-computer 注册节点协议的三个接口 |
 | server 本体 | 页面框架与登记入口 | 外壳、嵌入工具、侧边栏、权限点、THEME、语言、refs 与 API 挂载；功能模块与主题插件向它登记 |
 | server-overview | OVERVIEW | 概览页与问候、概览内容的登记与每个账户的排序；功能模块向它登记概览内容 |
 | server-access | 登录与权限 | 会话、登录页、账户、角色、分享与权限检查；server 本体与功能模块经它取得当前账户 |
@@ -434,7 +434,7 @@ server-computer → 活动模块、市场模块
 共享服务 + builder → agent → channel／harness
 ```
 
-图中为主要关系，各模块的完整 accepts 包含表中业务前置。server-access 接受 server 本体，登记登录页与权限检查；功能模块接受 server 本体与 server-access，登记页面、API、权限点与概览内容。
+图中为主要关系，各模块的完整 accepts 包含表中业务前置。server-access 接受 server 本体，登记登录页与权限检查；功能模块接受 server 本体与 server-access，登记页面、权限点与概览内容。
 server 本体接受 HTTP，在 yield 前挂载外壳并提供登记入口，退出时撤销挂载；各模块退出时撤销各自的登记。
 完整组合的入口、授权、投影和页面就绪后，应用才发布 ready 并开放外部请求。
 
@@ -456,7 +456,7 @@ HTTP、连接与 agent 的持续执行由所属模块管理后台任务或子进
 生命周期要求见 [并行运行与资源清理](framework.md#并行运行与资源清理)。
 
 独立部署使用多份配置分别执行 bcn run，各进程使用自己的数据库、端口、socket 和运行目录，server 与 client 通过私有 HTTP 连接。
-混合组合验收在 agent 等待长任务时继续请求 API、读取页面，在连接或页面订阅等待时继续执行 agent turn；
+混合组合验收在 agent 等待长任务时继续读取页面与统一总线，在连接或页面订阅等待时继续执行 agent turn；
 分进程组合验收实际连接与结果传递。两种组合都验证健康、故障通知和全部资源退出。
 
 ### 安装与配置的用户流程
@@ -464,7 +464,7 @@ HTTP、连接与 agent 的持续执行由所属模块管理后台任务或子进
 1. 普通节点安装宿主，首次生成默认配置，执行 bcn run；按配置创建 agent。
 2. 需要 server 的 host 与 bazaar-compute 一起安装 bazaar-contrib-server-management，已有宿主经 contrib manager 加入；首次运行由 server-management 的默认配置装好 HTTP、server 与存储等包。
 3. server 的设置写在各自所属条目的 config 里：监听在 http 条目，存储在 server-database 条目，访问在 server-access 条目。
-4. 使用相同 bcn run 启动；agent 列表为空时运行纯 API，有 agent 配置时同时提供 API 与执行能力。
+4. 使用相同 bcn run 启动；agent 列表为空时只运行 server，有 agent 配置时同时提供 server 与执行能力。
 5. server 的默认组合包含 server 本体、两个主题插件、server-access 与已交付的功能模块；安装第三方功能模块或主题插件后，它们与其他 contrib 一样在顶层启用，页面出现在侧边栏，主题出现在外观的主题选择中，保存后在下一次启动生效。
 6. 其他节点按需安装 bazaar-contrib-starlink，填写目标 server 地址与 token 或 token_env 后启用 starlink。
 
@@ -479,13 +479,13 @@ server-database 打开数据库前把 ~/.bcs/bcs.sqlite3 与 session.key 复制�
 
 - 第 11 阶段交付 http、server-database、server-migrations、server 本体与两个主题插件、server-overview、server-access、server-github、server-management，详见 [server.md](server.md)；经真实 HTTP 与浏览器验证外壳与 iframe 嵌入、侧边栏、概览、权限点与主题的登记和撤销、语言选择与从 ~/.bcs 导入。
 - 第 12 阶段交付 server-computer、server-relay-memory 与 starlink，详见 [server.md](server.md)；以隔离的真实两端验证 listen／announce／report、身份、调用与结果、事件确认与重放和退出；server 的调用经节点 sidecar 到达 RemoteEntry 声明的成员；节点填写 server 地址与 token 后启用 starlink，并补充 V4 的 audit／control／server 字段迁移；同一 bcn run 验证 server 与 agent 各自独立 DB 的同进程并行及分进程通信。
-- 第 13 阶段交付 agent 模块：经 server-computer 的 call 管理各电脑上的 agent，提供列表、详情、新建、配置、删除与近况的页面和 API，渠道表单由渠道插件的 UI 入口提供；agents.view、agents.create、agents.update 与 agents.delete 按角色与分享生效。
+- 第 13 阶段交付 agent 模块：经 server-computer 的 call 管理各电脑上的 agent，提供列表、详情、新建、配置、删除与近况的页面，渠道表单由渠道插件的 UI 入口提供；agents.view、agents.create、agents.update 与 agents.delete 按角色与分享生效。
 - 第 14 阶段交付会话模块、活动模块与用量插件：会话列表、会话详情、审批与聊天图片经 call 从节点读取，agents.approve 由会话模块登记；活动模块持久化节点事件并投影近况与当日用量；用量插件把 agent 概况与所选时间范围的用量登记为概览内容；验证原 BCS 历史、refs 及升级后的新事件在同一数据源可查询。
 - 第 15 阶段交付市场模块：按电脑展示各自的索引与已装 contrib，经 call 在目标电脑上安装、升级、配置、启停与卸载；contribs.view、contribs.install、contribs.update 与 contribs.delete 由市场模块登记。
 - 第 16 阶段删除原 bcs CLI、独立应用、server sink 和中心 Control 装配，收齐 bazaar-contrib-server 与各功能模块的正式产物、组合配置与真实 0.2 BCS 原数据源升级证据；原目录、数据及不可变迁移资源按所属模块继续保留。
 
 完整组合验收使用实际 wheel、隔离配置、数据库、端口和进程。分别验证普通节点、只运行 server 和混合组合，
-停用某个功能模块后重启，其余模块照常提供页面与 API；停用 server-access 的候选配置列出依赖它的功能模块，需要同步调整后保存。
+停用某个功能模块后重启，其余模块照常提供页面；停用 server-access 的候选配置列出依赖它的功能模块，需要同步调整后保存。
 整套升级保留可选包来源、版本要求、配置、后端选择及 agent 子树。各阶段按其详细计划的 Tasks 串行交付和 review。
 
 ## 公共扩展入口的实现原则
@@ -546,7 +546,7 @@ agent 空闲管理、消息合并等待、渠道限流与重试、版本检查�
 
 每个功能模块自行定义服务接口和结果，注册自己的 CLI / RPC 方法。
 调用模块在入口完成 Pydantic 校验和身份绑定，业务服务负责其规则；传输不持有全部业务请求的联合类型。
-server API 与 bcc 进入同一功能服务。可信身份与实例目标分开，模块实例可以在 channel 建立之前被配置服务寻址。
+server 的页面与 bcc 进入同一功能服务。可信身份与实例目标分开，模块实例可以在 channel 建立之前被配置服务寻址。
 
 搜索与其他业务方法由功能模块 offer 服务并登记本地命令；server client 通过 accept 获取相同服务执行私有协议请求；
 渠道配置可以注册自己的交互能力。UI 注册入口同时允许普通 schema 表单和 provider 自己的交互面板。
@@ -599,8 +599,8 @@ provider 的第三方依赖留在自己的发行包，app 发行包通过明确�
 ### 应用与界面
 
 `bazaar-contrib-server` 的入口与其他 contrib 一样在顶层启用；server 本体提供页面框架与登记入口，功能模块 accept 所需服务。
-server 与节点经两端协议通信；starlink 通过 listen 和 accept 接入节点插件，页面、API 与 starlink 分别拥有生命周期。
-功能模块登记页面、API、权限点与概览内容，渠道模块提供配置 schema，渠道的 UI 入口提供 agent 模块使用的表单。
+server 与节点经两端协议通信；starlink 通过 listen 和 accept 接入节点插件，页面与 starlink 分别拥有生命周期。
+功能模块登记页面、权限点与概览内容，渠道模块提供配置 schema，渠道的 UI 入口提供 agent 模块使用的表单。
 外壳、导航、主题、语言与页面权限由 server 本体与 server-access 执行；server 可以只运行登录与已安装的模块。
 全部组合由 app 的普通 bcn run 入口调用 core 的同一运行接口，core 宿主依据明确实例及服务依赖装配。
 完整依赖图、配置资源、部署与清理验收见 [统一宿主与 server 组合](#统一宿主与-server-组合)。
