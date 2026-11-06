@@ -235,6 +235,7 @@ def test_v4_brings_the_server_along_when_bcs_has_its_settings(
         "server",
         "server-theme-night",
         "server-theme-day",
+        "server-overview",
         "server-access",
     }
 
@@ -260,7 +261,12 @@ def test_v4_brings_the_server_along_when_bcs_has_its_settings(
     assert enabled["http"] == {"listen": "127.0.0.1:9876"}
     assert enabled["server-database"]["storage"] == "sqlite"
     assert "server-migrations" in enabled
-    assert {"server", "server-theme-night", "server-theme-day"} <= enabled.keys()
+    assert {
+        "server",
+        "server-theme-night",
+        "server-theme-day",
+        "server-overview",
+    } <= enabled.keys()
     assert enabled["server-access"] == {"session_minutes": 25}
     assert {
         f"bazaar-contrib-{name}"
@@ -269,6 +275,7 @@ def test_v4_brings_the_server_along_when_bcs_has_its_settings(
             "server-database",
             "server-migrations",
             "server",
+            "server-overview",
             "server-access",
         )
     } <= packages
