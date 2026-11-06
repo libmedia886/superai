@@ -109,4 +109,4 @@ node_health = Contrib(accepts=[AUDIT, TIMER], lifespan=health)
 node_upgrade = Contrib(
     offers=[NODE], accepts=[RUN, CONTRIB_MANAGER, TIMER, AUDIT], lifespan=upgrade
 )
-remote = RemoteEntry(NODE, ("version", "available", "install", "restart"))
+remote = RemoteEntry(NODE, ("version", "available", "info", "install", "restart"))

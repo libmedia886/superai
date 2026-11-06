@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from typing import TypedDict
 lazy import asyncio
 lazy import os
 lazy import signal
 lazy import sys
+lazy import time
 lazy from importlib.metadata import version
 lazy from pathlib import Path
 
@@ -17,6 +19,31 @@ lazy from bazaar_contrib_config import ConfigDocument
 lazy from bazaar_contrib_sidecar import CLIENT, Client, RemoteError
 lazy from bazaar_core import Composition, Context, Contrib, ContribEntry
 lazy from packaging.version import Version
+lazy from pydantic import TypeAdapter
+
+
+class Usage(TypedDict):
+    total: int
+    used: int
+
+
+class Disk(Usage):
+    mount: str
+
+
+class Processor(TypedDict):
+    cores: int
+    percent: float
+
+
+class Host(TypedDict):
+    version: str
+    name: str
+    machine: str
+    started_ms: int
+    cpu: Processor
+    memory: Usage
+    disks: list[Disk]
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process signals")
@@ -119,6 +146,17 @@ async def test_node_service_reports_and_restarts_the_node(
             assert await clients[0].call("node", "version") == current
             available = await clients[0].call("node", "available")
             assert available is None or Version(str(available)) > Version(current)
+            info = TypeAdapter(Host).validate_python(
+                await clients[0].call("node", "info")
+            )
+            assert info["version"] == current
+            assert info["name"] and info["machine"]
+            assert info["started_ms"] <= time.time() * 1000
+            assert info["cpu"]["cores"] >= 1
+            assert 0 <= info["cpu"]["percent"] <= 100
+            assert 0 < info["memory"]["used"] <= info["memory"]["total"]
+            assert info["disks"]
+            assert all(0 <= disk["used"] <= disk["total"] for disk in info["disks"])
             with pytest.raises(RemoteError, match="uv tool installation"):
                 await clients[0].call("node", "install", current, timeout=None)
             await clients[0].call("node", "restart")

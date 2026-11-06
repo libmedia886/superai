@@ -237,6 +237,8 @@ def test_v4_brings_the_server_along_when_bcs_has_its_settings(
         "server-theme-day",
         "server-overview",
         "server-access",
+        "server-relay-memory",
+        "server-computer",
     }
 
     def converted() -> tuple[dict[str, dict[str, object]], set[str]]:
@@ -266,6 +268,8 @@ def test_v4_brings_the_server_along_when_bcs_has_its_settings(
         "server-theme-night",
         "server-theme-day",
         "server-overview",
+        "server-relay-memory",
+        "server-computer",
     } <= enabled.keys()
     assert enabled["server-access"] == {"session_minutes": 25}
     assert {
@@ -277,5 +281,6 @@ def test_v4_brings_the_server_along_when_bcs_has_its_settings(
             "server",
             "server-overview",
             "server-access",
+            "server-computer",
         )
     } <= packages

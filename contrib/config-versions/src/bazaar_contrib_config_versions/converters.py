@@ -165,6 +165,8 @@ def migrate_v5(payload: Mapping[str, object]) -> ConfigCandidate:
             if "session_minutes" in server
             else None,
         )
+        add("server-relay-memory", "server-computer")
+        add("server-computer", "server-computer")
     changes.extend(
         [
             FieldChange(
