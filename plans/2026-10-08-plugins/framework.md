@@ -2872,6 +2872,7 @@ Windows 上 uv 替换不了正在运行的工具入口 bcn.exe，失败后连工
   同一包新增 `node-upgrade` 入口提供 NODE 服务，依赖 RUN、CONTRIB_MANAGER、TIMER 与 AUDIT，默认配置与 V4→V5 转换都启用它：
   - `version()` 返回节点启动时记下的运行版本，装完未重启时仍是原版本；node-health 心跳中的版本同样取启动时的运行版本。
     `available()` 返回每小时检查一次得到的最新可装版本。
+  - `info()` 返回运行版本与节点所在机器的信息：系统、系统名称与版本号、架构、节点进程的启动时间、CPU、内存与各磁盘，供 server-computer 的电脑页面使用；字段与磁盘的取法见 [server.md](server.md#机器信息)。
   - `install(版本)` 预检后安装，版本缺省时取 `available()`；在节点自己的任务中执行，调用方断开时照样装完并发布审计事件。
     Windows 上解释器所运行的启动器（`sys.orig_argv[1]`）就是 receipt 所列的工具入口（前台 `bcn.exe run`）时，
     在预检前抛 UnsupportedUpgrade；`sys.argv[0]` 在这里不带 .exe，不能用来比较（contrib-system-service 诊断 run 41589428916）。

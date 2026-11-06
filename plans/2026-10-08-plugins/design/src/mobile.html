@@ -18,7 +18,13 @@
   .phone { width: 390px; height: 844px; display: none; flex-direction: column; overflow: hidden; position: relative; }
   :root[data-screen="login"] .s-login, :root[data-screen="login-third"] .s-login,
   :root[data-screen="overview"] .s-overview, :root[data-screen="settings"] .s-settings,
-  :root[data-screen="appearance"] .s-appearance, :root[data-screen="login-methods"] .s-methods { display: flex; }
+  :root[data-screen="appearance"] .s-appearance, :root[data-screen="login-methods"] .s-methods,
+  :root[data-screen="computers"] .s-computers, :root[data-screen="computer-share"] .s-computers,
+  :root[data-screen="computer-delete"] .s-computers, :root[data-screen="computer"] .s-computer, :root[data-screen="computer-plugins"] .s-computer { display: flex; }
+  /* the marketplace's plugins section (stage 15) only on ?screen=computer-plugins, the whole page as it scrolls */
+  .s-computer .plugins { display: none; }
+  :root[data-screen="computer-plugins"] .s-computer { height: 1130px; }
+  :root[data-screen="computer-plugins"] .s-computer .plugins { display: block; }
   .for-third { display: none !important; }
   :root[data-screen="login-third"] .for-third { display: revert !important; }
   :root[data-screen="login-third"] .for-password { display: none !important; }
@@ -173,6 +179,97 @@
   .working .pin .t { color: var(--saffron); font: 12px var(--font-mono); }
   .tabs span { position: relative; }
   .tabs .badge { position: absolute; top: 2px; left: calc(50% + 5px); min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--saffron); color: var(--saffron-ink); font-size: 10px; font-weight: 700; display: grid; place-items: center; }
+  /* computers: one card a computer; sharing and removing come up as a sheet from the bottom */
+  .pcs { padding: 4px 0; }
+  .pcr { display: flex; align-items: center; gap: 12px; padding: 12px 14px; }
+  .pcr + .pcr { border-top: 1px solid var(--line-soft); }
+  .pcr .os { width: 38px; height: 38px; flex: none; border-radius: 11px; display: grid; place-items: center; background: var(--sunken); border: 1px solid var(--line); color: var(--text-2); position: relative; overflow: hidden; }
+  .pcr .os svg { width: 16px; height: 16px; fill: currentColor; stroke: none; }
+  .pcr .pcn { flex: 1; min-width: 0; }
+  .pcr b { display: block; font-size: 14.5px; }
+  .pcr small { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+  .pcr small .sdot { width: 7px; height: 7px; border-radius: 50%; background: var(--jade); }
+  .pcr small .sdot.off { background: var(--faint); }
+  .pcr .pmore { width: 34px; height: 34px; display: grid; place-items: center; color: var(--muted); }
+  /* memory and disk under the name, the same cells as on the desktop, shorter */
+  .pcr .pu { display: flex; gap: 14px; margin-top: 8px; }
+  .pcr .pm { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 11.5px; color: var(--muted); }
+  .pcr .pm b { display: inline; font: 600 11.5px var(--font-mono); color: var(--text-2); }
+  .scrim { display: none; position: absolute; inset: 0; z-index: 2; background: rgba(5, 7, 10, .55); }
+  :root[data-theme="day"] .scrim { background: rgba(60, 45, 20, .28); }
+  .sheet { display: none; position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; flex-direction: column; gap: 14px; padding: 10px 18px 30px; border-radius: 20px 20px 0 0; background: var(--surface); border-top: 1px solid var(--line); box-shadow: 0 -20px 50px -10px rgba(0,0,0,.45); }
+  .sheet .grab { align-self: center; width: 40px; height: 5px; border-radius: 3px; background: var(--line-strong); }
+  .sheet h3 { margin: 4px 0 0; font-family: var(--font-display); font-size: 19px; font-weight: 650; }
+  .sheet p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--text-2); }
+  :root[data-screen="computer-share"] .scrim, :root[data-screen="computer-delete"] .scrim { display: block; }
+  :root[data-screen="computer-share"] .sheet.share, :root[data-screen="computer-delete"] .sheet.remove { display: flex; }
+  .sheet .srole { display: flex; align-items: center; gap: 10px; padding: 11px 0; }
+  .sheet .srole + .srole { border-top: 1px solid var(--line-soft); }
+  .sheet .srole .sname { flex: 1; font-size: 14px; font-weight: 600; }
+  .sheet .srole .sname small { display: block; font-size: 12px; font-weight: 400; color: var(--muted); }
+  .chipt { width: 68px; height: 30px; padding: 0; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; font-size: 12.5px; font-weight: 600; color: var(--text-2); border: 1px solid var(--line-strong); }
+  .chipt.on { color: var(--saffron-ink); background: var(--saffron); border-color: var(--saffron); }
+  .chipt svg { width: 12px; height: 12px; stroke-width: 3; }
+  .sheet .acts2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; }
+  .sheet .acts2 .b { height: 46px; border-radius: 12px; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 15px; font-weight: 600; border: 1px solid var(--line-strong); color: var(--text); }
+  .sheet .acts2 .b.p { background: var(--saffron); color: var(--saffron-ink); border-color: transparent; }
+  .sheet .acts2 .b.d { background: var(--crimson); color: #fff; border-color: transparent; }
+  .sheet .dirty { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--saffron); }
+  .sheet .dirty::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--saffron); }
+  .sheet .sic { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; background: var(--crimson-soft); color: var(--crimson); }
+  /* one computer, opened from its row: its system, how it is now and its plugins; sharing and removing raise the same sheets; the whole page as it scrolls */
+  .s-computer .main { gap: 12px; }
+  .pc-hd { display: flex; align-items: center; gap: 12px; padding: 14px; border-bottom: 1px solid var(--line-soft); }
+  .pc-hd .os { width: 42px; height: 42px; flex: none; border-radius: 12px; display: grid; place-items: center; background: var(--sunken); border: 1px solid var(--line); color: var(--text-2); }
+  .pc-hd .os svg { width: 18px; height: 18px; fill: currentColor; stroke: none; }
+  .pc-hd b { display: block; font-size: 15px; }
+  .pc-hd small { font: 12px var(--font-mono); color: var(--muted); }
+  .pfacts { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .pfacts > div { display: flex; flex-direction: column; gap: 5px; padding: 11px 0 11px 14px; white-space: nowrap; }
+  .pfacts > div + div { border-left: 1px solid var(--line-soft); padding-left: 11px; }
+  .pfacts small { font-size: 11px; color: var(--faint); }
+  .pfacts b { font-size: 13px; font-weight: 600; }
+  .pfacts b.mono { font-size: 12px; }
+  .psec { padding: 14px; }
+  .psec h4 { display: flex; align-items: baseline; margin: 0 0 12px; font-size: 13px; font-weight: 650; }
+  .psec h4 small { margin-left: auto; font-size: 11.5px; font-weight: 400; color: var(--faint); }
+  .pmeter { display: grid; grid-template-columns: 16px 1fr auto; align-items: center; gap: 6px 8px; }
+  .pmeter + .pmeter { margin-top: 12px; }
+  .pmeter > svg { width: 15px; height: 15px; color: var(--muted); }
+  .pmeter > span { font-size: 13px; color: var(--text-2); }
+  .pmeter b { font: 600 12.5px var(--font-mono); }
+  .pmeter .cells { grid-column: 1 / -1; display: flex; }
+  .pmeter .cells i { flex: 1; height: 12px; }
+  .pmeter small { grid-column: 1 / -1; font: 11px var(--font-mono); color: var(--muted); }
+  /* plugins: a card a package in a box of fixed height that scrolls inside; on the phone, one column */
+  .pplug { position: relative; height: 330px; overflow: hidden; padding: 10px 14px 10px 10px; border: 1px solid var(--line); border-radius: 14px; background: var(--sunken); }
+  .pplug .thumb { position: absolute; top: 10px; right: 4px; width: 4px; height: 56px; border-radius: 2px; background: var(--line-strong); }
+  .pplug .pcard + .pcard { margin-top: 10px; }
+  .pcard { display: flex; flex-direction: column; gap: 9px; padding: 12px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); }
+  .pcard.no { border-color: color-mix(in srgb, var(--crimson) 45%, var(--line)); }
+  .pcard .ch { display: flex; align-items: center; gap: 10px; }
+  .pcard .src { width: 30px; height: 30px; flex: none; border-radius: 8px; display: grid; place-items: center; background: var(--surface-2); border: 1px solid var(--line); color: var(--text-2); }
+  .pcard .src svg { width: 16px; height: 16px; }
+  .pcard .src.pypi { color: #5b9bd5; }
+  .pcard .src.git { color: #f05032; }
+  :root[data-theme="day"] .pcard .src.pypi { color: #3775a9; }
+  .pcard .cn b { display: block; font: 600 13px var(--font-mono); }
+  .pcard .cn span { font: 11px var(--font-mono); color: var(--faint); }
+  .pcard p { margin: 0; font-size: 12px; line-height: 1.45; color: var(--muted); }
+  .pcard .es { display: flex; flex-direction: column; gap: 8px; padding-top: 9px; border-top: 1px solid var(--line-soft); }
+  .pcard .e { display: flex; align-items: center; gap: 8px; font: 12px var(--font-mono); color: var(--text-2); }
+  .pcard .e i { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--jade); }
+  .pcard .e i.no { background: var(--crimson); }
+  .pcard .e span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pcard .e em { font: normal 11px var(--font-sans); color: var(--saffron); }
+  .pcard .err { font: 11px var(--font-mono); line-height: 1.4; color: var(--crimson); }
+  .sw { width: 32px; height: 18px; flex: none; border-radius: 999px; background: var(--line-strong); position: relative; }
+  .sw::after { content: ""; position: absolute; left: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; }
+  .sw.on { background: var(--jade); }
+  .sw.on::after { left: auto; right: 2px; }
+  .pacts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .pacts .b { height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 14.5px; font-weight: 600; border: 1px solid var(--line-strong); color: var(--text); }
+  .pacts .b.d { color: var(--crimson); border-color: color-mix(in srgb, var(--crimson) 35%, transparent); }
 </style>
 <script>
   const q = new URLSearchParams(location.search);
@@ -357,6 +454,65 @@
     <div class="note2"><div class="line"><i data-i="users" class="sm muted"></i><span>登录方式没有单独指定默认角色时，首次登录的人使用全局默认角色 <b>成员</b>。</span></div><div class="btn sm">修改全局默认角色</div></div>
   </div>
   <nav class="tabs"><span><i data-i="overview"></i>总览</span><span><i data-i="bot"></i>智能体</span><span><i data-i="chats"></i>会话</span><span><i data-i="monitor"></i>电脑</span><span class="on"><i data-i="settings"></i>设置</span></nav>
+</div>
+
+<!-- computers: name, online, when last seen, memory and disk; ?screen=computer-share and computer-delete raise a sheet -->
+<div class="phone s-computers">
+  <div class="bar"><h1>电脑</h1><span class="muted" style="font-size:13px">4 台 · 3 台在线</span><span class="icon-btn" style="margin-left:auto"><i data-i="plus" class="sm"></i></span></div>
+  <div class="main">
+    <div class="card pcs">
+      <div class="pcr"><div class="os"><i data-l="linux"></i></div><div class="pcn"><b>kana-vm</b><small><span class="sdot"></span>在线 · 刚刚</small><div class="pu"><span class="pm">内存<span class="cells" data-n="8" data-v="41"></span><b>41%</b></span><span class="pm">硬盘<span class="cells" data-n="8" data-v="63"></span><b>63%</b></span></div></div><span class="pmore"><i data-i="more" class="sm"></i></span></div>
+      <div class="pcr"><div class="os"><i data-l="apple"></i></div><div class="pcn"><b>aqua-mbp</b><small><span class="sdot"></span>在线 · 刚刚</small><div class="pu"><span class="pm">内存<span class="cells" data-n="8" data-v="72"></span><b>72%</b></span><span class="pm">硬盘<span class="cells" data-n="8" data-v="38"></span><b>38%</b></span></div></div><span class="pmore"><i data-i="more" class="sm"></i></span></div>
+      <div class="pcr"><div class="os"><i data-i="windows"></i></div><div class="pcn"><b>win-desk</b><small><span class="sdot"></span>在线 · 刚刚</small><div class="pu"><span class="pm">内存<span class="cells" data-n="8" data-v="78"></span><b>78%</b></span><span class="pm">硬盘<span class="cells" data-n="8" data-v="91"></span><b>91%</b></span></div></div><span class="pmore"><i data-i="more" class="sm"></i></span></div>
+      <div class="pcr"><div class="os"><i data-l="linux"></i></div><div class="pcn"><b>ci-runner-01</b><small><span class="sdot off"></span>离线 · 2 小时前</small></div><span class="pmore"><i data-i="more" class="sm"></i></span></div>
+    </div>
+  </div>
+  <nav class="tabs"><span><i data-i="overview"></i>总览</span><span><i data-i="bot"></i>智能体</span><span><i data-i="chats"></i>会话</span><span class="on"><i data-i="monitor"></i>电脑</span><span><i data-i="settings"></i>设置</span></nav>
+  <div class="scrim"></div>
+  <div class="sheet share">
+    <span class="grab"></span>
+    <h3>分享 win-desk</h3>
+    <p>选择分享给哪些角色、可以做什么。成员还要有对应的功能权限才用得上；你只能分享自己在这台电脑上有的操作。</p>
+    <div>
+      <div class="srole"><div class="sname">成员<small>全局默认角色</small></div><span class="chipt on"><i data-i="check"></i>查看</span><span class="chipt">删除</span></div>
+      <div class="srole"><div class="sname">运维</div><span class="chipt on"><i data-i="check"></i>查看</span><span class="chipt on"><i data-i="check"></i>删除</span></div>
+      <div class="srole"><div class="sname">设计组</div><span class="chipt">查看</span><span class="chipt">删除</span></div>
+      <div class="srole"><div class="sname">访客</div><span class="chipt">查看</span><span class="chipt">删除</span></div>
+    </div>
+    <span class="dirty">有未保存的修改</span>
+    <div class="acts2"><span class="b">取消</span><span class="b p">保存</span></div>
+  </div>
+  <div class="sheet remove">
+    <span class="grab"></span>
+    <span class="sic"><i data-i="trash"></i></span>
+    <h3>删除电脑 ci-runner-01？</h3>
+    <p>删除后它的接入令牌立即失效，这台电脑会断开连接；分享给各角色的设置也会一并删除。</p>
+    <div class="acts2"><span class="b">取消</span><span class="b d"><i data-i="trash" class="sm"></i>删除</span></div>
+  </div>
+</div>
+
+<!-- one computer: ?screen=computer -->
+<div class="phone s-computer">
+  <div class="bar"><span class="back"><i data-i="left"></i></span><h1>win-desk</h1></div>
+  <div class="main">
+    <div class="card">
+      <div class="pc-hd"><div class="os"><i data-i="windows"></i></div><div><b>Windows 11</b><small>10.0.26100 · x86_64</small></div></div>
+      <div class="pfacts"><div><small>状态</small><span class="online">在线</span></div><div><small>已运行</small><b>3 天 4 小时</b></div><div><small>版本</small><b class="mono">0.3.0</b></div></div>
+    </div>
+    <div class="card psec">
+      <h4>资源<small>12 秒前更新</small></h4>
+      <div class="pmeter"><i data-i="cpu"></i><span>CPU</span><b>23%</b><span class="cells" data-n="24" data-v="23"></span><small>8 核</small></div>
+      <div class="pmeter"><i data-i="memory"></i><span>内存</span><b>78%</b><span class="cells" data-n="24" data-v="78"></span><small>25.1 / 32 GB</small></div>
+      <div class="pmeter"><i data-i="disk"></i><span>硬盘</span><b>91%</b><span class="cells" data-n="24" data-v="91"></span><small>C: · 466 / 512 GB</small></div>
+      <div class="pmeter"><i data-i="disk"></i><span>硬盘</span><b>60%</b><span class="cells" data-n="24" data-v="60"></span><small>D: · 1.2 / 2 TB</small></div>
+    </div>
+    <div class="card psec plugins">
+      <h4>插件<small>共 25 个 · 1 个出错</small></h4>
+      <div class="pplug"><div class="pcard no"><div class="ch"><span class="src pypi"><i data-l="pypi"></i></span><div class="cn"><b>telegram</b><span>0.3.0rc4</span></div></div><p>Telegram Channel provider for Bazaar Compute Node</p><div class="es"><div class="e"><i class="no"></i><span>telegram-builder</span><b class="sw on"></b></div><div class="err">ConnectError: All connection attempts failed</div></div></div><div class="pcard"><div class="ch"><span class="src pypi"><i data-l="pypi"></i></span><div class="cn"><b>system-service</b><span>0.3.0rc2</span></div></div><p>System service management for Bazaar Compute Node</p><div class="es"><div class="e"><i></i><span>system-service</span><b class="sw on"></b></div><div class="e"><i></i><span>system-service-readiness</span><em>重启后停用</em><b class="sw"></b></div></div></div><div class="pcard"><div class="ch"><span class="src private"><i data-i="lock"></i></span><div class="cn"><b>ops-tools</b><span>1.4.0</span></div></div><p>Our team's deployment and backup commands</p><div class="es"><div class="e"><i></i><span>ops-tools</span><b class="sw on"></b></div></div></div><span class="thumb"></span></div>
+    </div>
+    <div class="pacts"><span class="b"><i data-i="share" class="sm"></i>分享</span><span class="b d"><i data-i="trash" class="sm"></i>删除</span></div>
+  </div>
+  <nav class="tabs"><span><i data-i="overview"></i>总览</span><span><i data-i="bot"></i>智能体</span><span><i data-i="chats"></i>会话</span><span class="on"><i data-i="monitor"></i>电脑</span><span><i data-i="settings"></i>设置</span></nav>
 </div>
 
 </body>
