@@ -39,7 +39,7 @@ Contrib 通过 `offers / accepts` 声明服务，`accepts` 可以依据已校验
 服务接口、数据模型、查询、配置、命令、RPC 和 UI 登记协议由功能包拥有。
 `bazaar-contrib-server` 与各功能模块包是独立安装的可选包，与节点的插件同一种机制：server-management 与 bazaar-compute 一起安装后，它的默认配置在顶层启用 server 的条目。只有 server 的数据库由 server-database 以私有绑定装配，以 SERVER_DB 与 SERVER_SCHEMA 提供，数据位于 ~/.bcn；公共审计可共享。
 一个宿主可以同时运行 server 和 agent，各具体实例管理自己的后台任务或子进程；分开部署使用独立配置执行 bcn run，经公开 HTTP 协议通信。
-starlink 默认停用，配置目标 server 后启用；它经 listen 长轮询接收调用，经私有 sidecar 实例分发到 RemoteEntry 声明的成员，经 announce 回传结果，listen 业务审计后经 report 上报。
+starlink 默认停用，配置目标 server 后启用；它经 listen 长轮询接收调用，经节点的 sidecar 分发到 RemoteEntry 声明的成员，经 announce 回传结果，listen 业务审计后经 report 上报。
 数据投影与访问策略由普通模块消费事件和调用服务，完整已知配置在资源启动前生成并校验依赖图。动态子组合在启用时校验。
 用户选择模块与参数；默认 agent 的实体列表、channel／harness 选择及参数保存在 `contrib="agent"` 条目的 `contribs.config`，由 agent 插件的模型校验并展开实体。模块声明和实例状态分别管理。
 存储组合由公共后端注册表、具体后端及 DB 选择入口构成，默认配置明确选中 SQLite，
