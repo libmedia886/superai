@@ -157,6 +157,7 @@ def migrate_v5(payload: Mapping[str, object]) -> ConfigCandidate:
         add("server", "server")
         add("server-theme-night", "server")
         add("server-theme-day", "server")
+        add("server-overview", "server-overview")
         add(
             "server-access",
             "server-access",
