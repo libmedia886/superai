@@ -119,9 +119,10 @@ def migrate_v5(payload: Mapping[str, object]) -> ConfigCandidate:
             ),
         ]
     )
+    # 0.2 wrote the audit to one sink; logging hears it beside starlink now.
+    # 0.2's logging sink took no settings from [node.logging].
+    add("logging", "logging")
     if node.audit == "logging":
-        # 0.2's logging sink took no settings from [node.logging].
-        add("logging", "logging")
         changes.append(
             FieldChange(
                 source="node.audit",
@@ -167,6 +168,34 @@ def migrate_v5(payload: Mapping[str, object]) -> ConfigCandidate:
         )
         add("server-relay-memory", "server-computer")
         add("server-computer", "server-computer")
+    if node.server.get("url") and "server" in (node.audit, node.control):
+        # 0.2 reached its server with one address and token for the audit it
+        # reported and the requests it took; starlink does both
+        fields = {
+            key: name
+            for key, name in (("url", "server"), ("token_env", "token_env"))
+            if key in node.server
+        }
+        add(
+            "starlink",
+            "starlink",
+            {name: node.server[key] for key, name in fields.items()},
+        )
+        changes.extend(
+            FieldChange(
+                source=f"node.{key}",
+                target="contribs[bazaar-contrib-starlink].enabled[starlink]",
+            )
+            for key in ("audit", "control")
+            if getattr(node, key) == "server"
+        )
+        changes.extend(
+            FieldChange(
+                source=f"node.server.{key}",
+                target=f"contribs[bazaar-contrib-starlink].enabled[starlink].config.{name}",
+            )
+            for key, name in fields.items()
+        )
     changes.extend(
         [
             FieldChange(

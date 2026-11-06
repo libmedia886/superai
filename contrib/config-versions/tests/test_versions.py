@@ -219,6 +219,46 @@ def test_v4_node_timer_mapping_and_v5_provider_selection(tmp_path: Path, monkeyp
     assert converter.convert(payload).payload == payload
 
 
+def test_v4_node_connected_to_a_server_keeps_its_link(tmp_path: Path, monkeypatch):
+    from bazaar_contrib_config import ConfigDocument
+
+    from bazaar_contrib_config_versions import Converter
+
+    monkeypatch.setenv("BCN_HOME", str(tmp_path))
+    # what `bcn server connect` left in 0.2's configuration
+    candidate = Converter("5", Converter("4")).convert(
+        {
+            "version": "4",
+            "node": {
+                "audit": "server",
+                "control": "server",
+                "server": {"url": "https://bcs.example.test", "token_env": "BCS_TOKEN"},
+            },
+            "agent": [],
+        }
+    )
+    document = ConfigDocument.model_validate(candidate.payload)
+    starlink = next(
+        entry.config
+        for package in document.contribs
+        for entry in package.enabled
+        if entry.entry == "starlink"
+    )
+    assert starlink["server"] == "https://bcs.example.test"
+    # the token stays where 0.2 kept it, in the environment variable it named
+    assert starlink["token_env"] == "BCS_TOKEN"
+    assert any(
+        requirement.package == "bazaar-contrib-starlink"
+        for requirement in candidate.required_packages
+    )
+    # and the audit is still logged on the node, beside what starlink reports
+    assert any(
+        entry.entry == "logging"
+        for package in document.contribs
+        for entry in package.enabled
+    )
+
+
 def test_v4_brings_the_server_along_when_bcs_has_its_settings(
     tmp_path: Path, monkeypatch
 ):
