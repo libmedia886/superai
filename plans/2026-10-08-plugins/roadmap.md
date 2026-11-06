@@ -144,7 +144,7 @@ WeCom 从消息内的 quote 补录安静入站消息时，保留当前消息发�
 | `bazaar-contrib-server` | `server`、`server-theme-night`、`server-theme-day` | 在 open-bazaar/contrib-server 维护；server 是 server 本体：外壳与嵌入工具、侧边栏、设置页、统一总线、权限点登记、THEME 接口、语言、refs 与 API 挂载；server-theme-night 与 server-theme-day 分别登记夜市与晨市；原 BCS 数据结构保留 | 11 | server 默认组合 |
 | `bazaar-contrib-server-overview` | `server-overview` | 在 open-bazaar/contrib-server-overview 维护；概览页与问候、概览内容的登记（OVERVIEW，含占用的列数）与每个账户的排序 | 11 | server 默认组合 |
 | `bazaar-contrib-server-management` | 无 contrib 入口，defaults 入口 `server` | 在 open-bazaar/contrib-server-management 维护；在 `bazaar_compute_node.defaults` 登记 server 的默认配置，在顶层启用 server 的条目；生成配置时读取 ~/.bcs 中 0.2 的设置；与 bazaar-compute 一起安装 | 11 | 可选；与它一起新装的 host 即为 server |
-| `bazaar-contrib-starlink` | `starlink` | 节点主动连接目标 server：listen 长轮询接收调用，经私有 sidecar 实例分发到 RemoteEntry 声明的成员，announce 回传结果，listen 审计事件后经 report 上报；持有 token／token_env、请求关联与退避重试 | 12 | 可选；默认停用，配置 server 后启用 |
+| `bazaar-contrib-starlink` | `starlink` | 节点主动连接目标 server：listen 长轮询接收调用，经节点的 sidecar 分发到 RemoteEntry 声明的成员，announce 回传结果，listen 审计事件后经 report 上报；持有 token／token_env、请求关联与退避重试 | 12 | 可选；默认停用，配置 server 后启用 |
 | `bazaar-contrib-server-access` | `server-access` | 在 open-bazaar/contrib-server-access 维护；提供会话、登录页、账户、角色、分享与权限检查，定义第三方登录方式的接口；接管 0.2 的账户、角色与分享表 | 11 | server 默认组合；第三方登录方式由各自的插件提供 |
 | `bazaar-contrib-server-github` | `server-github` | 在 open-bazaar/contrib-server-github 维护；以 GitHub 账户登录，配置与 GitHub 用户的对应保存在自己的表中 | 11 | 可选；需要 GitHub 登录时加入 |
 | `bazaar-contrib-server-computer` | `server-computer`、`server-relay-memory` | 在 open-bazaar/contrib-server-computer 维护；server-computer 持有电脑的登记、身份、在线状态与机器信息，注册 listen／announce／report，定义中转契约并提供对电脑的 call，以及电脑的页面；server-relay-memory 是中转的单进程实现；接管 computers 表 | 12 | server 默认组合 |
@@ -182,7 +182,7 @@ Reminder、agent 及节点管理。agent 组合拥有 `config.agents`，明确�
 server 的包作为可选组合安装，普通节点按需安装 starlink 包，配置目标 server 并启用 starlink；默认节点组合不启用远端连接。
 与 bazaar-compute 一起安装 server-management 后，它提供 server 的默认配置，在顶层启用日志、调用、模块管理、timer、http、server-database、server-migrations、server、server-theme-night、server-theme-day、server-overview、server-access，
 以及后续阶段的 server-computer、server-relay-memory、agent、会话、活动与市场模块；server-database 以私有绑定装配 server 自己的 storage、后端、database 与 schema。
-用户选择包导出的 starlink 入口并填写 server 地址与 token 或 token_env；server 的调用经 starlink 的私有 sidecar 实例分发到 RemoteEntry 声明的成员。
+用户选择包导出的 starlink 入口并填写 server 地址与 token 或 token_env；server 的调用经 starlink 交给节点的 sidecar，分发到 RemoteEntry 声明的成员。
 第三方功能模块与主题插件与其他 contrib 一样在顶层启用，各自登记页面或主题。
 只运行 server 的部署可使用空的 `agent.config.agents`；新增 agent 后，组合展开其实体，宿主为内部 AGENT 定义及选定 provider 创建所属实例。
 
@@ -415,8 +415,8 @@ server 的数据位于 ~/.bcn；0.2 BCS 升级时，~/.bcs 的设置由 server-m
 | server-overview | OVERVIEW | 概览页与问候、概览内容的登记与每个账户的排序；功能模块向它登记概览内容 |
 | server-access | 登录与权限 | 会话、登录页、账户、角色、分享与权限检查；server 本体与功能模块经它取得当前账户 |
 | server-computer | 电脑与对电脑的调用 | 登记、身份、在线状态、节点协议、中转契约与 call；收到 report 后按公共审计契约 announce，agent、会话与活动模块消费 |
-| 节点功能模块 | 功能服务、审计事件 | offer 消息、管理等服务，由 starlink 经私有 sidecar 调用；announce 业务审计事件，由 logging 与 starlink 并列 listen |
-| starlink | 两端协议的节点实现 | 在节点主动 listen 收取调用，经私有 sidecar 实例分发并执行，announce 返回结果；listen 审计事件并经 report 上报 |
+| 节点功能模块 | 功能服务、审计事件 | offer 消息、管理等服务，由 starlink 经节点的 sidecar 调用；announce 业务审计事件，由 logging 与 starlink 并列 listen |
+| starlink | 两端协议的节点实现 | 在节点主动 listen 收取调用，经节点的 sidecar 分发并执行，announce 返回结果；listen 审计事件并经 report 上报 |
 
 HTTP 的类型和 key 由 `bazaar-contrib-http` 导出；页面框架、登记入口与 THEME 的类型和 key 归 `bazaar-contrib-server`，概览登记的归 `bazaar-contrib-server-overview`；登录与权限、第三方登录方式的接口归 `bazaar-contrib-server-access`；中转契约与 call 归 `bazaar-contrib-server-computer`。
 starlink 公开两端 HTTP 请求格式并持有节点身份、请求关联及 listen／announce／report 生命周期，server-computer 提供对应 HTTP 入口，协议见 [server.md](server.md)。
