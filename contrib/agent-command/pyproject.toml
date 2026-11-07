@@ -27,6 +27,9 @@ agent-command = "bazaar_contrib_agent_command:commands"
 [project.entry-points."bazaar_compute_node.commands"]
 agent = "bazaar_contrib_agent_command:command_entry"
 
+[project.entry-points."bazaar_compute_node.remotes"]
+agent-configuration = "bazaar_contrib_agent_command:remote"
+
 [project.urls]
 Repository = "https://github.com/yuchanns/bazaar-compute-node"
 

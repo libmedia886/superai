@@ -378,7 +378,7 @@ agent-activity 的 `agents()` 在现有的状态、原因、今日用量与最�
   - `channel.connection.connected`：连接建立或恢复，载荷为机器人身份；
   - `channel.connection.failed`：连接断开或建立失败，载荷为下次重试前等待的毫秒数，并带错误，插件随后自行重试。
 - 改动前各插件的事件为：telegram 发 `channel.poll.failed` 与 `channel.poll.recovered`，lark 发 `channel.connection.connected`（载荷为 service_id）与 `channel.connection.failed`，wecom 发 `channel.connection.subscribed` 与 `channel.connection.failed`；载荷都不带机器人身份。
-- agent 启用每个渠道与运行时的组合时，以 values 挂上 agent_id 与连接名。插件经 accept 取得的审计服务绑定在各自的作用域上，发出的审计事件自动带上连接名，插件不经手；agent 自己发布的渠道事件与限流事件同样带上连接名。机制见 [framework.md](framework.md) 的作用域值与调用方绑定。
+- 依据消息 `d11bc763-6e20-588d-9e83-8255a09f2986` 与 `d456448b-232b-5911-a8a4-eaa3c9d46f13`，bazaar-contrib-audit 的 `AuditContext` 增加 `connection`。agent 启用每个渠道与运行时的组合时，以 local 绑定在组合中放入一份审计服务：组合中的插件发布的事件缺少连接名时由它补上，再交给节点的审计服务，插件不经手。agent 自己发布的渠道事件与限流事件同样带上连接名。
 
 ### 配置模型的标注
 
@@ -490,8 +490,7 @@ server-agent 对所有插件使用同一套画法：字符串为输入框，枚�
     Windows 上直接结束进程，只验证节点的恢复。
   - 三平台 CI。
 - Task 52：第 13 阶段的计划与效果图，并同步计划入口、路线图与 design 的说明。
-- Task 53：节点侧，BCN `0.3-server`：bazaar-core 的作用域值与调用方绑定，bazaar-contrib-audit 的绑定，agent-command 的 remote `agent-configuration` 及其成员，agent-activity 新增的内容与它读取的 agent 状态，bazaar-contrib-channel 的连接事件，以及 agent 为渠道与运行时挂上的值；完成后发布 bazaar-compute 的 rc。
-  - 验证：core：子组合中的实例取得创建者与本次挂上的值，后代继承；实现 bind 的服务按调用方各得一份，未实现的照旧返回服务本身。审计：经绑定发布的事件由作用域补上 agent_id 与连接名，插件自己填写的字段保留。
+- Task 53：节点侧，BCN `0.3-server`：agent-command 的 remote `agent-configuration` 及其成员，agent-activity 新增的内容与它读取的 agent 状态，bazaar-contrib-channel 的连接事件，`AuditContext` 的 `connection`，以及 agent 为渠道与运行时的组合放入的审计服务；完成后发布 bazaar-compute 的 rc。
   - 验证：真实节点经 sidecar 调用 `agent-configuration`：`list` 只给出凭据的字段名；带连接名编辑时没有提交的凭据沿用，提交 null 时清除，两个运行时调换顺序后凭据随条目保留；`providers` 给出已启用 builder 的 schema；`inspect` 在 agent 的工作区与临时目录中各查询一次，临时目录随后不存在；`workspace` 给出绝对路径、总项数与一页内容，按 offset 读完各页与总项数一致；`read` 给出文本文件的内容，二进制文件标明无法显示；工作区之外的路径被拒绝。
   - 验证：配置变更：回合进行中修改运行时的模型并保存，保存在回合结束前返回，这一轮照常完成，空闲后该运行时按新配置重启，之后的会话使用新模型；只调整顺序时，已有会话继续在原运行时上，新会话按新的顺序选择运行时；修改渠道的配置后，agent 空闲时按新配置重新连接；一个 agent 正在等待时，另一个 agent 的变更照常生效。
   - 验证：agent-activity 在回合开始时给出 working，结束后清除；渠道连接的状态、身份与失败次数随连接事件变化；运行时被限流时在用者换为下一个。

@@ -10,7 +10,7 @@ from bazaar_contrib_channel import ChannelBuilderConfig
 from bazaar_contrib_config import CONFIGURATION
 from bazaar_contrib_harness import HarnessBuilderConfig
 from bazaar_contrib_invoke import COMMANDS, CommandEntry
-from bazaar_contrib_sidecar import CLIENT
+from bazaar_contrib_sidecar import CLIENT, RemoteEntry
 from bazaar_core import Composition, Context, Contrib, ServiceKey
 from pydantic import BaseModel, ConfigDict, PrivateAttr, ValidationInfo, model_validator
 
@@ -27,26 +27,30 @@ __all__ = [
 
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    _channels: tuple[str, ...] = PrivateAttr(default=())
-    _harnesses: tuple[str, ...] = PrivateAttr(default=())
+    _channels: tuple[type[ChannelBuilderConfig], ...] = PrivateAttr(default=())
+    _harnesses: tuple[type[HarnessBuilderConfig], ...] = PrivateAttr(default=())
 
     @model_validator(mode="after")
     def declarations(self, info: ValidationInfo) -> Self:
         if isinstance(info.context, Composition):
-            channels: list[str] = []
-            harnesses: list[str] = []
+            channels: list[type[ChannelBuilderConfig]] = []
+            harnesses: list[type[HarnessBuilderConfig]] = []
             for entry in info.context.entries:
                 model = entry.definition.config
                 if model is not None and issubclass(model, ChannelBuilderConfig):
-                    channels.append(model.kind)
+                    channels.append(model)
                 elif model is not None and issubclass(model, HarnessBuilderConfig):
-                    harnesses.append(model.kind)
+                    harnesses.append(model)
             self._channels = tuple(channels)
             self._harnesses = tuple(harnesses)
         return self
 
 
 AGENT_CONFIGURATION = ServiceKey[AgentManagement]("agent.configuration")
+remote = RemoteEntry(
+    AGENT_CONFIGURATION,
+    ("list", "providers", "inspect", "add", "edit", "remove", "workspace", "read"),
+)
 command_entry = CommandEntry(
     contrib="agent-command",
     help="Manage agents",

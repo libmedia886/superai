@@ -58,6 +58,7 @@ from bcn_agent_workbench import ChannelMessage as InboundMessage
 from pydantic import TypeAdapter
 
 from bazaar_contrib_agent import AGENTS, AgentInstances
+from bazaar_contrib_agent.activity import AGENT_ACTIVITY, Activity, AgentActivity
 
 
 class Peer:
@@ -569,7 +570,7 @@ async def steering(peer: Peer, draft: Path, persisted: asyncio.Queue[AuditEvent]
     assert continued.parent == saved.parent
 
 
-async def runtime_failures(peer: Peer, draft: Path):
+async def runtime_failures(peer: Peer, draft: Path, status: Callable[[], Activity]):
     """Complete reports after real write conflicts, fallback and final feedback."""
 
     for failures in (1, 2):
@@ -598,6 +599,10 @@ async def runtime_failures(peer: Peer, draft: Path):
                 data = json.loads(await asyncio.to_thread(saved.read_text))
                 assert data["words"] > 0
                 assert saved.parent != conflicts[0].parent
+                # the failed runtime is banned and the next one takes its place
+                first, second = status().runtimes
+                assert first.banned_until_ms and not first.in_use
+                assert second.in_use
             else:
                 feedback = await peer.until("outbound")
                 terminal = HarnessOutput.model_validate(
@@ -678,17 +683,21 @@ async def exercise(path: Path):
             ContribSpec(contrib="test-channel-builder"),
             ContribSpec(contrib="secondary-channel-builder"),
             ContribSpec(contrib="document-builder"),
+            ContribSpec(contrib="secondary-document-builder"),
+            ContribSpec(contrib="agent-activity"),
         ],
     )
 
     ready = asyncio.Event()
     registries: list[AgentInstances] = []
+    activities: list[AgentActivity] = []
     persisted: asyncio.Queue[AuditEvent] = asyncio.Queue()
     stopped: asyncio.Queue[AuditEvent] = asyncio.Queue()
 
     @asynccontextmanager
     async def registry(ctx: Context):
         registries.append(ctx.accept(AGENTS))
+        activities.append(ctx.accept(AGENT_ACTIVITY))
         yield
 
     def changed(ctx: Context, change: ContribChange):
@@ -711,7 +720,9 @@ async def exercise(path: Path):
                 *composition.entries,
                 ContribEntry(
                     name="agent-registry",
-                    definition=Contrib(accepts=[AGENTS], lifespan=registry),
+                    definition=Contrib(
+                        accepts=[AGENTS, AGENT_ACTIVITY], lifespan=registry
+                    ),
                 ),
                 ContribEntry(
                     name="ready", definition=Contrib(listen={CONTRIB_CHANGED: changed})
@@ -755,6 +766,37 @@ async def exercise(path: Path):
                     peers.push_async_callback(peer.aclose)
                     peer.automatic = name != "Cloud"
                     connected[name] = peer
+
+                def status(name: str) -> Activity:
+                    return activities[0].agents()[name]
+
+                async def settled(done: Callable[[], bool]) -> None:
+                    while not done():  # noqa: ASYNC110
+                        await asyncio.sleep(0.05)
+
+                await settled(
+                    lambda: all(
+                        status(name).channels[0].connected_at_ms is not None
+                        for name in workspaces
+                    )
+                )
+                for name in workspaces:
+                    channel = status(name).channels[0]
+                    assert channel.state == "running" and not channel.failures
+                    assert channel.identity is not None and channel.identity.id == name
+                    assert status(name).started_at_ms
+                    assert status(name).runtimes[0].in_use
+                await connected["Tifa"].aclose()
+                await settled(lambda: status("Tifa").channels[0].failures == 1)
+                assert status("Tifa").channels[0].state == "reconnecting"
+                assert status("Tifa").channels[0].error
+                connected["Tifa"] = await connect(
+                    workspaces["Tifa"] / "channel.json", ready, hub
+                )
+                peers.push_async_callback(connected["Tifa"].aclose)
+                connected["Tifa"].automatic = True
+                await settled(lambda: not status("Tifa").channels[0].failures)
+                assert status("Tifa").channels[0].state == "running"
                 await inbound_context(
                     connected["Cloud"],
                     drafts["Cloud"],
@@ -813,6 +855,8 @@ async def exercise(path: Path):
                 # Update the installed default entry while an existing approval remains live.
                 primary = connected["Cloud"]
                 _, pending = await submit(primary, drafts["Cloud"])
+                working = status("Cloud").working
+                assert working is not None and working.since_ms
                 identity = registries[0].running["Cloud"]
                 entry = next(
                     entry for entry in composition.entries if entry.name == "agent"
@@ -936,6 +980,39 @@ async def exercise(path: Path):
                 before = {record.id for record in hub.snapshots}
                 await enabled.update(revised)
                 await report(connected["Tifa"], drafts["Tifa"])
+                # A conversation arriving before the restart runs on the runtime
+                # as it was, and its session ends with that runtime. The waiting
+                # turn shares the peer, so only this session's events count.
+                _, interim = await submit(
+                    secondary,
+                    drafts["Cloud"],
+                    ChannelTarget(kind="group", thread_id="interim-desk"),
+                )
+                approval = ChannelApprovalRequest.model_validate(interim["approval"])
+                await secondary.write(
+                    {
+                        "id": interim["id"],
+                        "decision": ApprovalResult(
+                            request_id=approval.approval.request_id,
+                            decision="approved",
+                        ).model_dump(mode="json"),
+                    }
+                )
+                while True:
+                    packet = await secondary.until("event")
+                    secondary.events.append(packet)
+                    event = HarnessOutput.model_validate(packet["event"])
+                    if (
+                        event.session_id == approval.approval.session_id
+                        and event.payload.type == "completed"
+                    ):
+                        break
+                data = json.loads(
+                    await asyncio.to_thread(
+                        Path(str(approval.approval.details["path"])).read_text
+                    )
+                )
+                assert data["title"] == "Cloud editorial report"
                 old = await finish(secondary, pending)
                 await applied(
                     lambda: (
@@ -961,6 +1038,151 @@ async def exercise(path: Path):
                 assert old.parent != new.parent
                 data = json.loads(await asyncio.to_thread(new.read_text))
                 assert data["title"] == "Revised editorial report"
+                await settled(lambda: status("Cloud").working is None)
+
+                # Reordering runtimes of different kinds keeps both running: the
+                # existing conversation stays where it is, a new one takes the
+                # first.
+                order_workspace = path / "Order"
+                await asyncio.to_thread(order_workspace.mkdir)
+                order_draft = order_workspace / "draft.txt"
+                await asyncio.to_thread(
+                    order_draft.write_text, "An editorial note for the order desk."
+                )
+                config = deepcopy(config)
+                config["agents"].append(
+                    {
+                        "id": "Order",
+                        "name": "Order",
+                        "workspace": str(order_workspace),
+                        "session": {
+                            "config": {"sandbox": {"policy": "danger-full-access"}}
+                        },
+                        "channel": [{"kind": "test-channel"}],
+                        "harness": [
+                            {"kind": "document", "title": "First desk report"},
+                            {
+                                "kind": "document-secondary",
+                                "title": "Second desk report",
+                            },
+                        ],
+                    }
+                )
+                ordered = revised.model_copy(
+                    update={
+                        "entries": tuple(
+                            item.model_copy(update={"config": config})
+                            if item.name == "agent"
+                            else item
+                            for item in revised.entries
+                        )
+                    }
+                )
+                await enabled.update(ordered)
+                await applied(lambda: running(hub.snapshots, ["Order"]))
+                order = await connect(order_workspace / "channel.json", ready, hub)
+                peers.push_async_callback(order.aclose)
+                order.automatic = True
+                saved = await report(order, order_draft)
+                data = json.loads(await asyncio.to_thread(saved.read_text))
+                assert data["title"] == "First desk report"
+                runtimes = [
+                    "Order/harness:document:0",
+                    "Order/harness:document-secondary:0",
+                ]
+                before = {record.id for record in named(hub.snapshots, runtimes)}
+                config = deepcopy(config)
+                config["agents"][-1]["harness"].reverse()
+                ordered = ordered.model_copy(
+                    update={
+                        "entries": tuple(
+                            item.model_copy(update={"config": config})
+                            if item.name == "agent"
+                            else item
+                            for item in ordered.entries
+                        )
+                    }
+                )
+                await enabled.update(ordered)
+                await settled(lambda: status("Order").runtimes[0].in_use)
+                assert status("Order").runtimes[0].kind == "document-secondary"
+                assert {record.id for record in named(hub.snapshots, runtimes)} == (
+                    before
+                )
+                saved = await report(order, order_draft)
+                data = json.loads(await asyncio.to_thread(saved.read_text))
+                assert data["title"] == "First desk report"
+                saved = await report(
+                    order,
+                    order_draft,
+                    ChannelTarget(kind="group", thread_id="order-desk"),
+                )
+                data = json.loads(await asyncio.to_thread(saved.read_text))
+                assert data["title"] == "Second desk report"
+
+                # A changed channel waits for its agent to finish; another agent's
+                # change does not wait for it.
+                _, pending = await submit(secondary, drafts["Cloud"])
+                endpoint = workspaces["Cloud"] / "secondary.json"
+                channel = ["Cloud/channel:test-channel-secondary:0"]
+                before = {record.id for record in named(hub.snapshots, channel)}
+                waiting = {
+                    record.id
+                    for record in named(hub.snapshots, ["Tifa/harness:document:0"])
+                }
+                config = deepcopy(config)
+                for item in config["agents"]:
+                    if item["id"] == "Cloud":
+                        item["channel"][0]["token"] = "rotated"
+                    elif item["id"] == "Tifa":
+                        item["harness"][0]["title"] = "Tifa revised report"
+                ordered = ordered.model_copy(
+                    update={
+                        "entries": tuple(
+                            item.model_copy(update={"config": config})
+                            if item.name == "agent"
+                            else item
+                            for item in ordered.entries
+                        )
+                    }
+                )
+                await enabled.update(ordered)
+                await applied(
+                    lambda: (
+                        running(hub.snapshots, ["Tifa/harness:document:0"])
+                        and all(
+                            record.id not in waiting
+                            for record in named(
+                                hub.snapshots, ["Tifa/harness:document:0"]
+                            )
+                        )
+                    )
+                )
+                saved = await report(connected["Tifa"], drafts["Tifa"])
+                data = json.loads(await asyncio.to_thread(saved.read_text))
+                assert data["title"] == "Tifa revised report"
+                assert {record.id for record in named(hub.snapshots, channel)} == (
+                    before
+                )
+                await finish(secondary, pending)
+                await applied(
+                    lambda: (
+                        running(hub.snapshots, channel)
+                        and all(
+                            record.id not in before
+                            for record in named(hub.snapshots, channel)
+                        )
+                    )
+                )
+                secondary = await connect(endpoint, ready, hub)
+                peers.push_async_callback(secondary.aclose)
+                connected["Cloud"] = secondary
+                await settled(
+                    lambda: (
+                        status("Cloud").channels[0].connected_at_ms is not None
+                        and not status("Cloud").channels[0].failures
+                    )
+                )
 
                 # An idle timer releases the session after active approval and reply finish.
                 idle_workspace = path / "Idle"
@@ -1205,7 +1427,9 @@ async def exercise(path: Path):
                     (failure_workspace / "channel.closed").read_text
                 )
 
-                await runtime_failures(connected["Cloud"], drafts["Cloud"])
+                await runtime_failures(
+                    connected["Cloud"], drafts["Cloud"], lambda: status("Cloud")
+                )
 
                 # Stop with both an unacknowledged native send and a live approval.
                 _, pending = await submit(secondary, drafts["Cloud"])

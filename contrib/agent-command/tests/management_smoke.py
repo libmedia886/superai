@@ -13,12 +13,13 @@ import tomllib
 from contextlib import AsyncExitStack, asynccontextmanager, closing
 from importlib.resources import files
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import tomli_w
 from bazaar_compute_node.boot import build, defaults, node
 from bazaar_contrib_config import ConfigDocument
-from bazaar_contrib_sidecar import CLIENT, Client
+from bazaar_contrib_harness import HarnessInspection
+from bazaar_contrib_sidecar import CLIENT, Client, RemoteError
 from bazaar_core import (
     Composition,
     Context,
@@ -27,6 +28,15 @@ from bazaar_core import (
 )
 from blockbuster import blockbuster_ctx
 from packaging.requirements import Requirement
+from pydantic import JsonValue
+
+from bazaar_contrib_agent_command.management import (
+    AgentView,
+    Directory,
+    File,
+    Listing,
+    Providers,
+)
 
 
 async def exercise(path: Path, source: str, tests: Path):
@@ -123,6 +133,13 @@ async def exercise(path: Path, source: str, tests: Path):
         "test-channel-builder",
     )
     await cli("contrib", "enable", "bcn-agent-workbench", "--entry", "document-builder")
+    await cli(
+        "contrib",
+        "enable",
+        "bcn-agent-workbench",
+        "--entry",
+        "secondary-document-builder",
+    )
     await cli(
         "contrib",
         "enable",
@@ -445,6 +462,184 @@ async def exercise(path: Path, source: str, tests: Path):
                 if await asyncio.to_thread(saved.with_suffix(".published.json").exists):
                     break
                 await asyncio.sleep(0.01)
+
+    @asynccontextmanager
+    async def serving():
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-m",
+            "bazaar_compute_node",
+            "--config",
+            str(config),
+            "run",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        assert process.stdout is not None and process.stderr is not None
+        errors = asyncio.create_task(process.stderr.read())
+        try:
+            while (line := await process.stdout.readline()).rstrip(
+                b"\r\n"
+            ) != b"bcn ready":
+                assert line, (await errors).decode()
+            output = asyncio.create_task(process.stdout.read())
+            try:
+                yield
+            finally:
+                if process.returncode is None:
+                    if os.name == "nt":
+                        process.terminate()
+                    else:
+                        process.send_signal(signal.SIGTERM)
+                await process.wait()
+                await output
+        finally:
+            if process.returncode is None:
+                process.kill()
+                await process.wait()
+            failure = (await errors).decode()
+            if os.name != "nt":
+                assert process.returncode == 0, failure
+
+    # A server manages agents through the same service as bcn agent, over the
+    # running node's sidecar; credentials go in and never come back.
+    async with serving(), control() as client:
+
+        async def call(method: str, *args: object) -> JsonValue:
+            return await client.call("agent-configuration", method, *args)
+
+        providers = Providers.model_validate(await call("providers"))
+        schemas = {
+            (label, item.kind): cast(
+                dict[str, dict[str, JsonValue]], item.json_schema["properties"]
+            )
+            for label, items in (
+                ("channel", providers.channel),
+                ("harness", providers.harness),
+            )
+            for item in items
+        }
+        assert schemas["channel", "test-channel"]["token"]["writeOnly"]
+        assert schemas["harness", "document"]["api_key"]["writeOnly"]
+        assert ("harness", "document-secondary") in schemas
+        added = AgentView.model_validate(
+            await call(
+                "add",
+                {
+                    "name": "Remote desk",
+                    "channel": [{"kind": "test-channel", "token": "channel-secret"}],
+                    "harness": [
+                        {
+                            "kind": "document",
+                            "title": "Remote report",
+                            "api_key": "key-a",
+                        },
+                        {
+                            "kind": "document-secondary",
+                            "title": "Backup report",
+                            "api_key": "key-b",
+                        },
+                    ],
+                },
+            )
+        )
+        remote = added.id
+        listed = await call("list")
+        listing = Listing.model_validate(listed)
+        view = next(item for item in listing.agents if item.id == remote)
+        assert "token" in view.channel[0].secrets
+        assert "token" not in view.channel[0].values
+        assert [item.connection for item in view.harness] == [
+            "document:0",
+            "document-secondary:0",
+        ]
+        assert all(
+            secret not in json.dumps(listed)
+            for secret in ("channel-secret", "key-a", "key-b")
+        )
+        await client.call(
+            "agent-configuration",
+            "edit",
+            remote,
+            {
+                "channel": [
+                    {
+                        "kind": "test-channel",
+                        "connection": "test-channel:0",
+                        "token": None,
+                    }
+                ],
+                "harness": [
+                    {
+                        "kind": "document-secondary",
+                        "connection": "document-secondary:0",
+                        "title": "Backup report",
+                    },
+                    {
+                        "kind": "document",
+                        "connection": "document:0",
+                        "title": "Remote report",
+                    },
+                ],
+            },
+            expected_revision=listing.revision,
+        )
+        saved = next(item for item in await agents() if item["id"] == remote)
+        assert "token" not in saved["channel"][0]
+        assert [(item["kind"], item["api_key"]) for item in saved["harness"]] == [
+            ("document-secondary", "key-b"),
+            ("document", "key-a"),
+        ]
+        inspected = HarnessInspection.model_validate(
+            await call("inspect", "document", remote)
+        )
+        assert f"workspaces{os.sep}{remote}" in inspected.skills[0].description
+        drafted = HarnessInspection.model_validate(await call("inspect", "document"))
+        scratch = drafted.skills[0].description.split(" in ", 1)[1].rsplit(" and ", 1)
+        assert not await asyncio.to_thread(Path(scratch[0]).exists)
+
+        root = Path(Directory.model_validate(await call("workspace", remote)).root)
+        assert root.is_absolute()
+        await asyncio.to_thread((root / "chapters").mkdir)
+        for number in range(60):
+            await asyncio.to_thread(
+                (root / f"note-{number:02}.md").write_text, f"Note {number}"
+            )
+        await asyncio.to_thread((root / "cover.bin").write_bytes, bytes(range(256)))
+        if os.name != "nt":
+            await asyncio.to_thread((root / "outside").symlink_to, path)
+        first = Directory.model_validate(await call("workspace", remote))
+        rest = Directory.model_validate(
+            await call("workspace", remote, "", first.total - 12)
+        )
+        names = {item.name for item in (*first.entries, *rest.entries)}
+        directories = [item.directory for item in first.entries]
+        assert directories == sorted(directories, reverse=True)
+        assert any(item.name == "chapters" and item.directory for item in first.entries)
+        assert {"note-00.md", "note-59.md", "cover.bin"} <= names
+        assert "outside" not in names
+        assert len(first.entries) < first.total
+        note = File.model_validate(await call("read", remote, "note-07.md"))
+        assert note.content == "Note 7"
+        cover = File.model_validate(await call("read", remote, "cover.bin"))
+        assert cover.content is None and cover.size
+        for method, argument in (("workspace", ".."), ("read", "../config.toml")):
+            try:
+                await call(method, remote, argument)
+            except RemoteError:
+                pass
+            else:
+                raise AssertionError(f"{method} reached outside the workspace")
+        removed = AgentView.model_validate(await call("remove", remote))
+        assert removed.id == remote
+        assert all(item["id"] != remote for item in await agents())
+        assert await asyncio.to_thread(root.is_dir)
+    await asyncio.to_thread(
+        print,
+        "The agent-configuration remote masks, keeps and browses as a server needs",
+        flush=True,
+    )
+
     async with running(), AsyncExitStack() as stack:
         assert all(item["review"] == "approved" for item in await contacts(cloud["id"]))
         await cli(
