@@ -12,7 +12,6 @@ lazy from pathlib import Path
 from bazaar_core import ServiceKey
 lazy import psutil
 lazy from bazaar_contrib_audit import Audit, AuditContext, AuditError
-lazy from bazaar_contrib_invoke import Run
 lazy from bazaar_contrib_manager import ContribManager, ManagementError, Operation
 lazy from pydantic import JsonValue
 
@@ -86,14 +85,11 @@ def foreground() -> bool:
 
 
 class Node:
-    """Report the host release and its machine, find a newer installable release and hand over to it."""
+    """Report the host release and its machine, and find and install a newer release."""
 
-    def __init__(
-        self, manager: ContribManager, audit: Audit, run: Run, running: str
-    ) -> None:
+    def __init__(self, manager: ContribManager, audit: Audit, running: str) -> None:
         self.manager = manager
         self.audit = audit
-        self.run = run
         self.running = running
         self.latest: str | None = None
         self.installing: asyncio.Task[Operation] | None = None
@@ -139,10 +135,6 @@ class Node:
         else:
             await self.publish("installed", version)
         return operation
-
-    async def restart(self) -> None:
-        """Stop serving so the process exits and whatever runs it starts it again."""
-        self.run.stopped.set()
 
     async def publish(
         self, phase: str, version: str, *, error: str | None = None

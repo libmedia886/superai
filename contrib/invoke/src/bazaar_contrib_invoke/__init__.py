@@ -31,11 +31,9 @@ lazy from bazaar_core import ContribStatus, Stopping
 
 __all__ = [
     "COMMANDS",
-    "RUN",
     "CommandCatalog",
     "CommandEntry",
     "Commands",
-    "Run",
     "commands",
     "contribs",
     "table",
@@ -102,13 +100,6 @@ def contribs(snapshots: Iterable[ContribStatus]) -> list[tuple[str, str, str]]:
             )
         )
     return rows
-
-
-class Run:
-    """The `bcn run` this process serves until it is stopped."""
-
-    def __init__(self) -> None:
-        self.stopped = asyncio.Event()
 
 
 class CommandCatalog(click.Group):
@@ -314,14 +305,12 @@ class Commands(click.Group):
 
 
 COMMANDS = ServiceKey[Commands]("invoke.commands")
-RUN = ServiceKey[Run]("invoke.run")
 
 
 @asynccontextmanager
 async def lifespan(ctx: Context):
     ctx.offer(COMMANDS, Commands(context_settings=HELP))
-    ctx.offer(RUN, Run())
     yield
 
 
-commands = Contrib(offers=[COMMANDS, RUN], lifespan=lifespan)
+commands = Contrib(offers=[COMMANDS], lifespan=lifespan)

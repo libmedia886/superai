@@ -362,7 +362,12 @@ http、server-computer、server-relay-memory 与 starlink 的计时都经 TIMER�
   - 验证：sidecar 分发只到声明成员，结果回传与失败重试，上报的确认与重放。
   - 验证：token 与 token_env 的选择，server 不可达时的退避重试，退出时结束在途调用与后台任务。
 - Task 50：V4→V5 转换中的 starlink 迁移，并在 contrib-index 登记十个新包。
-- Task 51：两端联合验收。
-  - 在独立进程中分别运行 server 与节点，各自使用自己的配置、数据库、端口与运行目录。
-  - 经真实 HTTP 验证身份、调用 agent-activity 与 node 的已声明成员、结果、事件确认与重放、server 重启后的恢复，以及两端退出。
+- Task 51：两端联合验收。按消息 `38087144-154a-5eaa-93c7-78c2de410d74`，测试放在 contrib-server-management，从 PyPI 安装已发布的
+  `bazaar-compute[node]` 与 starlink，加入本地构建的包，两端经真实 HTTP 连接。
+  - 分进程：server 与节点各以一个 `bcn run` 运行，各自使用自己的配置、数据库、端口与运行目录。
+  - 按消息 `508d6600-4d1d-50d6-83ab-9216b5c98986`，同进程：一个 `bcn run` 同时启用 server 与节点的条目，starlink 连到同一进程中的 server，
+    server 与节点的数据库分开。
+  - 验证：身份、调用 agent-activity 与 node 的已声明成员、未声明的成员被拒、结果、事件确认与重放、server 重启后的恢复。
+  - 验证：按消息 `897f1d71-9e4f-5394-97e5-659d9f2387d1`，Linux 与 macOS 上两端收到 SIGINT 后正常退出；Windows 上 server 的重启
+    直接结束进程，只验证节点的恢复。
   - 三平台 CI。

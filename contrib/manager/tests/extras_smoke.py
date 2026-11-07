@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import shutil
+import signal
 import sys
 import tomllib
 from contextlib import asynccontextmanager
@@ -126,9 +127,15 @@ async def exercise(path: Path, source: str, releases: Path) -> None:
                 )
             )
             assert operation.installed, operation.model_dump_json(indent=2)
-            await clients[0].call("node", "restart")
-            output, _ = await process.communicate()
-        assert process.returncode == 0, output.decode()
+        # SIGTERM ends the node as Ctrl+C would; Windows has no such
+        # signal, so there the process is ended.
+        if os.name == "nt":
+            process.terminate()
+        else:
+            process.send_signal(signal.SIGTERM)
+        output, _ = await process.communicate()
+        if os.name != "nt":
+            assert process.returncode == 0, output.decode()
     finally:
         if process.returncode is None:
             process.kill()

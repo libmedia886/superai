@@ -96,7 +96,7 @@ async def test_run_uses_selected_configuration_and_exits(tmp_path: Path, sig: in
     assert await asyncio.to_thread(log.parent.is_dir)
 
 
-async def test_node_service_reports_and_restarts_the_node(
+async def test_node_service_reports_the_node_and_its_machine(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     monkeypatch.setenv("BCN_HOME", str(tmp_path / "node"))
@@ -159,9 +159,6 @@ async def test_node_service_reports_and_restarts_the_node(
             assert all(0 <= disk["used"] <= disk["total"] for disk in info["disks"])
             with pytest.raises(RemoteError, match="uv tool installation"):
                 await clients[0].call("node", "install", current, timeout=None)
-            await clients[0].call("node", "restart")
-            _, errors = await process.communicate()
-        assert process.returncode == 0, errors.decode()
     finally:
         if process.returncode is None:
             process.kill()

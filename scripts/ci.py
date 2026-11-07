@@ -44,6 +44,30 @@ def package(metadata: Metadata, member: Member) -> None:
             )
             artifacts["wheel"][item.name] = next(output.glob("*.whl"))
             artifacts["sdist"][item.name] = next(output.glob("*.tar.gz"))
+        # What the smoke installs as it runs, such as the host bootstrapping
+        # node-management, comes from this workspace's builds, not from PyPI.
+        workspace = directory / "workspace"
+        subprocess.run(
+            [
+                "uv",
+                "build",
+                "--all-packages",
+                "--wheel",
+                "--no-sources",
+                "--out-dir",
+                str(workspace),
+            ],
+            check=True,
+        )
+        overrides = directory / "overrides.txt"
+        overrides.write_text(
+            "".join(
+                f"{name} @ {wheel.as_uri()}\n"
+                for wheel in workspace.glob("*.whl")
+                if (name := wheel.name.split("-", 1)[0].replace("_", "-"))
+                not in artifacts["wheel"]
+            )
+        )
 
         with (member.path / "pyproject.toml").open("rb") as handle:
             project = Project.model_validate(tomllib.load(handle)["project"])
@@ -70,7 +94,12 @@ def package(metadata: Metadata, member: Member) -> None:
             if smoke is not None:
                 command.append(str(smoke))
             print(f"Verify {member.name} {kind}", flush=True)
-            subprocess.run(command, cwd=directory, check=True)
+            subprocess.run(
+                command,
+                cwd=directory,
+                env=os.environ | {"UV_OVERRIDE": str(overrides)},
+                check=True,
+            )
 
 
 def main() -> None:
