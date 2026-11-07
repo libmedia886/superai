@@ -195,7 +195,7 @@ def create_commands(service: AgentManagement, client: Client) -> click.Group:
         pass
 
     async def listing():
-        configuration = await service.read()
+        configuration = await service.snapshot()
         try:
             activity = await client.call("agent-activity", "agents")
         except FileNotFoundError, ConnectionRefusedError:
@@ -285,7 +285,7 @@ def create_commands(service: AgentManagement, client: Client) -> click.Group:
     )
     def edit(selector, name, channel, harness, options):
         async def update():
-            snapshot = await service.read()
+            snapshot = await service.snapshot()
             current = service.select(snapshot.agents, selector)
             values = parameters(
                 current.model_dump(mode="python"),

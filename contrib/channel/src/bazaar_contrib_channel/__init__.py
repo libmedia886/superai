@@ -26,6 +26,8 @@ from .errors import (
 from .events import CHANNEL_TURN, ChannelTurn
 from .models import (
     ChannelApprovalRequest,
+    ChannelConnected,
+    ChannelConnectionFailed,
     ChannelDeliveryReceipt,
     ChannelIdentity,
     ChannelInput,
@@ -58,7 +60,9 @@ __all__ = [
     "ChannelBuilder",
     "ChannelBuilderConfig",
     "ChannelBuilders",
+    "ChannelConnected",
     "ChannelConnectionError",
+    "ChannelConnectionFailed",
     "ChannelDeliveryReceipt",
     "ChannelDeliveryState",
     "ChannelError",

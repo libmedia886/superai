@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Literal, Self
 from uuid import UUID
@@ -62,6 +63,15 @@ class AgentConfig(BaseModel):
     idle_timeout: float = Field(default=0, ge=0, allow_inf_nan=False)
     channel: tuple[ProviderConfig, ...] = ()
     harness: tuple[ProviderConfig, ...] = ()
+
+    def directory(self) -> Path:
+        """The workspace the agent works in: the configured one, or its own
+        under the node's home."""
+        workspace = self.workspace
+        if workspace is None:
+            root = Path(os.environ.get("BCN_HOME") or Path.home())
+            workspace = root / ".bcn" / "workspaces" / self.id
+        return workspace.expanduser().resolve()
 
     @model_validator(mode="after")
     def session_configuration(self) -> Self:

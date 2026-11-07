@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager
 from pathlib import Path
-from typing import Literal, Self
+from typing import ClassVar, Literal, Self
 
 from bazaar_contrib_harness import ApprovalRequest
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
@@ -22,6 +22,23 @@ class ChannelIdentity(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     id: str = Field(min_length=1)
     name: str | None = None
+
+
+class ChannelConnected(BaseModel):
+    """The payload a channel audits when its connection is made or restored."""
+
+    event_name: ClassVar[str] = "channel.connection.connected"
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    identity: ChannelIdentity
+
+
+class ChannelConnectionFailed(BaseModel):
+    """The payload a channel audits, with the error, when its connection drops
+    or cannot be made and it will try again."""
+
+    event_name: ClassVar[str] = "channel.connection.failed"
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    retry_in_ms: int = Field(ge=0)
 
 
 class SenderIdentity(BaseModel):

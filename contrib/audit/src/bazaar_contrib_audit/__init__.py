@@ -28,6 +28,7 @@ class AuditContext(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     agent_id: str
     channel: str | None = None
+    connection: str | None = None
     harness: str | None = None
     target_kind: str | None = None
     thread_id: str | None = None
