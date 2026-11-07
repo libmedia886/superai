@@ -59,7 +59,82 @@
   .after { padding: 4px 16px 14px; }
   .after div { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; font-size: 13px; color: var(--text-2); }
   .after svg { color: var(--jade); margin-top: 2px; }
+  /* ?step= shows one of the four steps; 2, the channels, is the default */
+  .form[data-p] { display: none; }
+  .st .n.ok { display: none; }
+  .st.done .n:not(.ok) { display: none; }
+  .st.done .n.ok { display: grid; }
+  .st .did { display: none; }
+  .st.done .did { display: inline; }
+  .st.done .todo { display: none; }
+  :root[data-step="1"] .from2, :root[data-step="1"] .from3, :root[data-step="2"] .from3 { display: none !important; }
+  :root:not([data-step="1"]) .upto1, :root[data-step="3"] .upto2, :root[data-step="4"] .upto2 { display: none; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid3 { display: grid; grid-template-columns: .8fr 1.3fr .9fr; gap: 16px; }
+  .field label small { margin-left: 6px; font-weight: 400; font-size: 12px; color: var(--faint); }
+  .field .seg { height: 40px; align-items: center; }
+  .pcs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .pcp { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--r-md); border: 1.5px solid var(--line); background: var(--surface-2); position: relative; }
+  .pcp .os { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--sunken); border: 1px solid var(--line); color: var(--text-2); }
+  .pcp .os svg { width: 15px; height: 15px; fill: currentColor; stroke: none; }
+  .pcp b { display: block; font-size: 13.5px; }
+  .pcp span { font-size: 12px; color: var(--muted); }
+  .pcp.on { border-color: var(--saffron); box-shadow: 0 0 0 4px var(--saffron-soft); }
+  .pcp.on .tick { position: absolute; top: 50%; right: 14px; transform: translateY(-50%); width: 22px; height: 22px; border-radius: 50%; background: var(--saffron); color: var(--saffron-ink); display: grid; place-items: center; }
+  .pcp.on .tick svg { width: 13px; height: 13px; stroke-width: 2.6; }
+  .pcp.no { opacity: .55; }
+  .lead { margin: -2px 0 2px; font-size: 12.5px; color: var(--muted); }
+  .picks.rt { grid-template-columns: repeat(3, 1fr); }
+  .pick .ver { display: block; margin-top: 6px; font: 11.5px var(--font-mono); color: var(--jade); }
+  .models { display: grid; gap: 6px; }
+  .model { display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 9px; border: 1px solid var(--line); background: var(--sunken); font-size: 13px; }
+  .model .rd { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--line-strong); }
+  .model.on { border-color: var(--saffron); background: var(--surface); }
+  .model.on .rd { border: 5px solid var(--saffron); }
+  .model b { font: 600 13px var(--font-mono); }
+  .model em { font-style: normal; font-size: 12px; color: var(--muted); }
+  .sum { display: grid; gap: 12px; }
+  .sum .blk { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-2); padding: 12px 16px; }
+  .sum .blk h5 { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 13px; font-weight: 650; }
+  .sum .blk h5 .edit { margin-left: auto; font-size: 12.5px; font-weight: 600; color: var(--saffron); }
+  .sum .rows { display: grid; grid-template-columns: 90px 1fr 90px 1fr; gap: 7px 12px; font-size: 13px; }
+  .sum .rows span { color: var(--muted); }
+  .sum .rows b { font-weight: 600; }
+  .pick .tick.n { font: 700 12px var(--font-mono); }
+  .wizard > .form, .wizard > .preview, .cfg, .sum, .blk, .lines { min-width: 0; }
+  .prow b, .ln b { white-space: nowrap; flex: none; }
+  .ln em { flex: none; white-space: nowrap; }
+  .ln, .prow { min-width: 0; }
+  .ord { width: 20px; height: 20px; flex: none; border-radius: 6px; display: inline-grid; place-items: center; font: 700 11px var(--font-mono); color: var(--muted); background: var(--surface-2); border: 1px solid var(--line); }
+  .ord.on { color: var(--saffron-ink); background: var(--saffron); border-color: var(--saffron); }
+  .cfg h4 .chip { margin-left: 4px; }
+  .prow { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-2); font-size: 13.5px; }
+  .prow b { font-weight: 650; }
+  .prow .muted { font-size: 12.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .prow .ed { margin-left: auto; font-size: 12.5px; font-weight: 600; color: var(--saffron); white-space: nowrap; }
+  .prow .grip { display: inline-flex; flex-direction: column; color: var(--faint); }
+  .prow .grip svg.i { width: 12px; height: 8px; }
+  .sum .blk h5 small { margin-left: 6px; font-size: 12px; font-weight: 400; color: var(--faint); }
+  .lines { display: grid; gap: 8px; }
+  .ln { display: flex; align-items: center; gap: 9px; font-size: 13px; }
+  .ln b { font-weight: 600; white-space: nowrap; }
+  .ln span:not(.g):not(.ord) { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ln em { margin-left: auto; font-style: normal; font-size: 11.5px; font-weight: 600; color: var(--muted); padding: 1px 7px; border-radius: 5px; border: 1px solid var(--line); }
 </style>
+<script>
+  {
+    const step = Number(new URLSearchParams(location.search).get('step') || 2);
+    document.documentElement.dataset.step = String(step);
+    addEventListener('DOMContentLoaded', () => {
+      for (const s of document.querySelectorAll('.st[data-s]')) {
+        const n = Number(s.dataset.s);
+        s.classList.toggle('done', n < step);
+        s.classList.toggle('now', n === step);
+      }
+      document.querySelector(`.form[data-p="${step}"]`).style.display = 'flex';
+    });
+  }
+</script>
 </head>
 <body>
 <div class="app">
@@ -72,16 +147,110 @@
     <section class="content">
       <div class="wizard">
         <div class="stepper">
-          <div class="st done"><span class="n"><i data-i="check" class="sm"></i></span><div><b>基本信息</b><span>小满 · aqua-mbp</span></div></div>
-          <div class="st now"><span class="n">2</span><div><b>渠道</b><span>在哪里收发消息</span></div></div>
-          <div class="st"><span class="n">3</span><div><b>运行时</b><span>用什么思考和工作</span></div></div>
-          <div class="st"><span class="n">4</span><div><b>确认</b><span>检查后创建</span></div></div>
+          <div class="st" data-s="1"><span class="n">1</span><span class="n ok"><i data-i="check" class="sm"></i></span><div><b>基本信息</b><span class="todo">名字和电脑</span><span class="did">小满 · aqua-mbp</span></div></div>
+          <div class="st" data-s="2"><span class="n">2</span><span class="n ok"><i data-i="check" class="sm"></i></span><div><b>渠道</b><span class="todo">在哪里收发消息</span><span class="did">cli_a7f3e29c81b4d00e</span></div></div>
+          <div class="st" data-s="3"><span class="n">3</span><span class="n ok"><i data-i="check" class="sm"></i></span><div><b>运行时</b><span class="todo">用什么思考和工作</span><span class="did">gpt-5.5-codex，备用 claude-sonnet-5-5</span></div></div>
+          <div class="st" data-s="4"><span class="n">4</span><span class="n ok"><i data-i="check" class="sm"></i></span><div><b>确认</b><span class="todo">检查后创建</span><span class="did">检查后创建</span></div></div>
         </div>
 
-        <div class="form">
+        <div class="form" data-p="1">
+          <div class="card">
+            <h2 class="q">给新智能体起个名字，选一台电脑</h2>
+            <p class="q-sub">它会在选中的电脑上运行；那台电脑给它分配工作区，会话记录和凭据也都留在那里。</p>
+            <div style="display:grid;gap:18px">
+              <div class="grid2">
+                <div class="field"><label>名字</label><div class="input focus"><span>小满</span></div></div>
+                <div class="field"><label>空闲回收</label><div class="input"><span class="num">600</span><span class="suffix">秒，0 为不回收</span></div></div>
+              </div>
+              <div class="field">
+                <label>电脑</label>
+                <p class="lead">列出的是你可以在上面新建智能体的电脑。</p>
+                <div class="pcs">
+                  <div class="pcp"><div class="os"><i data-l="linux"></i></div><div><b>kana-vm</b><span>Fedora 44 · 在线</span></div></div>
+                  <div class="pcp on"><span class="tick"><i data-i="check"></i></span><div class="os"><i data-l="apple"></i></div><div><b>aqua-mbp</b><span>macOS 26 · 在线</span></div></div>
+                  <div class="pcp"><div class="os"><i data-i="windows"></i></div><div><b>win-desk</b><span>Windows 11 · 在线</span></div></div>
+                  <div class="pcp no"><div class="os"><i data-l="linux"></i></div><div><b>ci-runner-01</b><span>Ubuntu 24.04 · 离线，暂时不能新建</span></div></div>
+                </div>
+              </div>
+              <div class="grid2">
+                <div class="field"><label>模式</label><div class="seg"><span class="on">每个会话独立</span><span>个人助理 · 完全访问</span></div><span class="hint">每个会话有自己的上下文；个人助理只服务一个人，操作不再逐个审批。</span></div>
+                <div class="field"><label>会话沙箱</label><div class="seg"><span class="on">工作区可写</span><span>完全访问</span></div><span class="hint">工作区可写时，写工作区以外的文件要在渠道里审批。</span></div>
+              </div>
+            </div>
+            <div class="foot">
+              <div class="right"><div class="btn primary">下一步：渠道<i data-i="right" class="sm"></i></div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="form" data-p="3">
+          <div class="card">
+            <h2 class="q">小满用什么思考和工作？</h2>
+            <p class="q-sub">可以选多个，按选中的顺序使用：排第一的在用，出问题时换下一个。这里列出的是 aqua-mbp 上已安装的运行时插件，版本和模型由它们现场给出。</p>
+            <div class="picks rt">
+              <div class="pick on"><span class="tick n">2</span><span class="g claudecode" style="--s:36px"><i data-l="claudecode"></i></span><b>Claude Code</b><span>Anthropic · 备用</span><span class="ver">2.1.40 · 可用</span></div>
+              <div class="pick on"><span class="tick n">1</span><span class="g codex" style="--s:36px"><i data-l="codex"></i></span><b>Codex</b><span>OpenAI · 在用</span><span class="ver">0.163.0 · 可用</span></div>
+              <div class="pick more"><div class="logo"><i data-i="store" class="sm"></i></div><b style="color:var(--text-2)">更多运行时</b><span>市场即将上线</span></div>
+            </div>
+            <div class="cfg">
+              <h4><span class="ord on">1</span><span class="g codex"><i data-l="codex"></i></span>在用的设置</h4>
+              <div class="grid2">
+                <div class="field">
+                  <label>模型</label>
+                  <div class="models">
+                    <div class="model on"><span class="rd"></span><b>gpt-5.5-codex</b><em>默认</em></div>
+                    <div class="model"><span class="rd"></span><b>gpt-5.5</b><em></em></div>
+                    <div class="model"><span class="rd"></span><b>gpt-5.4-mini</b><em>更快</em></div>
+                  </div>
+                </div>
+                <div style="display:grid;gap:16px;align-content:start">
+                  <div class="field"><label>推理档位</label><div class="seg"><span>低</span><span>中</span><span class="on">高</span><span>最高</span></div><span class="hint">gpt-5.5-codex 默认为中。</span></div>
+                  <div class="field"><label>API Key<small>可选</small></label><div class="input"><span class="ph">留空则用这台电脑上已登录的账号</span></div></div>
+                </div>
+              </div>
+              <div class="prow"><span class="grip"><i data-i="more" class="xs"></i><i data-i="more" class="xs"></i></span><span class="ord">2</span><span class="g claudecode"><i data-l="claudecode"></i></span><b class="mono">claude-sonnet-5-5</b><span class="muted">思考强度 中 · 用电脑上已登录的账号</span><span class="ed">展开设置</span></div>
+            </div>
+            <div class="foot">
+              <div class="btn ghost"><i data-i="reply" class="sm"></i>上一步</div>
+              <div class="right"><div class="btn primary">下一步：确认<i data-i="right" class="sm"></i></div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="form" data-p="4">
+          <div class="card">
+            <h2 class="q">检查一下，没问题就创建</h2>
+            <p class="q-sub">创建时配置写入 aqua-mbp，凭据只留在那台电脑上。</p>
+            <div class="sum">
+              <div class="blk">
+                <h5>基本信息<span class="edit">修改</span></h5>
+                <div class="rows"><span>名字</span><b>小满</b><span>电脑</span><b>aqua-mbp</b><span>模式</span><b>每个会话独立</b><span>会话沙箱</span><b>工作区可写</b><span>空闲回收</span><b class="num">600 秒</b></div>
+              </div>
+              <div class="blk">
+                <h5>渠道<small>同时在线</small><span class="edit">修改</span></h5>
+                <div class="lines">
+                  <div class="ln"><span class="g lark"><i data-l="lark"></i></span><b class="mono">cli_a7f3e29c81b4d00e</b><span>飞书 open.feishu.cn · App Secret 已填写</span></div>
+                </div>
+              </div>
+              <div class="blk">
+                <h5>运行时<small>按顺序使用</small><span class="edit">修改</span></h5>
+                <div class="lines">
+                  <div class="ln"><span class="ord on">1</span><span class="g codex"><i data-l="codex"></i></span><b class="mono">gpt-5.5-codex</b><span>推理档位 高 · 0.163.0</span><em>在用</em></div>
+                  <div class="ln"><span class="ord">2</span><span class="g claudecode"><i data-l="claudecode"></i></span><b class="mono">claude-sonnet-5-5</b><span>思考强度 中 · 2.1.40</span><em>备用</em></div>
+                </div>
+              </div>
+            </div>
+            <div class="foot">
+              <div class="btn ghost"><i data-i="reply" class="sm"></i>上一步</div>
+              <div class="right"><div class="btn primary"><i data-i="check" class="sm"></i>创建小满</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="form" data-p="2">
           <div class="card">
             <h2 class="q">小满在哪里收发消息？</h2>
-            <p class="q-sub">可以添加多个渠道。这里列出的是 aqua-mbp 上已安装的渠道 contrib。</p>
+            <p class="q-sub">可以添加多个渠道。这里列出的是 aqua-mbp 上已安装的渠道插件。</p>
             <div class="picks">
               <div class="pick"><span class="g tg" style="--s:36px"><i data-l="telegram"></i></span><b>Telegram</b><span>Bot Token</span></div>
               <div class="pick on"><span class="tick"><i data-i="check"></i></span><span class="g lark" style="--s:36px"><i data-l="lark"></i></span><b>飞书</b><span>自建应用</span></div>
@@ -122,8 +291,8 @@
               <div class="kv-row"><span>电脑</span><span class="v"><span class="online" style="font-size:12.5px">aqua-mbp</span></span></div>
               <div class="kv-row"><span>会话模式</span><span class="v">每个会话独立</span></div>
               <div class="kv-row"><span>空闲回收</span><span class="v num">600 秒</span></div>
-              <div class="kv-row"><span>渠道</span><span class="v"><span class="chip"><span class="g lark"><i data-l="lark"></i></span>飞书</span></span></div>
-              <div class="kv-row"><span>运行时</span><span class="v"><span class="pending">下一步选择</span></span></div>
+              <div class="kv-row"><span>渠道</span><span class="v"><span class="chip from2 lg"><span class="g lark"><i data-l="lark"></i></span></span><span class="pending upto1">下一步选择</span></span></div>
+              <div class="kv-row"><span>运行时</span><span class="v"><span class="chip from3 lg"><span class="g codex"><i data-l="codex"></i></span><i data-i="right" class="xs"></i><span class="g claudecode"><i data-l="claudecode"></i></span></span><span class="pending upto2">下一步选择</span></span></div>
             </div>
           </div>
           <div class="card" style="flex:1;min-height:0">

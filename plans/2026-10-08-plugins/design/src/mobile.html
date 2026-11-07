@@ -270,6 +270,148 @@
   .pacts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .pacts .b { height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 14.5px; font-weight: 600; border: 1px solid var(--line-strong); color: var(--text); }
   .pacts .b.d { color: var(--crimson); border-color: color-mix(in srgb, var(--crimson) 35%, transparent); }
+  /* agents: a row an agent, the lantern saying how it is; the same sheets as the computers raise */
+  :root[data-screen="agents"] .s-agents, :root[data-screen="agent-share"] .s-agents, :root[data-screen="agent-delete"] .s-agents { display: flex; }
+  :root[data-screen="agent-share"] .s-agents .scrim, :root[data-screen="agent-delete"] .s-agents .scrim { display: block; }
+  :root[data-screen="agent-share"] .s-agents .sheet.share, :root[data-screen="agent-delete"] .s-agents .sheet.remove { display: flex; }
+  .aseg { display: flex; align-items: center; gap: 6px; }
+  .aseg span { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 11px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); font-size: 12.5px; font-weight: 600; color: var(--text-2); }
+  .aseg span.on { border-color: var(--saffron-line); background: var(--saffron-soft); color: var(--text); }
+  .aseg .pcsel { margin-left: auto; }
+  .ags { padding: 2px 0; }
+  .agr { display: flex; align-items: flex-start; gap: 11px; padding: 12px 12px 12px 14px; }
+  .agr + .agr { border-top: 1px solid var(--line-soft); }
+  .agr .av { border-radius: 10px; margin-top: 2px; }
+  .agr.away { opacity: .65; }
+  .agn { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+  .agn .l1 { display: flex; align-items: center; gap: 10px; }
+  .agn .l1 b { font-size: 14.5px; }
+  .agn .l2 { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12.5px; color: var(--text-2); white-space: nowrap; overflow: hidden; }
+  .agn .l2.err { color: var(--crimson); white-space: normal; }
+  .agn .l2 .sep { width: 1px; height: 12px; background: var(--line-strong); margin: 0 3px; }
+  .agn .l2 .mono { overflow: hidden; text-overflow: ellipsis; }
+  .agn .l3 { font-size: 12px; color: var(--muted); }
+  .g.dim { opacity: .45; }
+  .agn .status { height: 22px; padding: 0 8px 0 7px; font-size: 12px; }
+  .agn .status.work { font-family: var(--font-mono); }
+  .agn .status.st-e { height: auto; padding: 3px 9px 3px 7px; white-space: normal; }
+  .agr .pmore { margin-top: 2px; }
+  /* one agent: its header, then its tabs as a strip that scrolls sideways */
+  :root[data-screen="agent"] .s-agent, :root[data-screen="agent-workspace"] .s-agent, :root[data-screen="agent-skills"] .s-agent, :root[data-screen="agent-config"] .s-agent, :root[data-screen="agent-config-edit"] .s-agent { display: flex; }
+  :root[data-screen="agent-config-edit"] .s-agent .scrim { display: block; }
+  :root[data-screen="agent-config-edit"] .s-agent .sheet.edit { display: flex; }
+  .ahead { flex: none; display: flex; gap: 14px; padding: 14px 16px 12px; }
+  .ahead .av.lg { width: 56px; height: 56px; font-size: 22px; border-radius: 17px; box-shadow: 0 0 0 3px var(--surface), 0 0 0 4px var(--saffron-line); }
+  .ahead .aid { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+  .facts2 { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12.5px; color: var(--text-2); }
+  .facts2 > span { display: inline-flex; align-items: center; gap: 6px; }
+  .facts2 > span.dim { color: var(--muted); }
+  .facts2.muted > span { color: var(--muted); }
+  .facts2 svg.i { width: 12px; height: 12px; }
+  .atabs { flex: none; display: flex; gap: 4px; padding: 0 12px; border-bottom: 1px solid var(--line-soft); overflow: hidden; }
+  .atabs span { flex: none; padding: 10px 10px 9px; font-size: 13.5px; font-weight: 600; color: var(--muted); position: relative; }
+  .atabs span.on { color: var(--text); }
+  .atabs span.on::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; border-radius: 2px; background: var(--saffron); }
+  .amain { gap: 12px; padding-top: 14px; }
+  .ap { display: none; flex-direction: column; gap: 12px; }
+  .apanel { padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+  .apanel h4 { display: flex; align-items: baseline; gap: 6px; margin: 0 0 4px; font-size: 13.5px; font-weight: 650; }
+  .apanel h4 small { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 400; color: var(--faint); }
+  .apanel h4 small svg.i { width: 11px; height: 11px; }
+  .hl { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
+  .hl b { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hl b.mono { font-size: 12.5px; }
+  .hl > span:last-child:not(.g):not(.ord) { margin-left: auto; }
+  .hs { font-size: 12px; color: var(--muted); padding-left: 24px; margin-bottom: 4px; }
+  .hs.err { color: var(--crimson); }
+  .okt { display: inline-flex; align-items: center; gap: 5px; color: var(--jade); font-size: 12.5px; font-weight: 600; }
+  .badt { display: inline-flex; align-items: center; gap: 5px; color: var(--saffron); font-size: 12.5px; font-weight: 600; }
+  .stbt { color: var(--muted); font-size: 12.5px; font-weight: 600; }
+  .ord { width: 18px; height: 18px; flex: none; border-radius: 6px; display: inline-grid; place-items: center; font: 700 11px var(--font-mono); color: var(--muted); background: var(--surface-2); border: 1px solid var(--line); }
+  .ord.on { color: var(--saffron-ink); background: var(--saffron); border-color: var(--saffron); }
+  .ubig { display: flex; align-items: baseline; gap: 8px; }
+  .ubig b { font-family: var(--font-display); font-size: 26px; font-weight: 600; }
+  .ubig span { font-size: 12.5px; color: var(--muted); }
+  .urow { display: flex; flex-wrap: wrap; gap: 4px 14px; font: 12px var(--font-mono); color: var(--text-2); }
+  .wpath { font-size: 12px; margin-bottom: 4px; word-break: break-all; }
+  .wpath .mono { color: var(--text-2); }
+  .wf { display: flex; align-items: center; gap: 7px; padding: 6px 0; font-size: 13px; }
+  .wf b { font-weight: 500; color: var(--text-2); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wf.dir b { font-weight: 600; color: var(--text); }
+  .wf span { font: 11.5px var(--font-mono); color: var(--muted); }
+  .wf svg.i { width: 14px; height: 14px; color: var(--muted); flex: none; }
+  .wf.dir svg.i:not(.tw) { color: var(--saffron); }
+  .wf:not(.dir) { padding-left: 21px; }
+  .wf.d1 { margin-left: 20px; }
+  .wf.more { padding-left: 21px; font-size: 12.5px; font-weight: 600; color: var(--saffron); }
+  .wf.more small { margin-left: 6px; font-weight: 400; color: var(--muted); }
+  /* a workspace file opened from 工作区, as a page of its own */
+  :root[data-screen="agent-file"] .s-file { display: flex; }
+  .s-file .bar h1 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .s-file .fmeta { flex: none; display: flex; flex-direction: column; gap: 3px; padding: 10px 16px; border-bottom: 1px solid var(--line-soft); font-size: 12px; color: var(--muted); }
+  .s-file .fmeta .mono { color: var(--text-2); }
+  .s-file .main { padding: 14px 18px; }
+  .s-file .md { font-size: 14px; line-height: 1.75; color: var(--text-2); }
+  .s-file .md h1 { margin: 0 0 6px; font-family: var(--font-display); font-size: 21px; font-weight: 650; color: var(--text); }
+  .s-file .md h2 { margin: 16px 0 6px; padding-bottom: 5px; border-bottom: 1px solid var(--line-soft); font-size: 14px; font-weight: 650; color: var(--text); }
+  .s-file .md p { margin: 0 0 8px; }
+  .s-file .md ul { margin: 0; padding-left: 18px; }
+  .s-file .md li { margin: 3px 0; }
+  .s-file .md a { color: var(--saffron); text-decoration: none; }
+  .s-file .md code { padding: 1px 5px; border-radius: 5px; background: var(--surface-2); font: 12px var(--font-mono); color: var(--text); }
+  .sk { display: flex; flex-direction: column; gap: 2px; padding: 6px 0; font-size: 12.5px; }
+  .sk + .sk { border-top: 1px solid var(--line-soft); }
+  .sk span { color: var(--text-2); }
+  .tools2 { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+  .tools2 span { font: 11.5px var(--font-mono); padding: 3px 7px; border-radius: 6px; background: var(--sunken); border: 1px solid var(--line-soft); color: var(--text-2); }
+  .tools2 span.more { font-family: var(--font-sans); color: var(--muted); }
+  .f2 { display: flex; flex-direction: column; gap: 6px; }
+  .f2 label { font-size: 12.5px; font-weight: 600; }
+  .f2 .input { height: 40px; }
+  .f2 .seg { display: flex; }
+  .f2 .seg span { flex: 1; text-align: center; }
+  .prow2 { display: flex; align-items: center; gap: 9px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); font-size: 13px; }
+  .prow2 b { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .prow2 b.mono { font-size: 12.5px; }
+  .prow2 .ed { margin-left: auto; flex: none; font-size: 12.5px; font-weight: 600; color: var(--saffron); }
+  .pacts .b.p { background: var(--saffron); color: var(--saffron-ink); border-color: transparent; }
+  .sheet.edit h3 { display: flex; align-items: center; gap: 8px; }
+  .sheet .f2 + .f2 { margin-top: 2px; }
+  /* creating an agent, a step a screen, the steps as a bar under the title */
+  :root[data-screen^="new-agent-"] .s-new { display: flex; }
+  .stepn { margin-left: auto; font-size: 12.5px; color: var(--muted); }
+  .steps4 { flex: none; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 10px 16px 0; }
+  .steps4 i { height: 4px; border-radius: 2px; background: var(--line); }
+  .steps4 i.done { background: var(--jade); }
+  .steps4 i.now { background: var(--saffron); }
+  .np { display: none; flex-direction: column; gap: 14px; }
+  .nq { margin: 2px 0 0; font-family: var(--font-display); font-size: 21px; font-weight: 650; }
+  .nsub { margin: -6px 0 0; font-size: 12.5px; line-height: 1.6; color: var(--muted); }
+  .npc { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 11px; border: 1.5px solid var(--line); background: var(--surface-2); font-size: 13.5px; }
+  .npc + .npc { margin-top: 6px; }
+  .npc .os { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; background: var(--sunken); border: 1px solid var(--line); color: var(--text-2); }
+  .npc .os svg { width: 14px; height: 14px; fill: currentColor; stroke: none; }
+  .npc .muted { font-size: 12px; }
+  .npc .tick { margin-left: auto; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; background: var(--saffron); color: var(--saffron-ink); }
+  .npc .tick svg { width: 12px; height: 12px; stroke-width: 2.6; }
+  .npc.on { border-color: var(--saffron); box-shadow: 0 0 0 3px var(--saffron-soft); }
+  .npc.no { opacity: .5; }
+  .npick { display: flex; flex-wrap: wrap; gap: 8px; }
+  .npick .pk { display: inline-flex; align-items: center; gap: 7px; height: 38px; padding: 0 12px; border-radius: 11px; border: 1.5px solid var(--line); background: var(--surface-2); font-size: 13px; font-weight: 600; color: var(--text-2); }
+  .npick .pk.on { border-color: var(--saffron); box-shadow: 0 0 0 3px var(--saffron-soft); color: var(--text); }
+  .npick .pk svg.i { color: var(--saffron); }
+  .s-new .snote { display: flex; gap: 8px; align-items: center; padding: 9px 12px; border-radius: 10px; background: var(--jade-soft); color: var(--text-2); font-size: 12.5px; }
+  .s-new .snote svg { color: var(--jade); }
+  .model2 { display: grid; grid-template-columns: 16px 1fr auto; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--sunken); font-size: 13px; }
+  .model2 + .model2 { margin-top: 6px; }
+  .model2 .rd { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--line-strong); }
+  .model2.on { border-color: var(--saffron); background: var(--surface); }
+  .model2.on .rd { border: 5px solid var(--saffron); }
+  .model2 b { font: 600 13px var(--font-mono); }
+  .model2 em { font-style: normal; font-size: 12px; color: var(--muted); }
+  .nfoot { flex: none; display: grid; grid-template-columns: 1fr 1.6fr; gap: 10px; padding: 10px 16px 30px; border-top: 1px solid var(--line-soft); background: var(--surface); }
+  .nfoot .b { height: 46px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 600; border: 1px solid var(--line-strong); color: var(--text-2); }
+  .nfoot .b.p { background: var(--saffron); color: var(--saffron-ink); border-color: transparent; }
 </style>
 <script>
   const q = new URLSearchParams(location.search);
@@ -514,6 +656,267 @@
   </div>
   <nav class="tabs"><span><i data-i="overview"></i>总览</span><span><i data-i="bot"></i>智能体</span><span><i data-i="chats"></i>会话</span><span class="on"><i data-i="monitor"></i>电脑</span><span><i data-i="settings"></i>设置</span></nav>
 </div>
+
+
+<!-- agents: a row an agent, the lantern saying how it is; ?screen=agent-share and agent-delete raise a sheet -->
+<div class="phone s-agents">
+  <div class="bar"><h1>智能体</h1><span class="muted" style="font-size:13px">9 位 · 3 位正在工作</span><span class="icon-btn" style="margin-left:auto"><i data-i="plus" class="sm"></i></span></div>
+  <div class="main">
+    <div class="aseg"><span class="on">全部</span><span><i class="lantern work"></i>3</span><span><i class="lantern fail"></i>1</span><span><i class="lantern off"></i>2</span><span class="pcsel"><i data-i="monitor" class="xs"></i>所有电脑</span></div>
+    <div class="card ags">
+      <div class="agr"><div class="av sm h1">佳</div><div class="agn"><div class="l1"><b>有马佳奈</b><span class="status work"><span class="lantern work"></span>3:12</span></div><div class="l2"><span class="g tg"><i data-l="telegram"></i></span><span class="g lark"><i data-l="lark"></i></span><span class="sep"></span><span class="g claudecode"><i data-l="claudecode"></i></span><span class="mono">claude-opus-5-5</span><span class="g codex dim"><i data-l="codex"></i></span></div><div class="l3">kana-vm · 412k · $1.38</div></div><span class="pmore"><i data-i="more" class="sm"></i></span></div>
+      <div class="agr"><div class="av sm h2">夸</div><div class="agn"><div class="l1"><b>啊夸</b><span class="status work"><span class="lantern work"></span>0:48</span></div><div class="l2"><span class="g lark"><i data-l="lark"></i></span><span class="sep"></span><span class="g codex"><i data-l="codex"></i></span><span class="mono">gpt-5.5-codex</span></div><div class="l3">aqua-mbp · 96k · $0.21</div></div><span class="pmore"><i data-i="more" class="sm"></i></span></div>
+      <div class="agr"><div class="av sm h3">V</div><div class="agn"><div class="l1"><b>Vincent</b><span class="status work"><span class="lantern work"></span>6:04</span></div><div class="l2"><span class="g lark"><i data-l="lark"></i></span><span class="g tg"><i data-l="telegram"></i></span><span class="sep"></span><span class="g claudecode"><i data-l="claudecode"></i></span><span class="mono">claude-sonnet-5-5</span></div><div class="l3">win-desk · 298k · $0.92</div></div><span class="pmore"><i data-i="more" class="sm"></i></span></div>
+      <div class="agr"><div class="av sm h4">T</div><div class="agn"><div class="l1"><b>Tifa</b><span class="status on"><span class="lantern on"></span>空闲</span></div><div class="l2"><span class="g tg"><i data-l="telegram"></i></span><span class="sep"></span><span class="g codex"><i data-l="codex"></i></span><span class="mono">gpt-5.5-codex</span></div><div class="l3">kana-vm · 54k · $0.17</div></div><span class="pmore"><i data-i="more" class="sm"></i></span></div>
+      <div class="agr"><div class="av sm h5">A</div><div class="agn"><div class="l1"><b>Aerith</b><span class="status on"><span class="lantern on"></span>空闲</span></div><div class="l2"><span class="g wecom"><i data-l="wecom"></i></span><span class="sep"></span><span class="g claudecode"><i data-l="claudecode"></i></span><span class="mono">claude-haiku-5-5</span></div><div class="l3">aqua-mbp · 12k · $0.02</div></div><span class="pmore"><i data-i="more" class="sm"></i></span></div>
+      <div class="agr"><div class="av sm h4">B</div><div class="agn"><div class="l1"><b>Barret</b></div><div class="l2"><span class="status fail st-e"><span class="lantern fail"></span>启动失败 · codex 尚未登录</span></div><div class="l3">kana-vm</div></div><span class="pmore"><i data-i="more" class="sm"></i></span></div>
+      <div class="agr away"><div class="av sm h1">Y</div><div class="agn"><div class="l1"><b>Yuffie</b><span class="status off"><span class="lantern off"></span></span></div><div class="l2"><span class="g tg"><i data-l="telegram"></i></span><span class="sep"></span><span class="g codex"><i data-l="codex"></i></span><span class="mono">gpt-5.5-codex</span></div><div class="l3">ci-runner-01 · 离线 2 小时</div></div><span class="pmore"><i data-i="more" class="sm"></i></span></div>
+    </div>
+  </div>
+  <nav class="tabs"><span><i data-i="overview"></i>总览</span><span class="on"><i data-i="bot"></i>智能体</span><span><i data-i="chats"></i>会话</span><span><i data-i="monitor"></i>电脑</span><span><i data-i="settings"></i>设置</span></nav>
+  <div class="scrim"></div>
+  <div class="sheet share">
+    <span class="grab"></span>
+    <h3>分享啊夸</h3>
+    <p>选择分享给哪些角色、可以做什么。成员还要有对应的功能权限才用得上；你只能分享自己在这个智能体上有的操作。</p>
+    <div>
+      <div class="srole"><div class="sname">成员<small>全局默认角色</small></div><span class="chipt on"><i data-i="check"></i>查看</span><span class="chipt">修改</span><span class="chipt">删除</span></div>
+      <div class="srole"><div class="sname">运维</div><span class="chipt on"><i data-i="check"></i>查看</span><span class="chipt on"><i data-i="check"></i>修改</span><span class="chipt">删除</span></div>
+      <div class="srole"><div class="sname">设计组</div><span class="chipt">查看</span><span class="chipt">修改</span><span class="chipt">删除</span></div>
+      <div class="srole"><div class="sname">访客</div><span class="chipt">查看</span><span class="chipt">修改</span><span class="chipt">删除</span></div>
+    </div>
+    <span class="dirty">有未保存的修改</span>
+    <div class="acts2"><span class="b">取消</span><span class="b p">保存</span></div>
+  </div>
+  <div class="sheet remove">
+    <span class="grab"></span>
+    <span class="sic"><i data-i="trash"></i></span>
+    <h3>删除智能体啊夸？</h3>
+    <p>啊夸会在 aqua-mbp 上停下，配置从那台电脑上移除，机器人不再回复。工作区里的文件和会话记录留在 aqua-mbp 上；分享给各角色的设置一并删除。</p>
+    <div class="acts2"><span class="b">取消</span><span class="b d"><i data-i="trash" class="sm"></i>删除</span></div>
+  </div>
+</div>
+
+<!-- a workspace file opened from 工作区: ?screen=agent-file; Markdown rendered, other text as it is -->
+<div class="phone s-file">
+  <div class="bar"><span class="back"><i data-i="left"></i></span><h1>MEMORY.md</h1><span class="icon-btn" style="margin-left:auto"><i data-i="copy" class="sm"></i></span></div>
+  <div class="fmeta"><span>38.2 KB · 今天 15:20</span><span>kana-vm 上的 <span class="mono">/home/<wbr>kana/<wbr>.bcn/<wbr>workspaces/<wbr>arima/<wbr>MEMORY.md</span></span></div>
+  <div class="main">
+    <div class="md">
+      <h1>记忆索引</h1>
+      <p>有马佳奈在 kana-vm 上的长期记忆，每条一行，细节在 <code>notes/</code> 里。</p>
+      <h2>用户</h2>
+      <ul>
+        <li>yuchanns 习惯先看效果图，定了再写计划。</li>
+        <li>中文里说「插件」，英文照旧说 contrib。</li>
+      </ul>
+      <h2>项目</h2>
+      <ul>
+        <li><a>第 13 阶段</a>：agent 模块，计划写在 server.md，等 review。</li>
+        <li><a>发版顺序</a>：access、computer、agent，最后 management。</li>
+      </ul>
+      <h2>规则</h2>
+      <ul>
+        <li>每次发 PyPI 都要等他点头。</li>
+        <li>一个 Task 一个提交，review 的修改 amend 进去。</li>
+        <li>浏览器标签用完就关。</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- one agent: the header, then its tabs; ?screen=agent (动态), agent-workspace, agent-skills, agent-config, agent-config-edit -->
+<div class="phone s-agent">
+  <div class="bar"><span class="back"><i data-i="left"></i></span><h1>有马佳奈</h1><span class="icon-btn" style="margin-left:auto"><i data-i="more" class="sm"></i></span></div>
+  <div class="ahead">
+    <div class="av lg h1">佳</div>
+    <div class="aid">
+      <span class="status work"><span class="lantern work"></span>正在工作 · 3 分 12 秒</span>
+      <div class="facts2"><span><span class="g tg"><i data-l="telegram"></i></span>@armslave_bot</span><span><span class="g lark"><i data-l="lark"></i></span>有马佳奈</span></div>
+      <div class="facts2"><span><span class="g claudecode"><i data-l="claudecode"></i></span>claude-opus-5-5 · 高</span><span class="dim"><span class="g codex"><i data-l="codex"></i></span>备用</span></div>
+      <div class="facts2 muted"><span><i data-i="monitor" class="xs"></i>kana-vm</span><span><i data-i="chats" class="xs"></i>每个会话独立</span></div>
+    </div>
+  </div>
+  <div class="atabs"><span data-t="agent">动态</span><span data-t="agent-workspace">工作区</span><span data-t="agent-skills">技能 8</span><span data-t="agent-config agent-config-edit">配置</span><span>共享</span></div>
+  <div class="main amain">
+    <!-- 动态 -->
+    <div class="ap" data-p="agent">
+      <div class="card apanel">
+        <h4>渠道<small>同时在线</small></h4>
+        <div class="hl"><span class="g tg"><i data-l="telegram"></i></span><b>@armslave_bot</b><span class="okt"><i data-i="okc" class="xs"></i>正常</span></div>
+        <div class="hs">连接于今天 09:02 · 最后收到刚刚</div>
+        <div class="hl"><span class="g lark"><i data-l="lark"></i></span><b>有马佳奈</b><span class="badt"><i data-i="alert" class="xs"></i>重连中</span></div>
+        <div class="hs err">长连接被服务端关闭 · 第 3 次重连 · 最后收到 14 分钟前</div>
+      </div>
+      <div class="card apanel">
+        <h4>运行时<small>按顺序使用</small></h4>
+        <div class="hl"><span class="ord on">1</span><span class="g claudecode"><i data-l="claudecode"></i></span><b class="mono">claude-opus-5-5</b><span class="okt">在用</span></div>
+        <div class="hs">2.1.40 · 思考强度 高</div>
+        <div class="hl"><span class="ord">2</span><span class="g codex"><i data-l="codex"></i></span><b class="mono">gpt-5.5-codex</b><span class="stbt">备用</span></div>
+        <div class="hs">0.163.0 · 可用 · 推理档位 中</div>
+      </div>
+      <div class="card apanel">
+        <h4>今日用量<small>截至刚刚</small></h4>
+        <div class="ubig"><b>412k</b><span>tokens · $1.38</span></div>
+        <div class="urow"><span>输入 296k</span><span>缓存命中 98k · 68%</span><span>输出 18k</span></div>
+      </div>
+    </div>
+    <!-- 工作区 -->
+    <div class="ap" data-p="agent-workspace">
+      <div class="card apanel">
+        <h4>工作区<small aria-label="重新读取" style="color: var(--text-2)"><i data-i="refresh" class="sm"></i></small></h4>
+        <div class="wpath"><span class="muted">kana-vm 上的</span> <span class="mono">/home/kana/.bcn/workspaces/arima</span></div>
+        <div class="wf dir open"><i data-i="down" class="xs tw"></i><i data-i="folder" class="sm"></i><b>bazaar-compute-node</b><span>今天 15:18</span></div>
+        <div class="wf dir d1"><i data-i="right" class="xs tw"></i><i data-i="folder" class="sm"></i><b>app</b><span>15:02</span></div>
+        <div class="wf dir d1"><i data-i="right" class="xs tw"></i><i data-i="folder" class="sm"></i><b>contrib</b><span>14:56</span></div>
+        <div class="wf dir d1"><i data-i="right" class="xs tw"></i><i data-i="folder" class="sm"></i><b>plans</b><span>14:40</span></div>
+        <div class="wf d1"><i data-i="file" class="sm"></i><b>AGENTS.md</b><span>4.8 KB</span></div>
+        <div class="wf d1"><i data-i="file" class="sm"></i><b>pyproject.toml</b><span>1.6 KB</span></div>
+        <div class="wf d1"><i data-i="file" class="sm"></i><b>uv.lock</b><span>412 KB</span></div>
+        <div class="wf dir"><i data-i="right" class="xs tw"></i><i data-i="folder" class="sm"></i><b>design</b><span>11 月 6 日</span></div>
+        <div class="wf dir open"><i data-i="down" class="xs tw"></i><i data-i="folder" class="sm"></i><b>notes</b><span>11 月 5 日</span></div>
+        <div class="wf d1"><i data-i="file" class="sm"></i><b>2026-08-21.md</b><span>3.2 KB</span></div>
+        <div class="wf d1"><i data-i="file" class="sm"></i><b>2026-08-22.md</b><span>5.7 KB</span></div>
+        <div class="wf more d1">显示更多<small>已列出 50 项，还有 263 项</small></div>
+        <div class="wf"><i data-i="file" class="sm"></i><b>MEMORY.md</b><span>38.2 KB</span></div>
+        <div class="wf"><i data-i="file" class="sm"></i><b>notes.md</b><span>6.4 KB</span></div>
+      </div>
+    </div>
+    <!-- 技能 -->
+    <div class="ap" data-p="agent-skills">
+      <div class="card apanel">
+        <h4>工作区<small><span class="g claudecode"><i data-l="claudecode"></i></span>2.1.40 · 刚刚读取</small></h4>
+        <div class="sk"><b class="mono">release-notes</b><span>按合并的 PR 整理发版说明，写进 CHANGELOG</span></div>
+        <div class="sk"><b class="mono">plan-review</b><span>对照 AGENTS.md 检查计划文档的写法与引用</span></div>
+      </div>
+      <div class="card apanel">
+        <h4>用户</h4>
+        <div class="sk"><b class="mono">brainstorming</b><span>动手之前先把想法问清楚、拆成设计</span></div>
+        <div class="sk"><b class="mono">cdp-browser</b><span>经 Chrome DevTools 协议操作已登录的浏览器标签</span></div>
+        <div class="sk"><b class="mono">pdf</b><span>读取、合并、拆分 PDF，抽出文字与表格</span></div>
+      </div>
+      <div class="card apanel">
+        <h4>MCP 服务</h4>
+        <div class="hl"><b class="mono">notes</b><span class="okt"><i data-i="okc" class="xs"></i>无需认证</span></div>
+        <div class="tools2"><span>save_note</span><span>list_notes</span><span>search_notes</span></div>
+        <div class="hl"><b class="mono">github</b><span class="badt"><i data-i="key" class="xs"></i>未登录</span></div>
+        <div class="tools2"><span>search_issues</span><span>get_pull_request</span><span class="more">还有 10 个</span></div>
+      </div>
+    </div>
+    <!-- 配置 -->
+    <div class="ap" data-p="agent-config agent-config-edit">
+      <div class="card apanel">
+        <h4>基本信息</h4>
+        <div class="f2"><label>名字</label><div class="input"><span>有马佳奈</span></div></div>
+        <div class="f2"><label>空闲回收</label><div class="input"><span class="num">600</span><span class="suffix">秒</span></div></div>
+        <div class="f2"><label>模式</label><div class="seg"><span class="on">每个会话独立</span><span>个人助理</span></div></div>
+        <div class="f2"><label>会话沙箱</label><div class="seg"><span class="on">工作区可写</span><span>完全访问</span></div></div>
+      </div>
+      <div class="card apanel">
+        <h4>渠道<small><i data-i="plus" class="xs"></i>添加</small></h4>
+        <div class="prow2"><span class="g tg"><i data-l="telegram"></i></span><b>@armslave_bot</b><span class="ed">编辑</span></div>
+        <div class="prow2"><span class="g lark"><i data-l="lark"></i></span><b>有马佳奈</b><span class="ed">编辑</span></div>
+      </div>
+      <div class="card apanel">
+        <h4>运行时<small>拖动排序 · <i data-i="plus" class="xs"></i>添加</small></h4>
+        <div class="prow2"><span class="ord on">1</span><span class="g claudecode"><i data-l="claudecode"></i></span><b class="mono">claude-opus-5-5</b><span class="ed">编辑</span></div>
+        <div class="prow2"><span class="ord">2</span><span class="g codex"><i data-l="codex"></i></span><b class="mono">gpt-5.5-codex</b><span class="ed">编辑</span></div>
+      </div>
+      <div class="pacts"><span class="b">取消</span><span class="b p">保存</span></div>
+    </div>
+  </div>
+  <nav class="tabs"><span><i data-i="overview"></i>总览</span><span class="on"><i data-i="bot"></i>智能体</span><span><i data-i="chats"></i>会话</span><span><i data-i="monitor"></i>电脑</span><span><i data-i="settings"></i>设置</span></nav>
+  <div class="scrim"></div>
+  <div class="sheet edit">
+    <span class="grab"></span>
+    <h3><span class="g lark"><i data-l="lark"></i></span>有马佳奈</h3>
+    <p>这些字段由 kana-vm 上的这个渠道插件给出。</p>
+    <div class="f2"><label>App ID</label><div class="input"><span class="mono">cli_a7f3e29c81b4d00e</span></div></div>
+    <div class="f2"><label>App Secret</label><div class="input"><i data-i="key" class="sm muted"></i><span class="muted">已保存，留空则保持不变</span></div></div>
+    <div class="f2"><label>区域</label><div class="seg"><span class="on">飞书</span><span>Lark</span></div></div>
+    <div class="acts2"><span class="b">取消</span><span class="b p">完成</span></div>
+  </div>
+</div>
+
+<!-- creating an agent, a step a screen: ?screen=new-agent-1 … new-agent-4 -->
+<div class="phone s-new">
+  <div class="bar"><span class="back"><i data-i="x"></i></span><h1>新建智能体</h1><span class="stepn">第 <b class="sn"></b> / 4 步</span></div>
+  <div class="steps4"><i></i><i></i><i></i><i></i></div>
+  <div class="main">
+    <div class="np" data-p="1">
+      <h2 class="nq">起个名字，选一台电脑</h2>
+      <div class="f2"><label>名字</label><div class="input focus"><span>小满</span></div></div>
+      <div class="f2"><label>电脑</label>
+        <div class="npc"><span class="os"><i data-l="linux"></i></span><b>kana-vm</b><span class="muted">在线</span></div>
+        <div class="npc on"><span class="os"><i data-l="apple"></i></span><b>aqua-mbp</b><span class="muted">在线</span><span class="tick"><i data-i="check"></i></span></div>
+        <div class="npc"><span class="os"><i data-i="windows"></i></span><b>win-desk</b><span class="muted">在线</span></div>
+        <div class="npc no"><span class="os"><i data-l="linux"></i></span><b>ci-runner-01</b><span class="muted">离线</span></div>
+      </div>
+      <div class="f2"><label>模式</label><div class="seg"><span class="on">每个会话独立</span><span>个人助理</span></div></div>
+      <div class="f2"><label>空闲回收</label><div class="input"><span class="num">600</span><span class="suffix">秒，0 为不回收</span></div></div>
+    </div>
+    <div class="np" data-p="2">
+      <h2 class="nq">小满在哪里收发消息？</h2>
+      <p class="nsub">可以添加多个，同时在线。列出的是 aqua-mbp 上已安装的渠道。</p>
+      <div class="npick"><span class="pk"><span class="g tg"><i data-l="telegram"></i></span>Telegram</span><span class="pk on"><span class="g lark"><i data-l="lark"></i></span>飞书<i data-i="check" class="xs"></i></span><span class="pk"><span class="g wecom"><i data-l="wecom"></i></span>企业微信</span></div>
+      <div class="f2"><label>App ID</label><div class="input"><span class="mono">cli_a7f3e29c81b4d00e</span></div></div>
+      <div class="f2"><label>App Secret</label><div class="input focus"><i data-i="key" class="sm" style="color:var(--saffron)"></i><span class="mono">••••••••••••••Zk</span></div></div>
+      <div class="f2"><label>区域</label><div class="seg"><span class="on">飞书</span><span>Lark</span></div></div>
+      <div class="snote"><i data-i="shield" class="sm"></i>凭据只写入 aqua-mbp，不保存在服务端。</div>
+    </div>
+    <div class="np" data-p="3">
+      <h2 class="nq">小满用什么思考和工作？</h2>
+      <p class="nsub">可以选多个：排第一的在用，出问题时换下一个。</p>
+      <div class="npick"><span class="pk on"><span class="ord on">1</span><span class="g codex"><i data-l="codex"></i></span>0.163.0</span><span class="pk on"><span class="ord">2</span><span class="g claudecode"><i data-l="claudecode"></i></span>2.1.40</span></div>
+      <div class="f2"><label>模型</label>
+        <div class="model2 on"><span class="rd"></span><b>gpt-5.5-codex</b><em>默认</em></div>
+        <div class="model2"><span class="rd"></span><b>gpt-5.5</b><em></em></div>
+        <div class="model2"><span class="rd"></span><b>gpt-5.4-mini</b><em>更快</em></div>
+      </div>
+      <div class="f2"><label>推理档位</label><div class="seg"><span>低</span><span>中</span><span class="on">高</span><span>最高</span></div></div>
+      <div class="prow2"><span class="ord">2</span><span class="g claudecode"><i data-l="claudecode"></i></span><b class="mono">claude-sonnet-5-5</b><span class="ed">展开设置</span></div>
+    </div>
+    <div class="np" data-p="4">
+      <h2 class="nq">检查一下，没问题就创建</h2>
+      <div class="card apanel">
+        <h4>小满<small>修改</small></h4>
+        <div class="hs">aqua-mbp · 每个会话独立 · 工作区可写 · 空闲回收 600 秒</div>
+      </div>
+      <div class="card apanel">
+        <h4>渠道<small>修改</small></h4>
+        <div class="hl"><span class="g lark"><i data-l="lark"></i></span><b class="mono">cli_a7f3e29c81b4d00e</b></div>
+        <div class="hs">飞书 open.feishu.cn · App Secret 已填写</div>
+      </div>
+      <div class="card apanel">
+        <h4>运行时<small>修改</small></h4>
+        <div class="hl"><span class="ord on">1</span><span class="g codex"><i data-l="codex"></i></span><b class="mono">gpt-5.5-codex</b><span class="okt">在用</span></div>
+        <div class="hs">推理档位 高 · 0.163.0</div>
+        <div class="hl"><span class="ord">2</span><span class="g claudecode"><i data-l="claudecode"></i></span><b class="mono">claude-sonnet-5-5</b><span class="stbt">备用</span></div>
+        <div class="hs">思考强度 中 · 2.1.40</div>
+      </div>
+    </div>
+  </div>
+  <div class="nfoot"><span class="b">上一步</span><span class="b p nxt"></span></div>
+</div>
+
+<script>
+  {
+    const screen = document.documentElement.dataset.screen;
+    addEventListener('DOMContentLoaded', () => {
+      for (const p of document.querySelectorAll('.s-agent .ap')) if (p.dataset.p.split(' ').includes(screen)) p.style.display = 'flex';
+      for (const s of document.querySelectorAll('.s-agent .atabs span[data-t]')) if (s.dataset.t.split(' ').includes(screen)) s.classList.add('on');
+      const m = /^new-agent-(\d)$/.exec(screen);
+      if (m) {
+        const n = Number(m[1]);
+        document.querySelector(`.s-new .np[data-p="${n}"]`).style.display = 'flex';
+        document.querySelector('.s-new .sn').textContent = String(n);
+        document.querySelectorAll('.s-new .steps4 i').forEach((i, k) => i.className = k + 1 < n ? 'done' : k + 1 === n ? 'now' : '');
+        document.querySelector('.s-new .nxt').textContent = n < 4 ? '下一步' : '创建小满';
+        if (n === 1) document.querySelector('.s-new .nfoot .b:not(.p)').textContent = '取消';
+      }
+    });
+  }
+</script>
 
 </body>
 </html>

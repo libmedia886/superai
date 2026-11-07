@@ -9,9 +9,23 @@ server 本体、登录与功能模块页面的效果图，实现时以此对照�
 | 登录：账号密码 | [夜市](screens/desktop/login-night.png) | [晨市](screens/desktop/login-day.png) | `src/login.html?view=password` |
 | 登录：第三方登录 | [夜市](screens/desktop/login-third-night.png) | [晨市](screens/desktop/login-third-day.png) | `src/login.html` |
 | 总览 | [夜市](screens/desktop/overview-night.png) | [晨市](screens/desktop/overview-day.png) | `src/overview.html` |
-| 智能体 | [夜市](screens/desktop/agent-night.png) | [晨市](screens/desktop/agent-day.png) | `src/agent.html` |
+| 智能体：列表 | [夜市](screens/desktop/agents-night.png) | [晨市](screens/desktop/agents-day.png) | `src/agents.html` |
+| 智能体：行菜单 | [夜市](screens/desktop/agents-menu-night.png) | [晨市](screens/desktop/agents-menu-day.png) | `src/agents.html?view=menu` |
+| 智能体：删除 | [夜市](screens/desktop/agents-delete-night.png) | [晨市](screens/desktop/agents-delete-day.png) | `src/agents.html?view=delete` |
+| 智能体：动态 | [夜市](screens/desktop/agent-night.png) | [晨市](screens/desktop/agent-day.png) | `src/agent.html` |
+| 智能体：动态中的回合与按小时用量（第 14 阶段，活动模块） | [夜市](screens/desktop/agent-activity-night.png) | [晨市](screens/desktop/agent-activity-day.png) | `src/agent.html?tab=activity-full` |
+| 智能体：工作区 | [夜市](screens/desktop/agent-workspace-night.png) | [晨市](screens/desktop/agent-workspace-day.png) | `src/agent.html?tab=workspace` |
+| 智能体：查看 Markdown 文件 | [夜市](screens/desktop/agent-file-night.png) | [晨市](screens/desktop/agent-file-day.png) | `src/agent.html?tab=workspace&file=md` |
+| 智能体：查看代码文件（按类型着色） | [夜市](screens/desktop/agent-file-text-night.png) | [晨市](screens/desktop/agent-file-text-day.png) | `src/agent.html?tab=workspace&file=text` |
+| 智能体：技能 | [夜市](screens/desktop/agent-skills-night.png) | [晨市](screens/desktop/agent-skills-day.png) | `src/agent.html?tab=skills` |
+| 智能体：配置 | [夜市](screens/desktop/agent-config-night.png) | [晨市](screens/desktop/agent-config-day.png) | `src/agent.html?tab=config` |
+| 智能体：配置中编辑渠道 | [夜市](screens/desktop/agent-config-edit-night.png) | [晨市](screens/desktop/agent-config-edit-day.png) | `src/agent.html?tab=config&edit=lark` |
+| 智能体：分享 | [夜市](screens/desktop/agent-share-night.png) | [晨市](screens/desktop/agent-share-day.png) | `src/agent.html?tab=share` |
 | 会话 | [夜市](screens/desktop/chats-night.png) | [晨市](screens/desktop/chats-day.png) | `src/chats.html` |
-| 新建智能体 | [夜市](screens/desktop/new-agent-night.png) | [晨市](screens/desktop/new-agent-day.png) | `src/new-agent.html` |
+| 新建智能体：基本信息 | [夜市](screens/desktop/new-agent-1-night.png) | [晨市](screens/desktop/new-agent-1-day.png) | `src/new-agent.html?step=1` |
+| 新建智能体：渠道 | [夜市](screens/desktop/new-agent-night.png) | [晨市](screens/desktop/new-agent-day.png) | `src/new-agent.html` |
+| 新建智能体：运行时 | [夜市](screens/desktop/new-agent-3-night.png) | [晨市](screens/desktop/new-agent-3-day.png) | `src/new-agent.html?step=3` |
+| 新建智能体：确认 | [夜市](screens/desktop/new-agent-4-night.png) | [晨市](screens/desktop/new-agent-4-day.png) | `src/new-agent.html?step=4` |
 | 电脑：接入新电脑 | [夜市](screens/desktop/computers-night.png) | [晨市](screens/desktop/computers-day.png) | `src/computers.html` |
 | 电脑：列表 | [夜市](screens/desktop/computers-list-night.png) | [晨市](screens/desktop/computers-list-day.png) | `src/computers.html?view=list` |
 | 电脑：行菜单 | [夜市](screens/desktop/computers-menu-night.png) | [晨市](screens/desktop/computers-menu-day.png) | `src/computers.html?view=menu` |
@@ -33,6 +47,19 @@ server 本体、登录与功能模块页面的效果图，实现时以此对照�
 | 手机：分享电脑 | [夜市](screens/phone/computer-share-night.png) | [晨市](screens/phone/computer-share-day.png) | `src/mobile.html?screen=computer-share` |
 | 手机：删除电脑 | [夜市](screens/phone/computer-delete-night.png) | [晨市](screens/phone/computer-delete-day.png) | `src/mobile.html?screen=computer-delete` |
 | 手机：电脑详情中的插件（第 15 阶段，市场模块） | [夜市](screens/phone/computer-plugins-night.png) | [晨市](screens/phone/computer-plugins-day.png) | `src/mobile.html?screen=computer-plugins` |
+| 手机：智能体 | [夜市](screens/phone/agents-night.png) | [晨市](screens/phone/agents-day.png) | `src/mobile.html?screen=agents` |
+| 手机：分享智能体 | [夜市](screens/phone/agent-share-night.png) | [晨市](screens/phone/agent-share-day.png) | `src/mobile.html?screen=agent-share` |
+| 手机：删除智能体 | [夜市](screens/phone/agent-delete-night.png) | [晨市](screens/phone/agent-delete-day.png) | `src/mobile.html?screen=agent-delete` |
+| 手机：智能体动态 | [夜市](screens/phone/agent-night.png) | [晨市](screens/phone/agent-day.png) | `src/mobile.html?screen=agent` |
+| 手机：智能体工作区 | [夜市](screens/phone/agent-workspace-night.png) | [晨市](screens/phone/agent-workspace-day.png) | `src/mobile.html?screen=agent-workspace` |
+| 手机：查看工作区文件 | [夜市](screens/phone/agent-file-night.png) | [晨市](screens/phone/agent-file-day.png) | `src/mobile.html?screen=agent-file` |
+| 手机：智能体技能 | [夜市](screens/phone/agent-skills-night.png) | [晨市](screens/phone/agent-skills-day.png) | `src/mobile.html?screen=agent-skills` |
+| 手机：智能体配置 | [夜市](screens/phone/agent-config-night.png) | [晨市](screens/phone/agent-config-day.png) | `src/mobile.html?screen=agent-config` |
+| 手机：智能体配置中编辑渠道 | [夜市](screens/phone/agent-config-edit-night.png) | [晨市](screens/phone/agent-config-edit-day.png) | `src/mobile.html?screen=agent-config-edit` |
+| 手机：新建智能体：基本信息 | [夜市](screens/phone/new-agent-1-night.png) | [晨市](screens/phone/new-agent-1-day.png) | `src/mobile.html?screen=new-agent-1` |
+| 手机：新建智能体：渠道 | [夜市](screens/phone/new-agent-2-night.png) | [晨市](screens/phone/new-agent-2-day.png) | `src/mobile.html?screen=new-agent-2` |
+| 手机：新建智能体：运行时 | [夜市](screens/phone/new-agent-3-night.png) | [晨市](screens/phone/new-agent-3-day.png) | `src/mobile.html?screen=new-agent-3` |
+| 手机：新建智能体：确认 | [夜市](screens/phone/new-agent-4-night.png) | [晨市](screens/phone/new-agent-4-day.png) | `src/mobile.html?screen=new-agent-4` |
 
 晨市在地址后加 `theme=day`。
 
