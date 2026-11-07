@@ -367,7 +367,7 @@ agent-activity 的 `agents()` 在现有的状态、原因、今日用量与最�
 - `started_at_ms`：agent 开始运行的时间，由 agent 启动时记下。
 - `working`：进行中的回合里最早开始的一个，给出开始时间与所在会话的显示名，由 agent 在回合开始时记下；没有进行中的回合时为空。
 - `channels`：按配置顺序列出每个渠道连接的 kind、连接名、状态、机器人身份（`Channel.get_identity()`）、连接时间、最后收到消息的时间、连接后连续失败的次数与最近错误。
-  - 状态取自该连接条目的快照；运行中而最后一个连接事件为失败时，状态为重新连接中。
+  - 状态取自该连接条目的快照；运行中而最后一个连接事件为失败时，插件还会重试的为重新连接中，不再重试的为已断开。
   - 连接时间、失败次数与最近错误取自统一的连接事件，按事件上下文中的 connection 对应到连接；条目失败时，最近错误取快照中的错误。
   - 最后收到由 agent 在该连接收到消息时记下。
 - `runtimes`：按配置顺序列出每个运行时的 kind、连接名、状态、是否在用，以及被限流时恢复可用的时间。状态取自该运行时条目的快照；在用的是 agent 此时为新会话选择的那一个。
@@ -376,20 +376,20 @@ agent-activity 的 `agents()` 在现有的状态、原因、今日用量与最�
 
 - bazaar-contrib-channel 定义两个连接事件，三个渠道插件都改发这一组：
   - `channel.connection.connected`：连接建立或恢复，载荷为机器人身份；
-  - `channel.connection.failed`：连接断开或建立失败，载荷为下次重试前等待的毫秒数，并带错误，插件随后自行重试。
+  - `channel.connection.failed`：连接断开或建立失败，并带错误；载荷为下次重试前等待的毫秒数，插件随后自行重试。依据消息 `beb133fa-5a23-56d3-b225-f18f5a665270`，插件放弃重连时这一项为空，渠道条目照旧运行，例如 lark 连上后认证失败或超过服务端给出的重连次数，wecom 连上后连续三次认证失败或被同一机器人的另一个连接接管。
 - 改动前各插件的事件为：telegram 发 `channel.poll.failed` 与 `channel.poll.recovered`，lark 发 `channel.connection.connected`（载荷为 service_id）与 `channel.connection.failed`，wecom 发 `channel.connection.subscribed` 与 `channel.connection.failed`；载荷都不带机器人身份。
 - 依据消息 `d11bc763-6e20-588d-9e83-8255a09f2986` 与 `d456448b-232b-5911-a8a4-eaa3c9d46f13`，bazaar-contrib-audit 的 `AuditContext` 增加 `connection`。agent 启用每个渠道与运行时的组合时，以 local 绑定在组合中放入一份审计服务：组合中的插件发布的事件缺少连接名时由它补上，再交给节点的审计服务，插件不经手。agent 自己发布的渠道事件与限流事件同样带上连接名。
 
 ### 配置模型的标注
 
-渠道与运行时插件在实体配置模型的字段上，经 `Field(title=…, description=…, json_schema_extra=…)` 给出：
+渠道与运行时插件为实体配置模型给出表单所需的标注：
 
-- 凭据字段标 `writeOnly: true`：telegram 的 token、lark 的 app_secret、wecom 的 secret、codex 的 api_key、claudecode 的 api_key 与 bedrock_api_key。
-- 字段的名称与说明：`title` 与 `description` 为英文；枚举取值的显示文字以 `x-labels` 给出，例如 lark 的 region；可以留空的字段以 `x-empty` 给出留空时的含义，例如 codex 与 claudecode 的 api_key 留空时使用电脑上已登录的账号。`x-i18n` 给出这些文字的 `zh-CN`，与 server 支持的 en 与 zh-CN 两种语言对应。
+- 凭据字段经 `json_schema_extra` 标 `writeOnly: true`：telegram 的 token、lark 的 app_secret、wecom 的 secret、codex 的 api_key、claudecode 的 api_key 与 bedrock_api_key。
+- 依据消息 `25fe9d74-6015-5615-b26a-1021b11d8792` 与 `7ce989b2-cd0f-577c-9648-97f4153dc2c5`，文字与 server 的做法相同，放在插件包的 `resources/locales/en.toml` 与 `zh-CN.toml` 中，键以字段名开头：`<字段>.title` 为名称，`<字段>.description` 为说明，`<字段>.empty` 为留空时的含义，例如 codex 与 claudecode 的 api_key 留空时使用电脑上已登录的账号；枚举的每个取值为 `<字段>.<取值>`，例如 lark 的 `region.feishu`。模型在 schema 顶层以 `x-locales` 按语言给出这两份文字，字段上不再写 title 与 description。
 - 运行时的 model 标 `x-inspect: "models"`，effort 标 `x-inspect: "efforts"`：表单从 inspect 返回的模型中选择，档位取所选模型的 efforts，缺省为标为 default 的模型与它的 default_effort。
 - `*_env` 字段是普通的文本字段，说明写明填写的是节点上的环境变量名；与凭据字段都有值时以凭据为准，与现有规则相同。
 
-server-agent 对所有插件使用同一套画法：字符串为输入框，枚举为分段选择，凭据为只可替换的输入框，留空即保持不变。配置中的概要与新建的确认按 schema 列出有值的字段，凭据写已填写或已保存，留空且带 `x-empty` 的字段写它的含义。
+server-agent 对所有插件使用同一套画法：字符串为输入框，枚举为分段选择，凭据为只可替换的输入框，留空即保持不变。配置中的概要与新建的确认按 schema 列出有值的字段，凭据写已填写或已保存，留空而有 `<字段>.empty` 的字段写它的含义。文字按账户的语言取 `x-locales`，没有该语言或该键时取 en；每台电脑上的插件版本可能不同，server 使用每份 schema 自带的文字，不并入 server 的 catalog。
 
 ### server-agent
 
@@ -494,8 +494,9 @@ server-agent 对所有插件使用同一套画法：字符串为输入框，枚�
   - 验证：真实节点经 sidecar 调用 `agent-configuration`：`list` 只给出凭据的字段名；带连接名编辑时没有提交的凭据沿用，提交 null 时清除，两个运行时调换顺序后凭据随条目保留；`providers` 给出已启用 builder 的 schema；`inspect` 在 agent 的工作区与临时目录中各查询一次，临时目录随后不存在；`workspace` 给出绝对路径、总项数与一页内容，按 offset 读完各页与总项数一致；`read` 给出文本文件的内容，二进制文件标明无法显示；工作区之外的路径被拒绝。
   - 验证：配置变更：回合进行中修改运行时的模型并保存，保存在回合结束前返回，这一轮照常完成，空闲后该运行时按新配置重启，之后的会话使用新模型；只调整顺序时，已有会话继续在原运行时上，新会话按新的顺序选择运行时；修改渠道的配置后，agent 空闲时按新配置重新连接；一个 agent 正在等待时，另一个 agent 的变更照常生效。
   - 验证：agent-activity 在回合开始时给出 working，结束后清除；渠道连接的状态、身份与失败次数随连接事件变化；运行时被限流时在用者换为下一个。
-- Task 54：渠道与运行时插件：contrib-telegram、contrib-lark 与 contrib-wecom 的配置模型标注并改发统一的连接事件，contrib-codex 与 contrib-claudecode 的配置模型标注。各自发布 rc。
-  - 验证：各插件的 schema 带凭据的 writeOnly、中英文的名称与说明、枚举文字、x-empty 与 inspect 标注；各渠道在真实的连接与断开时发出统一的连接事件，事件上下文带有连接名，插件代码不涉及连接名。
+- Task 54：先在 BCN `0.3-server` 让 `channel.connection.failed` 的重试时间可以为空、agent-activity 区分重新连接中与已断开，并发布 bazaar-compute 的 rc；再做渠道与运行时插件：contrib-telegram、contrib-lark 与 contrib-wecom 的配置模型标注并改发统一的连接事件，contrib-codex 与 contrib-claudecode 的配置模型标注。各自发布 rc。
+  - 验证：BCN：渠道报告不再重连时 agent-activity 给出已断开，重新连上后恢复为运行中。
+  - 验证：各插件的 schema 带凭据的 writeOnly、`x-locales` 中英文的名称与说明、枚举文字、留空含义与 inspect 标注；各渠道连上时发出带机器人身份的连接事件，事件上下文带有连接名，插件代码不涉及连接名；telegram 以同一机器人的另一次 getUpdates 打断长轮询，验证失败与重连的事件；wecom 以同一机器人的另一个连接接管，验证不再重试的失败事件。
 - Task 55：server 侧：contrib-server-access 的 `points`，contrib-server-computer 的 `computers(ids)` 与 `COMPUTER_REMOVED`，新仓库 contrib-server-agent 的 server-agent，以及 contrib-server-management 的默认配置加入 server-agent。发版顺序为 bazaar-contrib-server-access、bazaar-contrib-server-computer、bazaar-contrib-server-agent、bazaar-contrib-server-management。
   - 验证：只分享了查看的角色看得到 agent 但不能修改，分享了修改后可以保存配置；拥有者可以分享；电脑的分享页出现 agents.create，没有分享时新建向导不列出该电脑。
   - 验证：以真实浏览器在 1440px 与 390px 宽度下完成新建（两个渠道、两个运行时）、配置修改（凭据留空不变，运行时调换顺序）、工作区展开与显示更多、查看 Markdown 文件与按类型着色的代码文件、技能查看、分享与删除，与 design 中智能体的效果图一致。

@@ -252,6 +252,7 @@ class TestChannel:
         self.kind = kind
         self.audit = audit
         self.closing = False
+        self.retry_in_ms: int | None = 0
         self.writer: asyncio.StreamWriter | None = None
         self.connected = asyncio.Event()
         self.inbound: asyncio.Queue[InboundMessage] = asyncio.Queue()
@@ -275,6 +276,7 @@ class TestChannel:
 
     def connect(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         self.writer = writer
+        self.retry_in_ms = 0
         self.connected.set()
         self.group.create_task(
             self.audit.publish(
@@ -332,6 +334,9 @@ class TestChannel:
                     )
                 elif "release_attachment" in packet:
                     self.downloads.pop(packet["release_attachment"]).set()
+                elif "give_up" in packet:
+                    # the peer asks the channel to report it will not reconnect
+                    self.retry_in_ms = None
                 else:
                     pending = self.pending.pop(packet["id"], None)
                     if pending is not None and not pending.done():
@@ -348,9 +353,9 @@ class TestChannel:
                             context=AuditContext(
                                 agent_id=self.input.agent_id, channel=self.kind
                             ),
-                            payload=ChannelConnectionFailed(retry_in_ms=0).model_dump(
-                                mode="json"
-                            ),
+                            payload=ChannelConnectionFailed(
+                                retry_in_ms=self.retry_in_ms
+                            ).model_dump(mode="json"),
                             error=AuditError(
                                 kind="disconnected",
                                 message="channel peer disconnected",
