@@ -172,6 +172,18 @@ agent 插件拥有实体模型与 AGENT 服务，从 config.agents 构造每个�
 顶层 contribs 统一启用一次；同一实现可以用不同参数生成多个实例，选中的 provider 和完整已知依赖在资源启动前展开并预检。
 动态 lifespan 创建的子组合在 ctx.enable 进入前检查其完整声明，校验结论只覆盖已经声明的输入。
 
+### 作用域值与调用方绑定（2026-11-07）
+
+依据消息 `ed1dd70f-308a-5b3d-adfd-d0381cf01531`、`dff2c15a-ef38-564e-af96-12724b570e1c`、`67f23dbc-296a-5e49-bdc9-2c8b4bded437`、`7ee78256-6b43-544f-ac94-14d9aee08c9a` 与 `4989beed-e586-5b89-a690-8d99e95578a8`，宿主附加在插件上的信息由框架带给服务，插件不经手：
+
+- `bazaar-core` 导出 `ValueKey[T]`，与 ServiceKey、EventKey 并列，标识作用域中的一个值。
+- `ctx.enable(composition, local=(), values={})` 在子组合上挂值：启用句柄复制创建者可见的值，再加上本次给出的值，子组合中的实例及其后代都能看到，做法与绑定的继承相同。值在启用句柄存续期间不变。
+- `ctx.value(key)` 返回实例所在作用域中该 key 的值，没有时为 None。
+- 调用方绑定：服务实现 `bind(caller: Context)` 时，`ctx.accept(key)` 返回 `service.bind(ctx)`，hub 为每个调用方与 key 保留一份；没有实现的服务照旧返回服务本身。
+- 事件的发布照旧不等待监听者，announce 不返回结果。需要其他插件给出结果的流程，由流程的所有者提供登记式服务，其他插件在其中登记处理者，所有者在需要的那一步显式等待，并以 TIMER 限时。
+- bazaar-contrib-audit 定义值 `AGENT_ID` 与 `CONNECTION`，`AuditContext` 增加 `connection`，`agent_id` 缺省为空字符串。审计服务实现 bind：经绑定发布的事件中，上下文缺少的 agent_id 与 connection 由调用方作用域中的值补上，插件自己填写的字段保留。
+- 随第 13 阶段的 Task 53 交付，见 [server.md](server.md)。
+
 ### 公共契约类型命名
 
 公共契约按能力命名：`TaskFailureSource`、`Audit`、`Channel`、`ApprovalHandler`、
