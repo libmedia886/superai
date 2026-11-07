@@ -96,7 +96,7 @@ Codex、Claude Code、Telegram、Lark、WeCom 是用户选择安装的具体 pro
 | [framework.md](framework.md) | 首个特性分支：框架、默认节点基础、模块与 agent 配置管理、串行 Tasks 和验收 |
 | [roadmap.md](roadmap.md) | 全部能力的模块归属、替换依赖与顺序、阶段验收、0.3 发行清单及发布顺序 |
 | [bazaar.md](bazaar.md) | contrib 市场页面：官方与额外模块索引、包安装到入口配置的流程、管理状态和串行 Tasks |
-| [server.md](server.md) | server 框架、登录与两端通信（第 11、12 阶段）：页面框架与模块登记、登录与权限、server 的条目、数据库与从 ~/.bcs 导入、server-computer 与 listen／announce／report 协议、中转契约、starlink、串行 Tasks |
+| [server.md](server.md) | server 框架、登录、两端通信与 agent 模块（第 11 至 13 阶段）：页面框架与模块登记、登录与权限、server 的条目、数据库与从 ~/.bcs 导入、server-computer 与 listen／announce／report 协议、中转契约、starlink、节点上 agent 管理的 remote、渠道的连接事件、配置模型的表单标注、server-agent、串行 Tasks |
 | [workspace 发版](../2026-10-21-workspace-release/plan.md) | 可选择分支的统一版本、候选产物验收与批量发布 |
 
 后续特性分支的详细计划继续放入本目录，按能力命名，并从本入口与路线图关联。
