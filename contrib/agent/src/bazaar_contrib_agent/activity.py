@@ -92,12 +92,13 @@ class Activity:
 
 @dataclass(frozen=True, slots=True)
 class Link:
-    """A channel connection as its events tell: when it last connected, and
-    how often it failed since, with what."""
+    """A channel connection as its events tell: when it last connected, how
+    often it failed since, with what, and whether it is still trying."""
 
     connected_at_ms: int | None = None
     failures: int = 0
     error: str | None = None
+    retrying: bool = False
 
 
 def _state(record: ContribStatus | None) -> tuple[str, str | None]:
@@ -163,6 +164,8 @@ class AgentActivity:
                 link.connected_at_ms,
                 link.failures + 1,
                 event.error.message if isinstance(event, AuditFailure) else None,
+                ChannelConnectionFailed.model_validate(event.payload).retry_in_ms
+                is not None,
             )
         self.last[agent] = (event.event_name, event.occurred_at_ms)
 
@@ -214,9 +217,11 @@ class AgentActivity:
                                 ChannelStatus(
                                     kind=provider.kind,
                                     connection=key,
-                                    state="reconnecting"
-                                    if entry == "running" and link.failures
-                                    else entry,
+                                    state=entry
+                                    if entry != "running" or not link.failures
+                                    else "reconnecting"
+                                    if link.retrying
+                                    else "disconnected",
                                     identity=None
                                     if connection is None
                                     else connection.channel.get_identity(),

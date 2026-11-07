@@ -797,6 +797,18 @@ async def exercise(path: Path):
                 connected["Tifa"].automatic = True
                 await settled(lambda: not status("Tifa").channels[0].failures)
                 assert status("Tifa").channels[0].state == "running"
+                await connected["Tifa"].write({"give_up": True})
+                await connected["Tifa"].aclose()
+                await settled(
+                    lambda: status("Tifa").channels[0].state == "disconnected"
+                )
+                assert status("Tifa").channels[0].error
+                connected["Tifa"] = await connect(
+                    workspaces["Tifa"] / "channel.json", ready, hub
+                )
+                peers.push_async_callback(connected["Tifa"].aclose)
+                connected["Tifa"].automatic = True
+                await settled(lambda: status("Tifa").channels[0].state == "running")
                 await inbound_context(
                     connected["Cloud"],
                     drafts["Cloud"],

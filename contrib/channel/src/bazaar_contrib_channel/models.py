@@ -34,11 +34,11 @@ class ChannelConnected(BaseModel):
 
 class ChannelConnectionFailed(BaseModel):
     """The payload a channel audits, with the error, when its connection drops
-    or cannot be made and it will try again."""
+    or cannot be made: how long until it tries again, or None when it will not."""
 
     event_name: ClassVar[str] = "channel.connection.failed"
     model_config = ConfigDict(extra="forbid", frozen=True)
-    retry_in_ms: int = Field(ge=0)
+    retry_in_ms: int | None = Field(ge=0)
 
 
 class SenderIdentity(BaseModel):
