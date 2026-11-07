@@ -362,12 +362,19 @@ http、server-computer、server-relay-memory 与 starlink 的计时都经 TIMER�
   - 验证：sidecar 分发只到声明成员，结果回传与失败重试，上报的确认与重放。
   - 验证：token 与 token_env 的选择，server 不可达时的退避重试，退出时结束在途调用与后台任务。
 - Task 50：V4→V5 转换中的 starlink 迁移，并在 contrib-index 登记十个新包。
-- Task 51：两端联合验收。按消息 `38087144-154a-5eaa-93c7-78c2de410d74`，测试放在 contrib-server-management，从 PyPI 安装已发布的
-  `bazaar-compute[node]` 与 starlink，加入本地构建的包，两端经真实 HTTP 连接。
-  - 分进程：server 与节点各以一个 `bcn run` 运行，各自使用自己的配置、数据库、端口与运行目录。
-  - 按消息 `508d6600-4d1d-50d6-83ab-9216b5c98986`，同进程：一个 `bcn run` 同时启用 server 与节点的条目，starlink 连到同一进程中的 server，
-    server 与节点的数据库分开。
-  - 验证：身份、调用 agent-activity 与 node 的已声明成员、未声明的成员被拒、结果、事件确认与重放、server 重启后的恢复。
-  - 验证：按消息 `897f1d71-9e4f-5394-97e5-659d9f2387d1`，Linux 与 macOS 上两端收到 SIGINT 后正常退出；Windows 上 server 的重启
-    直接结束进程，只验证节点的恢复。
+- Task 51：两端联合验收。按消息 `38087144-154a-5eaa-93c7-78c2de410d74`，测试放在 contrib-server-management，在第三个安装环境中从 PyPI
+  安装已发布的 `bazaar-compute[node]`，加入本地构建的 server-management，两端经真实 HTTP 连接。节点按电脑登记页给出的命令
+  `bcn contrib add bazaar-contrib-starlink --enable starlink --option server=… --option token=…` 从索引装上 starlink 并连上 server。
+  测试目录中的小包 two-ends 提供 server 侧的 ends-server（一个模块，经 COMPUTERS 调用电脑的成员，列出收到的 REPORTED）与节点侧的
+  ends-node（以 RemoteEntry 声明 speak，向节点的审计说一句话）。
+  - 分进程：server 与节点各以一个 `bcn run` 运行，分别以 server-management 与 node-management 的默认配置作为首次写入的配置，
+    各自使用自己的配置、数据库、端口与运行目录。
+  - 按消息 `508d6600-4d1d-50d6-83ab-9216b5c98986`，同进程：一个 `bcn run` 以两者合并的默认配置同时运行 server 与节点，
+    starlink 连到同一进程中的 server。
+  - 验证：登记后电脑页显示在线与节点的版本；server 调用 node.version、node.info、agent-activity.agents 与 ends.speak 得到结果，
+    agent-activity 未声明的 observe 被拒；节点说的话在 server 各收到一次。
+  - 验证：server 停下后节点记下 starlink.failed，期间节点经 sidecar 说的两句在 server 以同一目录与端口重新启动后各到一次，
+    并带有 starlink.failed 与 starlink.recovered；同进程时 server 的电脑在 bcs.sqlite3 中，不在 bcn.sqlite3 中。
+  - 验证：按消息 `897f1d71-9e4f-5394-97e5-659d9f2387d1`，Linux 与 macOS 上两端收到 SIGINT 后退出，输出中没有异常回溯；
+    Windows 上直接结束进程，只验证节点的恢复。
   - 三平台 CI。
