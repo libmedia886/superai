@@ -168,6 +168,7 @@ def migrate_v5(payload: Mapping[str, object]) -> ConfigCandidate:
         )
         add("server-relay-memory", "server-computer")
         add("server-computer", "server-computer")
+        add("server-agent", "server-agent")
     if node.server.get("url") and "server" in (node.audit, node.control):
         # 0.2 reached its server with one address and token for the audit it
         # reported and the requests it took; starlink does both
