@@ -382,3 +382,36 @@ svg.i.xs { width: 14px; height: 14px; }
 .g.wecom { --brand: linear-gradient(160deg, #36a3ff, #0a6fd6); }
 .g.claudecode { --brand: linear-gradient(160deg, #e8916f, #c75f3a); }
 .g.codex { --brand: linear-gradient(160deg, #303030, #070707); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .16); }
+
+/* an icon and its text share one ink centre at 1x: whole-pixel boxes, leading that splits evenly, whole-pixel icon moves */
+.side .brand { line-height: 31px; }
+.side .jump { line-height: 18px; }
+.side .nav-group { line-height: 17px; }
+.side .pin { line-height: 20px; }
+.side .me .who, .side .me .who b { line-height: 17px; }
+.top { padding-top: 1px; }
+.crumbs { line-height: 20px; }
+.btn { line-height: 20px; }
+.btn.sm { line-height: 17px; }
+.top .input { line-height: 18px; }
+.profile h2 { line-height: 34px; }
+.fact { line-height: 18px; }
+.fact > svg.i { position: relative; top: -1px; }
+.tab { line-height: 20px; }
+.card-hd h3 { line-height: 21px; }
+.card-hd .more { line-height: 17px; }
+.turn { line-height: 20px; }
+.turn .ok, .turn .bad { line-height: 17px; }
+.kv-row { line-height: 20px; }
+.step { line-height: 20px; }
+.kpi .lbl { line-height: 19px; }
+.kpi .lbl svg.i { position: relative; top: -1px; }
+.kpi .legend { line-height: 17px; }
+.section-title h2 { line-height: 28px; }
+.section-title .more svg.i { position: relative; top: -1px; }
+.attn-item .tx { line-height: 19px; }
+.feed-item { align-items: center; }
+.feed-item .tx { line-height: 20px; }
+.card-hd .more svg.i { position: relative; top: -1px; }
+.seg span { line-height: 20px; }
+.field label { line-height: 20px; }
