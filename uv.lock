@@ -58,7 +58,7 @@ wheels = [
 
 [[package]]
 name = "bazaar-compute"
-version = "0.3.0rc20"
+version = "0.3.0rc21"
 source = { editable = "app" }
 dependencies = [
     { name = "bazaar-contrib-config" },
@@ -88,7 +88,7 @@ provides-extras = ["node"]
 
 [[package]]
 name = "bazaar-compute-node"
-version = "0.3.0rc20"
+version = "0.3.0rc21"
 source = { editable = "alias" }
 dependencies = [
     { name = "bazaar-compute", extra = ["node"] },
@@ -99,7 +99,7 @@ requires-dist = [{ name = "bazaar-compute", extras = ["node"], editable = "app" 
 
 [[package]]
 name = "bazaar-contrib-agent"
-version = "0.3.0rc20"
+version = "0.3.0rc21"
 source = { editable = "contrib/agent" }
 dependencies = [
     { name = "bazaar-contrib-audit" },
@@ -144,7 +144,7 @@ requires-dist = [
 
 [[package]]
 name = "bazaar-contrib-agent-command"
-version = "0.3.0rc20"
+version = "0.3.0rc21"
 source = { editable = "contrib/agent-command" }
 dependencies = [
     { name = "bazaar-contrib-agent" },
@@ -179,7 +179,7 @@ requires-dist = [
 
 [[package]]
 name = "bazaar-contrib-audit"
-version = "0.3.0rc20"
+version = "0.3.0rc21"
 source = { editable = "contrib/audit" }
 dependencies = [
     { name = "bazaar-core" },
@@ -194,7 +194,7 @@ requires-dist = [
 
 [[package]]
 name = "bazaar-contrib-channel"
-version = "0.3.0rc20"
+version = "0.3.0rc21"
 source = { editable = "contrib/channel" }
 dependencies = [
     { name = "bazaar-contrib-harness" },
@@ -213,7 +213,7 @@ requires-dist = [
 
 [[package]]
 name = "bazaar-contrib-collaboration"
-version = "0.3.0rc20"
+version = "0.3.0rc21"
 source = { editable = "contrib/collaboration" }
 dependencies = [
     { name = "bazaar-contrib-audit" },
@@ -244,7 +244,7 @@ requires-dist = [
 
 [[package]]
 name = "bazaar-contrib-config"
-version = "0.3.0rc20"
+version = "0.3.0rc21"
 source = { editable = "contrib/config" }
 dependencies = [
     { name = "bazaar-contrib-sidecar" },
@@ -261,7 +261,7 @@ requires-dist = [
 
 [[package]]
 name = "bazaar-contrib-config-versions"
-version = "0.3.0rc20"
+version = "0.3.0rc21"
 source = { editable = "contrib/config-versions" }
 dependencies = [
     { name = "bazaar-contrib-config" },
@@ -272,7 +272,7 @@ requires-dist = [{ name = "bazaar-contrib-config", editable = "contrib/config" }
 
 [[package]]
 name = "bazaar-contrib-harness"
-version = "0.3.0rc20"
+version = "0.3.0rc21"
 source = { editable = "contrib/harness" }
 dependencies = [
     { name = "bazaar-core" },
@@ -287,7 +287,7 @@ requires-dist = [
 
 [[package]]
 name = "bazaar-contrib-invoke"
-version = "0.3.0rc20"
+version = "0.3.0rc21"
 source = { editable = "contrib/invoke" }
 dependencies = [
     { name = "bazaar-core" },
@@ -316,7 +316,7 @@ wheels = [
 
 [[package]]
 name = "bazaar-contrib-manager"
-version = "0.3.0rc20"
+version = "0.3.0rc21"
 source = { editable = "contrib/manager" }
 dependencies = [
     { name = "bazaar-contrib-config" },
@@ -341,7 +341,7 @@ requires-dist = [
 
 [[package]]
 name = "bazaar-contrib-messages"
-version = "0.3.0rc20"
+version = "0.3.0rc21"
 source = { editable = "contrib/messages" }
 dependencies = [
     { name = "bazaar-contrib-channel" },
@@ -358,7 +358,7 @@ requires-dist = [
 
 [[package]]
 name = "bazaar-contrib-messages-node"
-version = "0.3.0rc20"
+version = "0.3.0rc21"
 source = { editable = "contrib/messages-node" }
 dependencies = [
     { name = "bazaar-contrib-audit" },
@@ -391,7 +391,7 @@ requires-dist = [
 
 [[package]]
 name = "bazaar-contrib-node-management"
-version = "0.3.0rc20"
+version = "0.3.0rc21"
 source = { editable = "contrib/node-management" }
 dependencies = [
     { name = "bazaar-contrib-audit" },
@@ -418,7 +418,7 @@ requires-dist = [
 
 [[package]]
 name = "bazaar-contrib-reminder"
-version = "0.3.0rc20"
+version = "0.3.0rc21"
 source = { editable = "contrib/reminder" }
 dependencies = [
     { name = "bazaar-contrib-audit" },
@@ -449,7 +449,7 @@ requires-dist = [
 
 [[package]]
 name = "bazaar-contrib-schema"
-version = "0.3.0rc20"
+version = "0.3.0rc21"
 source = { editable = "contrib/schema" }
 dependencies = [
     { name = "bazaar-contrib-storage" },
@@ -468,7 +468,7 @@ requires-dist = [
 
 [[package]]
 name = "bazaar-contrib-sidecar"
-version = "0.3.0rc20"
+version = "0.3.0rc21"
 source = { editable = "contrib/sidecar" }
 dependencies = [
     { name = "bazaar-contrib-timer" },
@@ -483,7 +483,7 @@ requires-dist = [
 
 [[package]]
 name = "bazaar-contrib-status"
-version = "0.3.0rc20"
+version = "0.3.0rc21"
 source = { editable = "contrib/status" }
 dependencies = [
     { name = "bazaar-core" },
@@ -494,7 +494,7 @@ requires-dist = [{ name = "bazaar-core", editable = "core" }]
 
 [[package]]
 name = "bazaar-contrib-storage"
-version = "0.3.0rc20"
+version = "0.3.0rc21"
 source = { editable = "contrib/storage" }
 dependencies = [
     { name = "bazaar-core" },
@@ -509,7 +509,7 @@ requires-dist = [
 
 [[package]]
 name = "bazaar-contrib-timer"
-version = "0.3.0rc20"
+version = "0.3.0rc21"
 source = { editable = "contrib/timer" }
 dependencies = [
     { name = "bazaar-core" },
@@ -520,7 +520,7 @@ requires-dist = [{ name = "bazaar-core", editable = "core" }]
 
 [[package]]
 name = "bazaar-core"
-version = "0.3.0rc20"
+version = "0.3.0rc21"
 source = { editable = "core" }
 dependencies = [
     { name = "packaging" },
