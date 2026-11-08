@@ -53,8 +53,10 @@ class MessageReadResult:
     snapshot_seq: int
     first_seq: int | None = None
     last_seq: int | None = None
-    # whether the conversation goes on before the first message read
+    # whether the conversation goes on before the first message read, and
+    # after the last
     has_before: bool = False
+    has_after: bool = False
     referenced_messages: tuple[
         Message[InboundAttachment | OutboundAttachment], ...
     ] = ()
@@ -97,6 +99,8 @@ class MessageSearchHit:
     at_ms: int
     body: str
     snippet: str
+    # the value relevance is ranked by, 0 when the hits go by time
+    score: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,6 +111,7 @@ class MessageSearchResult:
     offset: int
     has_more: bool
     next_offset: int | None
+    total: int
 
     @property
     def shown(self) -> int:

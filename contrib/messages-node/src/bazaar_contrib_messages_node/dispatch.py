@@ -9,7 +9,11 @@ from math import ceil
 from time import time_ns
 from typing import Annotated, Literal, Self, cast
 
-from bazaar_contrib_messages import SessionBindingError, SessionBindingValidator
+from bazaar_contrib_messages import (
+    RuntimeSession,
+    SessionBindingError,
+    SessionBindingValidator,
+)
 from bazaar_contrib_messages.actor import Actor, Actors, Thread
 from bazaar_contrib_messages.models import (
     Message,
@@ -425,8 +429,11 @@ class CommandDispatcher:
 
         request = _parse_command_request(raw_request, _CommandRequest)
         actor = self._resolve_actor(request.actor_id)
-        if self._session_binding_validator is not None:
-            await self._session_binding_validator(actor, raw_request)
+        session = (
+            None
+            if self._session_binding_validator is None
+            else await self._session_binding_validator(actor, raw_request)
+        )
         request = _parse_command_request(
             raw_request,
             _REQUEST_MODELS[route],
@@ -449,7 +456,7 @@ class CommandDispatcher:
                 )
             case ("message", "send"):
                 return await self._send_message(
-                    actor, cast(_MessageSendRequest, request)
+                    actor, cast(_MessageSendRequest, request), session
                 )
             case ("inbox", "check"):
                 return await self._check_inbox(actor)
@@ -546,7 +553,10 @@ class CommandDispatcher:
         }
 
     async def _send_message(
-        self, actor: Actor, request: _MessageSendRequest
+        self,
+        actor: Actor,
+        request: _MessageSendRequest,
+        session: RuntimeSession | None,
     ) -> Mapping[str, object]:
         result = await self._service.send_message(
             actor=actor,
@@ -556,6 +566,7 @@ class CommandDispatcher:
             attachment_paths=tuple(request.attachment_paths),
             reply_to_message_id=request.reply_to_message_id,
             send_draft=request.send_draft,
+            session=session,
         )
         if isinstance(result, MessageSendFreshnessHold):
             return {"ok": True, "result": {"text": format_freshness_hold(result)}}

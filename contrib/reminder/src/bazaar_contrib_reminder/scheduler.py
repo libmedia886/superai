@@ -411,6 +411,7 @@ class ReminderScheduler:
                     **reminder_audit_metadata(fired, anchor),
                     "scheduled_for_ms": scheduled_for_ms,
                 },
+                message_id=materialized.message_id,
             )
             return owner.agent, materialized
 

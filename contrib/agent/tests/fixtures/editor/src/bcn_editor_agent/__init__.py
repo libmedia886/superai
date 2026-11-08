@@ -35,7 +35,14 @@ from bazaar_contrib_harness import (
     TurnCompleted,
     TurnFailed,
 )
-from bazaar_contrib_messages import MESSAGES, Actor, Actors, Mode, Thread
+from bazaar_contrib_messages import (
+    MESSAGES,
+    Actor,
+    Actors,
+    Mode,
+    RuntimeSession,
+    Thread,
+)
 from bazaar_contrib_messages.models import Message, SenderIdentity
 from bazaar_contrib_messages.states import ChannelTargetKind, MessageDirection, Review
 from bazaar_core import Composition, Context, Contrib, ContribEntry
@@ -101,6 +108,7 @@ async def process(ctx: Context, config: Input):
             or request.get("session_capability") != capability
         ):
             raise ValueError("The editorial command has no active session")
+        return RuntimeSession(session.id)
 
     async with ctx.accept(MESSAGES).bind(
         actors=Actors(config.id, Mode.SESSION),

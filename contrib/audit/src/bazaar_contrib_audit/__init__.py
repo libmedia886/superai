@@ -36,6 +36,7 @@ class AuditContext(BaseModel):
     sender_id: str | None = None
     session_id: str | None = None
     turn_id: str | None = None
+    call_id: str | None = None
     provider_session_id: str | None = None
     provider_turn_id: str | None = None
 

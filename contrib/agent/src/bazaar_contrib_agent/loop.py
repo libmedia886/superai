@@ -46,6 +46,7 @@ from bazaar_contrib_messages import (
     Messages,
     MessageService,
     Mode,
+    RuntimeSession,
     SessionBindingError,
     Thread,
 )
@@ -207,7 +208,7 @@ class AgentLoop:
 
     async def validate_binding(
         self, actor: Actor, request: Mapping[str, object]
-    ) -> None:
+    ) -> RuntimeSession:
         if request.get("agent_id") != self.actors.agent_id:
             raise SessionBindingError("Agent binding is invalid")
         if (
@@ -231,6 +232,10 @@ class AgentLoop:
             capability.encode(), binding.capability.encode()
         ):
             raise SessionBindingError("session capability is invalid")
+        active = None if loop is None else loop.active
+        return RuntimeSession(
+            binding.session.id, None if active is None else active.turn.id
+        )
 
     async def receive(self, connection: Connection) -> None:
         await connection.ready.wait()
@@ -1306,6 +1311,7 @@ class AgentLoop:
                 context = AuditContext(
                     agent_id=self.agent.id,
                     channel=connection.kind,
+                    connection=runtime.key,
                     harness=runtime.name,
                     target_kind=anchor.target_kind.value,
                     thread_id=message.thread_id,
@@ -1545,17 +1551,18 @@ class AgentLoop:
                         if not isinstance(loop.state, states.Idle):
                             await self.close_session(loop)
                         runtime.banned_until_ms = self.timer.now_ms + 3_600_000
+                        alternative = self.select(exclude=attempted)
                         await self.audit.publish(
                             "harness.pool.banned",
-                            context=context.model_copy(
-                                update={"connection": runtime.key}
-                            ),
+                            context=context,
                             payload={
                                 "ban_until_ms": runtime.banned_until_ms,
                                 "terminal_state": outcome.payload.type,
+                                "fallback": None
+                                if alternative is None
+                                else alternative.key,
                             },
                         )
-                        alternative = self.select(exclude=attempted)
                         if alternative is not None:
                             await self.close_session(loop)
                             runtime = alternative
@@ -1566,11 +1573,7 @@ class AgentLoop:
                     ):
                         runtime.banned_until_ms = 0
                         await self.audit.publish(
-                            "harness.pool.released",
-                            context=context.model_copy(
-                                update={"connection": runtime.key}
-                            ),
-                            payload={},
+                            "harness.pool.released", context=context, payload={}
                         )
                     await self.channels.announce(outcome)
                     if isinstance(outcome.payload, TurnFailed):

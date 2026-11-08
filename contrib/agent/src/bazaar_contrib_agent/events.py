@@ -18,7 +18,12 @@ from bazaar_contrib_harness import (
     ApprovalScope,
     HarnessOutput,
     SandboxPolicy,
+    ToolCallCompleted,
     ToolCallFailed,
+    ToolCallInteraction,
+    ToolCallPatchUpdated,
+    ToolCallStarted,
+    ToolCallTextDelta,
     TurnFailed,
 )
 
@@ -163,7 +168,25 @@ async def forward(
     *,
     deliver: bool = True,
 ) -> None:
-    """Publish turn events and announce them to the turn's channels."""
+    """Publish turn events and announce them to the turn's channels.
+
+    The native message an event was made from is left out: the runtime's
+    `harness.source.*` events already record it."""
+    match event.payload:
+        case (
+            ToolCallStarted(call=call)
+            | ToolCallCompleted(call=call)
+            | ToolCallFailed(call=call)
+        ):
+            call_id = call.call_id
+        case (
+            ToolCallTextDelta(call_id=call_id)
+            | ToolCallPatchUpdated(call_id=call_id)
+            | ToolCallInteraction(call_id=call_id)
+        ):
+            pass
+        case _:
+            call_id = None
     await audit.publish(
         f"harness.{event.payload.type}",
         context=context.model_copy(
@@ -172,11 +195,12 @@ async def forward(
                 for key, value in (
                     ("provider_session_id", event.provider_session_id),
                     ("provider_turn_id", event.provider_turn_id),
+                    ("call_id", call_id),
                 )
                 if value is not None
             }
         ),
-        payload=event.model_dump(mode="json"),
+        payload=event.model_dump(mode="json", exclude={"raw"}),
         occurred_at_ms=event.occurred_at_ms,
         error=AuditError(
             kind=event.payload.failure.reason.value,

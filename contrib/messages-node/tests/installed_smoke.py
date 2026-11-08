@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import sqlite3
@@ -11,7 +12,7 @@ from contextlib import asynccontextmanager, closing
 from importlib.metadata import distribution
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from time import monotonic
+from time import monotonic, time_ns
 from typing import Any, cast
 from uuid import NAMESPACE_URL, uuid5, uuid7
 
@@ -20,13 +21,23 @@ from bazaar_compute_node.boot import build, defaults
 from bazaar_compute_node.boot import node as application
 from bazaar_contrib_agent.tool import Tool
 from bazaar_contrib_config import CONFIGURATION, ConfigDocument, Configuration
-from bazaar_contrib_sidecar import CLIENT, Client
+from bazaar_contrib_messages.states import ChannelTargetKind, Review
+from bazaar_contrib_sidecar import CLIENT, Client, RemoteError
 from bazaar_contrib_timer import TIMER, Timer
 from bazaar_core import (
     Composition,
     Context,
     Contrib,
     ContribEntry,
+)
+from pydantic import TypeAdapter
+
+from bazaar_contrib_messages_node.conversations import (
+    Conversations,
+    Detail,
+    History,
+    Search,
+    Segment,
 )
 
 
@@ -60,6 +71,8 @@ class Peer:
         attachments: tuple[Path, ...] = (),
         id: str | None = None,
         edit_version: str | None = None,
+        review: str = "approved",
+        media_type: str | None = None,
     ):
         id = id or str(uuid7())
         await self.write(
@@ -75,8 +88,10 @@ class Peer:
                     "body": body,
                     "edit_version": edit_version,
                     "attachments": [
-                        {"name": path.name, "path": str(path)} for path in attachments
+                        {"name": path.name, "path": str(path), "media_type": media_type}
+                        for path in attachments
                     ],
+                    "metadata": {"review": review},
                 }
             }
         )
@@ -197,6 +212,153 @@ async def node(config: Path):
             _, stderr = await process.communicate()
             if process.returncode:
                 raise RuntimeError(stderr.decode())
+
+
+async def reads(client: Client, peer: Peer, directory: Path) -> None:
+    """Read Cloud's conversations as a server does, through the node's sidecar."""
+
+    async def call[T](kind: type[T], method: str, *args: object, **values: Any) -> T:
+        return TypeAdapter(kind).validate_python(
+            await client.call("messages", method, "Cloud", *args, **values)
+        )
+
+    def query(sql: str, *values: object) -> list[Any]:
+        with closing(
+            sqlite3.connect(
+                (directory / ".bcn" / "bcn.sqlite3").as_uri() + "?mode=ro", uri=True
+            )
+        ) as connection:
+            return connection.execute(sql, values).fetchall()
+
+    async def stored(id: str) -> None:
+        while True:
+            if await asyncio.to_thread(
+                query,
+                "SELECT 1 FROM messages WHERE agent_id = ? AND message_id = ?",
+                "Cloud",
+                id,
+            ):
+                return
+            await asyncio.sleep(0.01)
+
+    # a newcomer waits to be let in; a guest group was turned away
+    newcomer = str(uuid5(NAMESPACE_URL, "Cloud:dm:lilei:thread"))
+    guests = str(uuid5(NAMESPACE_URL, "Cloud:group:guest-room:thread"))
+    for body, target, kind, review in (
+        ("你好，我是李雷，想请你帮忙看看下周的排期。", "lilei", "dm", "pending"),
+        ("排期表在共享盘里，标题是下周安排。", "lilei", "dm", "pending"),
+        ("周三前回复我就好，谢谢。", "lilei", "dm", "pending"),
+        ("大家好，这个群想请你来答疑。", "guest-room", "group", "denied"),
+        ("问题我们先整理成文档。", "guest-room", "group", "denied"),
+        ("整理好了会再通知你。", "guest-room", "group", "denied"),
+    ):
+        await stored(
+            await peer.inbound(
+                body, sender=target, kind=kind, target=target, review=review
+            )
+        )
+
+    approved = await call(Conversations, "conversations", "approved")
+    pending = await call(Conversations, "conversations", "pending")
+    for page, review in ((approved, Review.APPROVED), (pending, Review.PENDING)):
+        assert page.total == len(page.conversations) and not page.has_more
+        assert page.pending_review == pending.total
+        assert all(item.review is review for item in page.conversations)
+        times = [item.last_activity_at_ms for item in page.conversations]
+        assert times == sorted(times, reverse=True)
+    assert newcomer in {item.thread_id for item in pending.conversations}
+    assert guests not in {
+        item.thread_id for item in (*approved.conversations, *pending.conversations)
+    }
+    direct = next(item for item in approved.conversations if item.handle == "hanchin")
+    assert direct.name == "hanchin" and direct.kind is ChannelTargetKind.DM
+    group = next(
+        item for item in approved.conversations if item.kind is ChannelTargetKind.GROUP
+    )
+    assert group.name == "Design room" and group.member_count == 2
+
+    detail = await call(Detail, "conversation", direct.thread_id)
+    whole = await call(
+        History, "history", direct.thread_id, limit=detail.message_count + 1
+    )
+    assert len(whole.messages) == detail.message_count
+    assert not whole.has_before and not whole.has_after
+    assert direct.first is not None and direct.latest is not None
+    assert direct.first.message_id == whole.messages[0].message_id
+    assert direct.latest.message_id == whole.messages[-1].message_id
+    assert direct.latest.text == whole.messages[-1].body[:240]
+    assert 0 < detail.created_at_ms <= time_ns() // 1_000_000
+    assert detail.members[0].sender == whole.messages[-1].sender
+    assert any(member.is_self for member in detail.members)
+    assert detail.conversation.member_count == len(detail.members)
+
+    for thread_id in (newcomer, guests):
+        whole = await call(History, "history", thread_id)
+        assert len(whole.messages) == 3
+        assert not whole.has_before and not whole.has_after
+        latest = await call(
+            History, "history", thread_id, around=whole.messages[-1].message_id, limit=2
+        )
+        assert latest.messages == whole.messages[1:]
+        assert latest.has_before and not latest.has_after
+        earliest = await call(History, "history", thread_id, limit=2)
+        assert earliest.messages == whole.messages[:2]
+        assert not earliest.has_before and earliest.has_after
+
+    found = await call(Search, "search", "周五下午", "relevance", limit=2)
+    assert found.total > len(found.messages) and found.has_more
+    found = await call(Search, "search", "周五下午", "relevance", limit=found.total)
+    assert found.total == len(found.messages)
+    scores = [hit.score for hit in found.messages]
+    assert scores == sorted(scores, reverse=True) and scores[-1] > 0
+    assert all(hit.conversation == "hanchin" for hit in found.messages)
+    scheduled = await call(Search, "search", "排期表", "time")
+    assert any(
+        hit.thread_id == newcomer and hit.conversation == "lilei"
+        for hit in scheduled.messages
+    )
+
+    picture = directory / "checks.png"
+    content = b"\x89PNG\r\n\x1a\n" + os.urandom(1_300_000)
+    await asyncio.to_thread(picture.write_bytes, content)
+    id = await peer.inbound(
+        "检查结果截图在这里，麻烦看一下。",
+        attachments=(picture,),
+        media_type="image/png",
+    )
+    await stored(id)
+    sent = await call(History, "history", direct.thread_id, around=id, limit=1)
+    (attachment,) = sent.messages[0].attachments
+    assert attachment.state == "ready" and attachment.media_type == "image/png"
+    assert attachment.attachment_id is not None
+    data = b""
+    while True:
+        segment = await call(Segment, "attachment", attachment.attachment_id, len(data))
+        data += base64.b64decode(segment.data)
+        if len(data) >= segment.size_bytes:
+            break
+    ((relative,),) = await asyncio.to_thread(
+        query,
+        "SELECT relative_path FROM inbound_attachments WHERE attachment_id = ?",
+        attachment.attachment_id,
+    )
+    assert data == await asyncio.to_thread((directory / "Cloud" / relative).read_bytes)
+    assert segment.media_type == "image/png" and segment.size_bytes == len(content)
+
+    # an agent that does not run has no conversations to read
+    for method, values in (
+        ("conversations", ("approved",)),
+        ("conversation", (direct.thread_id,)),
+        ("history", (direct.thread_id,)),
+        ("search", ("周五下午", "relevance")),
+        ("attachment", (attachment.attachment_id,)),
+    ):
+        try:
+            await client.call("messages", method, "Barret", *values)
+        except RemoteError as error:
+            assert "Agent is not available" in error.message
+        else:
+            raise AssertionError(f"{method} answered for an agent that is not running")
 
 
 async def bcc(
@@ -622,6 +784,7 @@ async def exercise(directory: Path):
             assert await asyncio.to_thread(inbound_edits, directory, unseen) == [
                 ("1", None)
             ]
+            await reads(clients[0], peers["Cloud"], directory)
         finally:
             for peer in peers.values():
                 await peer.aclose()

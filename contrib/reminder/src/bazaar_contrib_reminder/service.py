@@ -5,7 +5,13 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 
 from bazaar_contrib_audit import Audit
-from bazaar_contrib_messages import Actors, Agent, Messages, SessionBindingValidator
+from bazaar_contrib_messages import (
+    Actors,
+    Agent,
+    Messages,
+    SessionBindingValidator,
+    Thread,
+)
 from bazaar_contrib_messages.models import InboundAttachment, Message
 from bazaar_contrib_storage import Database
 from bazaar_contrib_timer import Timer
@@ -15,6 +21,7 @@ from .audit import ReminderAudit
 from .commands import ReminderCommands
 from .concurrency import ThreadLockRegistry
 from .dispatch import CommandDispatcher
+from .models import Reminder
 from .scheduler import ReminderScheduler
 from .store import ReminderStore
 
@@ -115,6 +122,16 @@ class Reminders:
                 "error": "Agent is not available",
             }
         return await binding[0](request)
+
+    async def reminders(
+        self, agent_id: str, thread_id: str | None = None
+    ) -> tuple[Reminder, ...]:
+        """An agent's reminders still to fire, the soonest first, whether or
+        not the agent runs."""
+
+        return await self.storage.for_agent(Agent(agent_id)).list_scheduled_reminders(
+            None if thread_id is None else Thread(thread_id)
+        )
 
     async def _wake(self, owner: Agent, message: Message[InboundAttachment]) -> bool:
         binding = self._bindings.get(owner)

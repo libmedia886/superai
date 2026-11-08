@@ -26,7 +26,7 @@ from bazaar_contrib_channel import (
 )
 from bazaar_contrib_channel import InboundAttachment as ChannelSource
 from bazaar_contrib_channel import OutboundAttachment as ChannelAttachment
-from bazaar_contrib_messages import ThreadConcurrency
+from bazaar_contrib_messages import RuntimeSession, ThreadConcurrency
 from bazaar_contrib_messages.actor import Actor, Agent, Thread
 from bazaar_contrib_messages.correlation import CorrelationContext
 from bazaar_contrib_messages.delivery import from_receipt
@@ -280,7 +280,7 @@ class NodeMessageService:
         self._concurrency = concurrency
         self._clock = clock
         self._channel = channel
-        self._workspace = workspace
+        self.workspace = workspace
         self._delivery = OutboundDeliveryService(
             channel, timer, timeout=provider_timeout
         )
@@ -316,6 +316,7 @@ class NodeMessageService:
         channel_session_id: str | None = None,
         inbound_seq: int | None = None,
         outbound_message_id: str | None = None,
+        session: RuntimeSession | None = None,
     ) -> CorrelationContext:
         return CorrelationContext(
             node_id=self._owner.id,
@@ -323,6 +324,8 @@ class NodeMessageService:
             channel_session_id=channel_session_id,
             thread_id=thread_id.id if thread_id is not None else None,
             actor=actor,
+            runtime_session_id=session.id if session is not None else None,
+            turn_id=session.turn_id if session is not None else None,
             inbound_seq=inbound_seq,
             outbound_message_id=outbound_message_id,
         )
@@ -606,13 +609,14 @@ class NodeMessageService:
         body: str,
         attachments: tuple[OutboundAttachment, ...],
         created_at_ms: int,
+        session: RuntimeSession | None,
     ) -> MessageSendSuccess:
         """Open a conversation when its first visible message reaches the peer."""
 
         address = opening.address
         attempted_at_ms = self._clock()
         now = self._clock()
-        session = ChannelSession(
+        channel_session = ChannelSession(
             id=address.channel_session_id,
             channel=opening.channel,
             channel_identity=address.channel_identity,
@@ -631,8 +635,8 @@ class NodeMessageService:
             seq=0,
             message_id=str(uuid7()),
             thread_id=address.thread_id,
-            channel_session_id=session.id,
-            target=session.canonical_target,
+            channel_session_id=channel_session.id,
+            target=channel_session.canonical_target,
             body=body,
             attachments=attachments,
             target_kind=ChannelTargetKind.DM,
@@ -642,7 +646,7 @@ class NodeMessageService:
         )
         outbound, delivery_result = await self._transmit(
             outbound,
-            session,
+            channel_session,
             delivery_handle=address.delivery_handle,
             opening=True,
         )
@@ -651,9 +655,10 @@ class NodeMessageService:
             raise RuntimeError("outbound message has no delivery state")
         audit_context = self._correlation(
             thread_id=Thread(address.thread_id),
-            channel=session.channel,
-            channel_session_id=session.id,
+            channel=channel_session.channel,
+            channel_session_id=channel_session.id,
             outbound_message_id=outbound.message_id,
+            session=session,
         )
         # a chat that was never opened is not a conversation, and writing one
         # down would leave `dm:@name` resolving to something that cannot be
@@ -670,9 +675,11 @@ class NodeMessageService:
             audit_context,
             outbound,
             delivery_result,
-            canonical_target=session.canonical_target,
+            canonical_target=channel_session.canonical_target,
         )
-        resolved = await self.storage.resolve_inbox_target(session.canonical_target)
+        resolved = await self.storage.resolve_inbox_target(
+            channel_session.canonical_target
+        )
         return MessageSendSuccess(message=outbound, target=resolved.display_target)
 
     async def _stage_draft(
@@ -729,7 +736,7 @@ class NodeMessageService:
 
         messages: list[Message[OutboundAttachment]] = []
         attachments = {
-            self._workspace / item.relative_path: item for item in outbound.attachments
+            self.workspace / item.relative_path: item for item in outbound.attachments
         }
 
         async def record(delivery: ChannelMessageDelivery) -> None:
@@ -792,7 +799,7 @@ class NodeMessageService:
                 attachments=tuple(
                     ChannelAttachment(
                         name=item.name,
-                        path=self._workspace / item.relative_path,
+                        path=self.workspace / item.relative_path,
                         media_type=item.media_type,
                         size_bytes=item.size_bytes,
                         sha256=item.sha256,
@@ -859,6 +866,7 @@ class NodeMessageService:
             metadata={
                 **receipt,
                 "text": outbound.body,
+                "reply_to_message_id": outbound.reply_to_message_id,
                 "attachments": [
                     {
                         "name": attachment.name,
@@ -889,6 +897,7 @@ class NodeMessageService:
     async def _deliver(
         self,
         staged: Sequence[tuple[ResolvedInboxTarget, MessageDraft, int]],
+        session: RuntimeSession | None,
     ) -> tuple[Message[OutboundAttachment], ...] | MessageSendFreshnessHold:
         """Hand the message to its channels and record what each made of it.
 
@@ -921,11 +930,13 @@ class NodeMessageService:
             # the conversations are delivered side by side, so the send takes
             # as long as the slowest one rather than all of them added up
             return tuple(
-                await asyncio.gather(*(self._deliver_one(item) for item in prepared))
+                await asyncio.gather(
+                    *(self._deliver_one(item, session) for item in prepared)
+                )
             )
 
     async def _deliver_one(
-        self, item: _PreparedDelivery
+        self, item: _PreparedDelivery, session: RuntimeSession | None
     ) -> Message[OutboundAttachment]:
         target = item.target
         outbound = item.outbound
@@ -936,6 +947,7 @@ class NodeMessageService:
             channel_session_id=channel_session.id,
             inbound_seq=item.expected_target_seq,
             outbound_message_id=outbound.message_id,
+            session=session,
         )
         await self._publish(
             event_name="bcc.send.fresh_check.passed",
@@ -946,6 +958,7 @@ class NodeMessageService:
             event_name="channel.outbound.pending",
             state=RuntimeEventState.STARTED,
             correlation=audit_context,
+            metadata={"reply_to_message_id": outbound.reply_to_message_id},
         )
         outbound, delivery_result = await self._transmit(
             outbound,
@@ -973,6 +986,7 @@ class NodeMessageService:
         attachment_paths: tuple[str, ...] = (),
         reply_to_message_id: str | None = None,
         send_draft: bool = False,
+        session: RuntimeSession | None = None,
     ) -> MessageSendResult:
         attachments = (
             await asyncio.to_thread(self._attachment_resolver, attachment_paths)
@@ -993,6 +1007,7 @@ class NodeMessageService:
             attachments=attachments,
             reply_to_message_id=reply_to_message_id,
             send_draft=send_draft,
+            session=session,
         )
 
     async def _send(
@@ -1005,6 +1020,7 @@ class NodeMessageService:
         attachments: tuple[OutboundAttachment, ...],
         reply_to_message_id: str | None,
         send_draft: bool,
+        session: RuntimeSession | None,
     ) -> MessageSendResult:
         try:
             targets = await self.storage.resolve_inbox_targets(raw_target)
@@ -1030,6 +1046,7 @@ class NodeMessageService:
                     body=body,
                     attachments=attachments,
                     created_at_ms=created_at_ms,
+                    session=session,
                 )
             targets = (await self.storage.resolve_inbox_target(held.canonical_target),)
         for target in targets:
@@ -1092,7 +1109,7 @@ class NodeMessageService:
         if hold is not None:
             return _named_as_called(hold, raw_target, targets)
 
-        delivered = await self._deliver(staged)
+        delivered = await self._deliver(staged, session)
         if isinstance(delivered, MessageSendFreshnessHold):
             return _named_as_called(delivered, raw_target, targets)
         deliveries = tuple(

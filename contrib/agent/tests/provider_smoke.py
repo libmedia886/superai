@@ -27,9 +27,14 @@ from bazaar_contrib_channel import (
 )
 from bazaar_contrib_harness import (
     ApprovalResult,
+    CommandDetail,
     ContentDelta,
+    FileDetail,
     HarnessOutput,
+    ModelUpdated,
     ToolCallCompleted,
+    ToolCallFailed,
+    ToolCallStarted,
     TurnFailed,
 )
 from bazaar_core import (
@@ -169,7 +174,7 @@ async def finish(peer: Peer, packet: dict[str, Any] | None = None) -> Path:
     if "event" in packet:
         return Path(
             next(
-                item["event"]["payload"]["call"]["input"]["path"]
+                item["event"]["payload"]["call"]["detail"]["changes"][0]["path"]
                 for item in reversed(peer.events)
                 if item.get("event", {}).get("turn_id") == packet["event"]["turn_id"]
                 and item["event"]["payload"].get("call", {}).get("name") == "file.write"
@@ -542,9 +547,9 @@ async def steering(peer: Peer, draft: Path, persisted: asyncio.Queue[AuditEvent]
             event = HarnessOutput.model_validate(packet["event"])
             assert isinstance(event.payload, ToolCallCompleted)
             assert event.turn_id == approval["approval"]["approval"]["turn_id"]
-            assert all(
-                update.body in str(event.payload.call.output) for update in updates
-            )
+            detail = event.payload.call.detail
+            assert isinstance(detail, CommandDetail)
+            assert all(update.body in (detail.output or "") for update in updates)
             break
     entries = [
         json.loads(line)
@@ -1464,7 +1469,9 @@ async def exercise(path: Path):
                 await connected["Tifa"].until("outbound", acknowledge=False)
                 other_path = Path(
                     next(
-                        packet["event"]["payload"]["call"]["input"]["path"]
+                        packet["event"]["payload"]["call"]["detail"]["changes"][0][
+                            "path"
+                        ]
                         for packet in reversed(connected["Tifa"].events)
                         if packet.get("event", {})
                         .get("payload", {})
@@ -1513,12 +1520,84 @@ async def exercise(path: Path):
         assert reads
         for event, output in reads:
             assert isinstance(output.payload, ToolCallCompleted)
-            assert output.payload.call.output == content
-            raw = cast(dict[str, Any], output.raw)
-            assert raw["metadata"]["result"] == content
-            assert raw["occurred_at_ms"] == event.occurred_at_ms
+            detail = output.payload.call.detail
+            assert isinstance(detail, FileDetail) and detail.path is not None
+            assert await asyncio.to_thread(Path(detail.path).read_text) == content
+            assert output.payload.call.duration_ms is not None
             assert output.session_id == event.context.session_id
             assert output.turn_id == event.context.turn_id
+    # The native message stays in the runtime's own events; each tool event
+    # names its call, and each turn event the runtime connection serving it.
+    for event in records:
+        if not event.event_name.startswith("harness."):
+            continue
+        assert "raw" not in cast(dict[str, Any], event.payload)
+        if event.context.turn_id is not None:
+            assert event.context.connection in {
+                "document:0",
+                "document:1",
+                "document-secondary:0",
+            }
+        if event.event_name.startswith("harness.tool."):
+            output = HarnessOutput.model_validate(event.payload)
+            assert isinstance(
+                output.payload, (ToolCallStarted, ToolCallCompleted, ToolCallFailed)
+            )
+            assert event.context.call_id == output.payload.call.call_id
+    models = [
+        HarnessOutput.model_validate(event.payload).payload
+        for event in records
+        if event.event_name == "harness.model.updated"
+    ]
+    assert models and all(isinstance(model, ModelUpdated) for model in models)
+    # A banned runtime names the one the turn goes on with, and the turn's
+    # next events come from it; nothing is named when none is left.
+    banned = [event for event in records if event.event_name == "harness.pool.banned"]
+    assert any(
+        cast(dict[str, Any], event.payload)["fallback"] is None for event in banned
+    )
+    for event in banned:
+        fallback = cast(dict[str, Any], event.payload)["fallback"]
+        if fallback is None:
+            continue
+        retried = next(
+            later
+            for later in records
+            if later.sequence > event.sequence
+            and later.context.turn_id == event.context.turn_id
+        )
+        assert retried.context.connection == fallback != event.context.connection
+    # A reply sent from a turn names the turn, its session and the message it
+    # answers: one the channel brought in, or one a reminder wrote.
+    turns = {
+        (event.context.session_id, event.context.turn_id)
+        for event in records
+        if event.event_name == "harness.turn.requested"
+    }
+    answered = {
+        event.context.message_id
+        for event in records
+        if event.event_name in {"channel.inbound.persisted", "reminder.fired"}
+    }
+    assert None not in answered
+    outbound = [
+        event
+        for event in records
+        if event.event_name in {"channel.outbound.pending", "channel.outbound.sent"}
+    ]
+    assert outbound
+    for event in outbound:
+        assert (event.context.session_id, event.context.turn_id) in turns
+        metadata = cast(dict[str, Any], event.payload)["metadata"]
+        assert metadata["reply_to_message_id"] in answered
+    # The turn a reminder starts and the reminder's firing name one message.
+    fired = [event for event in records if event.event_name == "reminder.fired"]
+    assert fired
+    for event in fired:
+        assert any(
+            request.context.message_id == event.context.message_id
+            for request in requests.values()
+        )
     for event in records:
         if event.event_name == "harness.content.delta":
             request = requests[event.context.turn_id]
