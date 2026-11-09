@@ -16,6 +16,10 @@
   .stalls { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 16px; flex: 1; min-height: 0; }
   .rightcol { display: flex; flex-direction: column; gap: 16px; min-height: 0; }
   .rightcol .feedcard { flex: 1; min-height: 0; overflow: hidden; }
+  .greet h2 { line-height: 30px; }
+  .kpi .foot { line-height: 19px; }
+  /* 全部's first stroke starts a pixel lower than the other links' text, so its arrow stays where the box puts it */
+  .rightcol > .card:first-child .card-hd .more svg.i { top: 0; }
   .count-pill { min-width: 22px; height: 22px; padding: 0 7px; border-radius: 999px; background: var(--saffron); color: var(--saffron-ink); font-size: 12px; font-weight: 700; display: grid; place-items: center; }
 </style>
 </head>
@@ -92,12 +96,6 @@
                   <div class="doing">空闲 · 2 分钟前在 #前端组 回复了王磊</div></div>
                   <svg class="spark calm" width="84" height="26" data-v="3,4,2,5,6,4,3,5,6,4,3,2,2"></svg>
                 </div>
-                <div class="vendor">
-                  <span class="lantern fail"></span>
-                  <div><div class="nm">Barret <span class="g wecom"><i data-l="wecom"></i></span><span class="rtn"><span class="g codex"><i data-l="codex"></i></span></span></div>
-                  <div class="doing err">启动失败 · codex 尚未登录</div></div>
-                  <svg class="spark dead" width="84" height="26" data-v="2,2,2,2,2,2,2,2,2,2,2,2,2"></svg>
-                </div>
               </div>
             </div>
 
@@ -158,7 +156,7 @@
                 <div class="vendor">
                   <span class="lantern off"></span>
                   <div><div class="nm">Yuffie <span class="g tg"><i data-l="telegram"></i></span><span class="rtn"><span class="g codex"><i data-l="codex"></i></span></span></div>
-                  <div class="doing">电脑离线，消息会在重新连接后处理</div></div>
+                  <div class="doing">电脑离线</div></div>
                   <svg class="spark dead" width="84" height="26" data-v="2,2,2,2,2,2,2,2,2,2,2,2,2"></svg>
                 </div>
                 <div class="vendor">
@@ -178,14 +176,14 @@
             <div class="attn">
               <div class="attn-item">
                 <div class="ic req"><i data-i="userplus" class="sm"></i></div>
-                <div class="tx"><b>李雷</b> 想私聊 <b>Tifa</b> <span class="g tg" style="vertical-align:-3px"><i data-l="telegram"></i></span>
+                <div class="tx"><b>李雷</b> 想私聊 <b>Tifa</b> <span class="g tg" style="vertical-align:-1px"><i data-l="telegram"></i></span>
                   <div class="q">“你好，我是新来的同事，想请你帮我搭一下开发环境…”</div>
                   <div class="acts"><span class="btn sm ok"><i data-i="check" class="xs"></i>允许</span><span class="btn sm no"><i data-i="x" class="xs"></i>拒绝</span></div>
                 </div>
               </div>
               <div class="attn-item">
                 <div class="ic req"><i data-i="users" class="sm"></i></div>
-                <div class="tx"><b>设计组</b> 想让 <b>啊夸</b> 加入群聊 <span class="g lark" style="vertical-align:-3px"><i data-l="lark"></i></span>
+                <div class="tx"><b>设计组</b> 想让 <b>啊夸</b> 加入群聊 <span class="g lark" style="vertical-align:-1px"><i data-l="lark"></i></span>
                   <div class="q">12 位成员 · 首条消息 5 分钟前</div>
                   <div class="acts"><span class="btn sm ok"><i data-i="check" class="xs"></i>允许</span><span class="btn sm no"><i data-i="x" class="xs"></i>拒绝</span></div>
                 </div>
@@ -193,20 +191,18 @@
               <div class="attn-item">
                 <div class="ic err"><i data-i="alert" class="sm"></i></div>
                 <div class="tx"><b>Barret</b> 在 kana-vm 上启动失败
-                  <div class="q mono">codex: not logged in · 运行 codex login 后重试</div>
+                  <div class="q mono">codex: not logged in</div>
                 </div>
               </div>
             </div>
           </div>
           <div class="card feedcard">
-            <div class="card-hd"><h3>集市动态</h3><span class="more">活动记录<i data-i="right" class="xs"></i></span></div>
+            <div class="card-hd"><h3>集市动态</h3></div>
             <div class="feed">
               <div class="feed-item"><span class="dot s"><i data-i="zap"></i></span><span class="tx"><b>有马佳奈</b> 开始处理 #bazaar-compute 开发</span><span class="t">刚刚</span></div>
               <div class="feed-item"><span class="dot j"><i data-i="send"></i></span><span class="tx"><b>Tifa</b> 在 #前端组 回复了王磊</span><span class="t">2 分钟</span></div>
               <div class="feed-item"><span class="dot b"><i data-i="userplus"></i></span><span class="tx"><b>李雷</b> 请求私聊 Tifa</span><span class="t">4 分钟</span></div>
               <div class="feed-item"><span class="dot s"><i data-i="terminal"></i></span><span class="tx"><b>Vincent</b> 运行了 6 条命令</span><span class="t">6 分钟</span></div>
-              <div class="feed-item"><span class="dot"><i data-i="alarm"></i></span><span class="tx"><b>啊夸</b> 的提醒到期：整理周会纪要</span><span class="t">18 分钟</span></div>
-              <div class="feed-item"><span class="dot r"><i data-i="wifioff"></i></span><span class="tx"><b>ci-runner-01</b> 断开连接</span><span class="t">2 小时</span></div>
             </div>
           </div>
         </div>

@@ -1,6 +1,6 @@
 # server 页面效果图
 
-server 本体、登录与功能模块页面的效果图，实现时以此对照。桌面为 1440×900，手机为 390×844，每页有夜市与晨市两张；手机的登录方式与电脑详情中的插件比一屏长，截取滚动后的整页，分别为 390×1010 与 390×1130。
+server 本体、登录与功能模块页面的效果图，实现时以此对照。桌面为 1440×900，手机为 390×844，每页有夜市与晨市两张；手机的登录方式、电脑详情中的插件、智能体动态与完整活动记录比一屏长，截取滚动后的整页，分别为 390×1010、390×1130、390×1040 与 390×1250。
 
 ## 页面
 
@@ -12,8 +12,9 @@ server 本体、登录与功能模块页面的效果图，实现时以此对照�
 | 智能体：列表 | [夜市](screens/desktop/agents-night.png) | [晨市](screens/desktop/agents-day.png) | `src/agents.html` |
 | 智能体：行菜单 | [夜市](screens/desktop/agents-menu-night.png) | [晨市](screens/desktop/agents-menu-day.png) | `src/agents.html?view=menu` |
 | 智能体：删除 | [夜市](screens/desktop/agents-delete-night.png) | [晨市](screens/desktop/agents-delete-day.png) | `src/agents.html?view=delete` |
-| 智能体：动态 | [夜市](screens/desktop/agent-night.png) | [晨市](screens/desktop/agent-day.png) | `src/agent.html` |
-| 智能体：动态中的回合与按小时用量（第 14 阶段，活动模块） | [夜市](screens/desktop/agent-activity-night.png) | [晨市](screens/desktop/agent-activity-day.png) | `src/agent.html?tab=activity-full` |
+| 智能体：动态（第 14 阶段，活动模块） | [夜市](screens/desktop/agent-night.png) | [晨市](screens/desktop/agent-day.png) | `src/agent.html` |
+| 智能体：完整活动记录（第 14 阶段） | [夜市](screens/desktop/agent-activity-log-night.png) | [晨市](screens/desktop/agent-activity-log-day.png) | `src/agent.html?tab=activity-log` |
+| 智能体：会话（第 14 阶段） | [夜市](screens/desktop/agent-chats-night.png) | [晨市](screens/desktop/agent-chats-day.png) | `src/agent.html?tab=chats` |
 | 智能体：工作区 | [夜市](screens/desktop/agent-workspace-night.png) | [晨市](screens/desktop/agent-workspace-day.png) | `src/agent.html?tab=workspace` |
 | 智能体：查看 Markdown 文件 | [夜市](screens/desktop/agent-file-night.png) | [晨市](screens/desktop/agent-file-day.png) | `src/agent.html?tab=workspace&file=md` |
 | 智能体：查看代码文件（按类型着色） | [夜市](screens/desktop/agent-file-text-night.png) | [晨市](screens/desktop/agent-file-text-day.png) | `src/agent.html?tab=workspace&file=text` |
@@ -22,6 +23,9 @@ server 本体、登录与功能模块页面的效果图，实现时以此对照�
 | 智能体：配置中编辑渠道 | [夜市](screens/desktop/agent-config-edit-night.png) | [晨市](screens/desktop/agent-config-edit-day.png) | `src/agent.html?tab=config&edit=lark` |
 | 智能体：分享 | [夜市](screens/desktop/agent-share-night.png) | [晨市](screens/desktop/agent-share-day.png) | `src/agent.html?tab=share` |
 | 会话 | [夜市](screens/desktop/chats-night.png) | [晨市](screens/desktop/chats-day.png) | `src/chats.html` |
+| 会话：不再回复的确认（第 14 阶段） | [夜市](screens/desktop/chats-revoke-night.png) | [晨市](screens/desktop/chats-revoke-day.png) | `src/chats.html?view=revoke` |
+| 会话：新联系人的审批（第 14 阶段） | [夜市](screens/desktop/chats-contacts-night.png) | [晨市](screens/desktop/chats-contacts-day.png) | `src/chats.html?view=contacts` |
+| 会话：搜索消息（第 14 阶段） | [夜市](screens/desktop/chats-search-night.png) | [晨市](screens/desktop/chats-search-day.png) | `src/chats.html?view=search` |
 | 新建智能体：基本信息 | [夜市](screens/desktop/new-agent-1-night.png) | [晨市](screens/desktop/new-agent-1-day.png) | `src/new-agent.html?step=1` |
 | 新建智能体：渠道 | [夜市](screens/desktop/new-agent-night.png) | [晨市](screens/desktop/new-agent-day.png) | `src/new-agent.html` |
 | 新建智能体：运行时 | [夜市](screens/desktop/new-agent-3-night.png) | [晨市](screens/desktop/new-agent-3-day.png) | `src/new-agent.html?step=3` |
@@ -50,12 +54,20 @@ server 本体、登录与功能模块页面的效果图，实现时以此对照�
 | 手机：智能体 | [夜市](screens/phone/agents-night.png) | [晨市](screens/phone/agents-day.png) | `src/mobile.html?screen=agents` |
 | 手机：分享智能体 | [夜市](screens/phone/agent-share-night.png) | [晨市](screens/phone/agent-share-day.png) | `src/mobile.html?screen=agent-share` |
 | 手机：删除智能体 | [夜市](screens/phone/agent-delete-night.png) | [晨市](screens/phone/agent-delete-day.png) | `src/mobile.html?screen=agent-delete` |
-| 手机：智能体动态 | [夜市](screens/phone/agent-night.png) | [晨市](screens/phone/agent-day.png) | `src/mobile.html?screen=agent` |
+| 手机：智能体动态（第 14 阶段） | [夜市](screens/phone/agent-night.png) | [晨市](screens/phone/agent-day.png) | `src/mobile.html?screen=agent` |
+| 手机：完整活动记录（第 14 阶段） | [夜市](screens/phone/activity-log-night.png) | [晨市](screens/phone/activity-log-day.png) | `src/mobile.html?screen=activity-log` |
 | 手机：智能体工作区 | [夜市](screens/phone/agent-workspace-night.png) | [晨市](screens/phone/agent-workspace-day.png) | `src/mobile.html?screen=agent-workspace` |
 | 手机：查看工作区文件 | [夜市](screens/phone/agent-file-night.png) | [晨市](screens/phone/agent-file-day.png) | `src/mobile.html?screen=agent-file` |
 | 手机：智能体技能 | [夜市](screens/phone/agent-skills-night.png) | [晨市](screens/phone/agent-skills-day.png) | `src/mobile.html?screen=agent-skills` |
 | 手机：智能体配置 | [夜市](screens/phone/agent-config-night.png) | [晨市](screens/phone/agent-config-day.png) | `src/mobile.html?screen=agent-config` |
 | 手机：智能体配置中编辑渠道 | [夜市](screens/phone/agent-config-edit-night.png) | [晨市](screens/phone/agent-config-edit-day.png) | `src/mobile.html?screen=agent-config-edit` |
+| 手机：会话（第 14 阶段） | [夜市](screens/phone/chats-night.png) | [晨市](screens/phone/chats-day.png) | `src/mobile.html?screen=chats` |
+| 手机：新联系人（第 14 阶段） | [夜市](screens/phone/contacts-night.png) | [晨市](screens/phone/contacts-day.png) | `src/mobile.html?screen=contacts` |
+| 手机：新联系人的审批（第 14 阶段） | [夜市](screens/phone/review-night.png) | [晨市](screens/phone/review-day.png) | `src/mobile.html?screen=review` |
+| 手机：会话内容（第 14 阶段） | [夜市](screens/phone/chat-night.png) | [晨市](screens/phone/chat-day.png) | `src/mobile.html?screen=chat` |
+| 手机：会话信息（第 14 阶段） | [夜市](screens/phone/chat-info-night.png) | [晨市](screens/phone/chat-info-day.png) | `src/mobile.html?screen=chat-info` |
+| 手机：不再回复的确认（第 14 阶段） | [夜市](screens/phone/chat-revoke-night.png) | [晨市](screens/phone/chat-revoke-day.png) | `src/mobile.html?screen=chat-revoke` |
+| 手机：搜索消息（第 14 阶段） | [夜市](screens/phone/search-night.png) | [晨市](screens/phone/search-day.png) | `src/mobile.html?screen=search` |
 | 手机：新建智能体：基本信息 | [夜市](screens/phone/new-agent-1-night.png) | [晨市](screens/phone/new-agent-1-day.png) | `src/mobile.html?screen=new-agent-1` |
 | 手机：新建智能体：渠道 | [夜市](screens/phone/new-agent-2-night.png) | [晨市](screens/phone/new-agent-2-day.png) | `src/mobile.html?screen=new-agent-2` |
 | 手机：新建智能体：运行时 | [夜市](screens/phone/new-agent-3-night.png) | [晨市](screens/phone/new-agent-3-day.png) | `src/mobile.html?screen=new-agent-3` |
