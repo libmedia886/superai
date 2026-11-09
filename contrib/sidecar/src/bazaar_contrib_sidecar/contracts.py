@@ -8,6 +8,7 @@ from typing import Protocol
 
 from bazaar_core import ServiceKey
 
+from .handlers import Remotes
 from .remote import Client
 from .wire import Failure, Request, Result
 
@@ -24,3 +25,4 @@ class Server(Protocol):
 
 SERVER = ServiceKey[Server]("sidecar.server")
 CLIENT = ServiceKey[Client]("sidecar.client")
+REMOTES = ServiceKey[Remotes]("sidecar.remotes")

@@ -6,11 +6,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 lazy import asyncio
 
+from bazaar_contrib_sidecar import RemoteEntry
 from bazaar_core import Context, Contrib, ServiceKey
 from pydantic import BaseModel, ConfigDict, Field
 lazy import aiofiles
 
-__all__ = ["consumer", "file", "reader"]
+__all__ = ["consumer", "file", "reader", "remote"]
 
 FILE = ServiceKey[Path]("example.file")
 CONSUMER = ServiceKey[Path]("example.consumer")
@@ -85,3 +86,4 @@ async def reader_lifespan(ctx: Context):
 file = Contrib(config=FileConfig, offers=[FILE], lifespan=file_lifespan)
 consumer = Contrib(accepts=[FILE], offers=[CONSUMER], lifespan=consumer_lifespan)
 reader = Contrib(accepts=[CONSUMER], lifespan=reader_lifespan)
+remote = RemoteEntry(FILE, ("name",))
