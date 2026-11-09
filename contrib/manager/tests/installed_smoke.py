@@ -36,7 +36,7 @@ from blockbuster import blockbuster_ctx
 from packaging.requirements import Requirement
 from packaging.version import Version
 
-from bazaar_contrib_manager import CONTRIB_MANAGER, ContribManager, Operation, Package
+from bazaar_contrib_manager import CONTRIB_MANAGER, ContribManager, Operation
 
 
 async def invoke(options: dict[str, Any], action) -> Any:
@@ -79,6 +79,16 @@ async def invoke(options: dict[str, Any], action) -> Any:
         flush=True,
     )
     return result
+
+
+def add(name: str, source: str, version: str = ""):
+    """Add a package as `bcn contrib add` does, waiting for its operation."""
+
+    async def action(manager: ContribManager) -> Operation:
+        operation = await manager.add(name, source, version)
+        return await manager.wait(operation.id)
+
+    return action
 
 
 async def exercise(path: Path, source: str, other_source: str, releases: Path) -> None:
@@ -204,14 +214,10 @@ async def exercise(path: Path, source: str, other_source: str, releases: Path) -
     assert "aiofiles" in output
     await cli("remove", "aiofiles")
 
-    async def install(manager: ContribManager):
-        package = await manager.catalog.select("example", source=source)
-        return await manager.add(package)
-
     await asyncio.to_thread(
         print, "Install example from its local package index", flush=True
     )
-    added = await checked(install)
+    added = await checked(add("example", source))
     assert added.installed and added.config_saved
     detail = await checked(lambda manager: manager.detail("example"))
     assert any(entry.config_schema for entry in detail.entries)
@@ -402,11 +408,7 @@ async def exercise(path: Path, source: str, other_source: str, releases: Path) -
     )
     assert enabled.config_saved
 
-    async def conflict(manager: ContribManager):
-        package = await manager.catalog.select("example", source=source, version=">=9")
-        return await manager.add(package)
-
-    rejected = await invoke(options, conflict)
+    rejected = await invoke(options, add("example", source, ">=9"))
     assert rejected.error and rejected.phase == "failed"
     assert (await checked(lambda manager: manager.detail("example"))).entries
     writer = path / "user.txt"
@@ -733,16 +735,10 @@ async def exercise(path: Path, source: str, other_source: str, releases: Path) -
     ):
         assert "started:edited" in await asyncio.to_thread(writer.read_text)
 
-    async def change_source(manager: ContribManager):
-        package = await manager.catalog.select(
-            "example", source=other_source, version=">=0.2,<0.3"
-        )
-        return await manager.add(package)
-
     await asyncio.to_thread(
         print, "Change installed example package source", flush=True
     )
-    replaced = await checked(change_source)
+    replaced = await checked(add("example", other_source, ">=0.2,<0.3"))
     assert replaced.installed
     detail = await checked(lambda manager: manager.detail("example"))
     assert detail.version.startswith("0.2")
@@ -757,12 +753,7 @@ async def exercise(path: Path, source: str, other_source: str, releases: Path) -
     payload = tomllib.loads(original)
     payload["contribs"].append({"enabled": [{"entry": "example-missing"}]})
     await asyncio.to_thread(config.write_text, tomli_w.dumps(payload))
-    invalid = await invoke(
-        options,
-        lambda manager: manager.add(
-            Package(package="bazaar-contrib-example-support", source=other_source)
-        ),
-    )
+    invalid = await invoke(options, add("bazaar-contrib-example-support", other_source))
     assert invalid.phase == "failed" and invalid.error
     assert invalid.installed and invalid.environment_changed
     await asyncio.to_thread(config.write_text, original)
@@ -1034,11 +1025,7 @@ async def exercise(path: Path, source: str, other_source: str, releases: Path) -
         )
         await checked(lambda manager, index=index: manager.disable(index))
 
-    await checked(
-        lambda manager: manager.add(
-            Package(package="bazaar-contrib-example-carrier", source=source)
-        )
-    )
+    await checked(add("bazaar-contrib-example-carrier", source))
     carrier = {"configer": "example-config", **options}
     for platform in (None, "win32" if sys.platform != "win32" else "linux"):
         snapshot = tomllib.loads(await asyncio.to_thread(config.read_text))

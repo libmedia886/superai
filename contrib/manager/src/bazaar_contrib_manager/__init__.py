@@ -16,7 +16,7 @@ lazy from .contracts import (
     Operation,
     Package,
 )
-lazy from .service import CONTRIB_MANAGER, ContribManager, manager
+lazy from .service import CONTRIB_MANAGER, ContribManager, manager, remote
 
 __all__ = [
     "CONTRIB_CATALOG",
@@ -34,4 +34,5 @@ __all__ = [
     "Package",
     "command_entry",
     "manager",
+    "remote",
 ]

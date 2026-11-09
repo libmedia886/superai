@@ -28,9 +28,7 @@ from bazaar_core import (
     Contrib,
     ContribEntry,
 )
-from pydantic import TypeAdapter
 
-from bazaar_contrib_reminder import Reminder
 from bazaar_contrib_reminder.reminder import format_utc_timestamp
 
 
@@ -220,7 +218,7 @@ async def exercise(directory: Path):
     await asyncio.to_thread(config.write_text, tomli_w.dumps(payload))
 
     @asynccontextmanager
-    async def control(owners: tuple[str, ...] = ("Cloud", "Tifa")):
+    async def control():
         clients: list[Client] = []
         configurations: list[Configuration] = []
 
@@ -250,7 +248,7 @@ async def exercise(directory: Path):
             os.environ["BCN_TOOL_CONFIG"] = str(tool.path)
             peers: dict[str, Peer] = {}
             try:
-                for owner in owners:
+                for owner in ("Cloud", "Tifa"):
                     address = json.loads(
                         await asyncio.to_thread(
                             (directory / owner / "channel.json").read_text
@@ -432,26 +430,6 @@ async def exercise(directory: Path):
             "cancel",
             reminder_id=own["reminder"]["reminder_id"],
         )
-        later = await command(
-            reminders,
-            "Tifa",
-            "Tifa",
-            "schedule",
-            title="下周把会议记录发给大家",
-            message_id=tifa_anchor,
-            delay_seconds=3600,
-        )
-        daily = await command(
-            reminders,
-            "Tifa",
-            "Tifa",
-            "schedule",
-            title="每天跟进会场纪要",
-            message_id=tifa_group_anchor,
-            repeat_rule="daily@09:00",
-            fire_at=format_utc_timestamp(time_ns() // 1_000_000 + 7_200_000),
-            timezone="Asia/Shanghai",
-        )
         offline = await command(
             reminders,
             "Tifa",
@@ -485,43 +463,6 @@ async def exercise(directory: Path):
             and reminder["last_occurrence_no"] > 0
             for reminder in reminders_rows
         )
-    # Tifa no longer runs; what she is still to be reminded of can be read.
-    payload["contribs"][-1]["enabled"][0]["config"]["agents"] = ["Cloud"]
-    await asyncio.to_thread(config.write_text, tomli_w.dumps(payload))
-    async with node(config), control(("Cloud",)) as (reminders, _):
-        stopped = cast(
-            dict[str, Any],
-            await reminders.call(
-                "reminder",
-                "request",
-                {
-                    "kind": "command",
-                    "resource": "reminder",
-                    "command": "list",
-                    "agent_id": "Tifa",
-                    "actor_id": "Tifa",
-                },
-            ),
-        )
-        assert stopped["code"] == "AGENT_NOT_AVAILABLE"
-        scheduled = TypeAdapter(tuple[Reminder, ...]).validate_python(
-            await reminders.call("reminder", "reminders", "Tifa")
-        )
-        assert [reminder.reminder_id for reminder in scheduled] == [
-            later["reminder"]["reminder_id"],
-            daily["reminder"]["reminder_id"],
-        ]
-        assert scheduled[0].owner_thread_id == tifa_row["thread_id"]
-        assert scheduled[1].repeat_rule == "daily@09:00"
-        assert scheduled[1].timezone == "Asia/Shanghai"
-        grouped = TypeAdapter(tuple[Reminder, ...]).validate_python(
-            await reminders.call(
-                "reminder", "reminders", "Tifa", tifa_group_row["thread_id"]
-            )
-        )
-        assert [reminder.reminder_id for reminder in grouped] == [
-            daily["reminder"]["reminder_id"]
-        ]
     print("Reminder workflow passed")
 
 

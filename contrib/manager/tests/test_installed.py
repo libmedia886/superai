@@ -187,6 +187,7 @@ def wheels(tmp_path_factory):
             for deployment in ("venv", "tool")
             for workflow in ("installed_smoke.py", "live_smoke.py")
         ),
+        ("tool", "remote_smoke.py"),
         ("alias", "extras_smoke.py"),
         ("extra", "extras_smoke.py"),
     ],

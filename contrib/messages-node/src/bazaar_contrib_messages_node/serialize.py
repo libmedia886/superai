@@ -106,41 +106,30 @@ def serialize_message(
     }
 
 
-def highlight(query: str, snippet: str) -> list[tuple[str, bool]]:
-    """The snippet in pieces, each saying whether it is a fragment of the query."""
-
+def serialize_search(
+    result: MessageSearchResult,
+    actors: Actors,
+) -> dict[str, object]:
     fragments = sorted(
         {
             fragment
             for fragment in (
                 fragment.strip('"').strip()
-                for fragment in re.findall(r'"[^"]+"|\S+', query)
+                for fragment in re.findall(r'"[^"]+"|\S+', result.query)
             )
             if fragment
         },
         key=len,
         reverse=True,
     )
-    if not fragments:
-        return [(snippet, False)]
-    return [
-        (text, bool(index % 2))
-        for index, text in enumerate(
-            re.split(
-                "(" + "|".join(map(re.escape, fragments)) + ")",
-                snippet,
-                flags=re.IGNORECASE,
-            )
-        )
-    ]
-
-
-def serialize_search(
-    result: MessageSearchResult,
-    actors: Actors,
-) -> dict[str, object]:
+    pattern = (
+        re.compile("(" + "|".join(map(re.escape, fragments)) + ")", re.IGNORECASE)
+        if fragments
+        else None
+    )
     messages: list[dict[str, object]] = []
     for hit in result.messages:
+        pieces = pattern.split(hit.snippet) if pattern else [hit.snippet]
         message: dict[str, object] = {
             "message_id": hit.message_id,
             "direction": hit.direction.value,
@@ -156,7 +145,9 @@ def serialize_search(
             "sender_kind": hit.sender_kind.value,
             "at_ms": hit.at_ms,
             "snippet": hit.snippet,
-            "parts": highlight(result.query, hit.snippet),
+            "parts": [
+                (text, bool(pattern and index % 2)) for index, text in enumerate(pieces)
+            ],
             "thread_id": hit.thread_id,
             "actor_id": actors.for_thread(hit.thread_id).id,
             "target": hit.target,

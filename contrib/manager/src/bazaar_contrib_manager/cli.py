@@ -283,13 +283,10 @@ def create_commands(manager: ContribManager) -> click.Group:
         config = parameters(options) if options else None
 
         async def action(manager: ContribManager):
-            package = await manager.catalog.select(name, source=source, version=version)
-            return await manager.add(
-                package,
-                enable=enable is not None,
-                contrib=enable or None,
-                config=config,
+            operation = await manager.add(
+                name, source=source, version=version, enable=enable, config=config
             )
+            return await manager.wait(operation.id)
 
         return execute(
             manager,

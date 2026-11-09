@@ -81,4 +81,4 @@ reminder = Contrib(
     lifespan=lifespan,
 )
 
-remote = RemoteEntry(REMINDER, ("request", "reminders"))
+remote = RemoteEntry(REMINDER, ("request",))
