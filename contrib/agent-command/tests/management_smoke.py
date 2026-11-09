@@ -41,6 +41,7 @@ from bazaar_contrib_agent_command.management import (
 
 async def exercise(path: Path, source: str, tests: Path):
     config = path / "config.toml"
+    workspaces = path / ".bcn" / "workspaces"
     os.environ["EDITOR_SOURCE"] = "Weekend editor"
 
     async def cli(*arguments: str):
@@ -187,8 +188,6 @@ async def exercise(path: Path, source: str, tests: Path):
             "--harness",
             "document",
             "--set",
-            f"agent.workspace={path / name}",
-            "--set",
             f"agent.mode={mode}",
             "--set",
             f"harness.title={name} editorial report",
@@ -225,8 +224,8 @@ async def exercise(path: Path, source: str, tests: Path):
     listing = await cli("agent", "list")
     assert "Cloud desk" in listing and "Tifa" in listing
     assert "offline" in listing
-    assert not await asyncio.to_thread((path / "Cloud").exists)
-    assert not await asyncio.to_thread((path / "Tifa").exists)
+    assert not await asyncio.to_thread((workspaces / cloud["id"]).exists)
+    assert not await asyncio.to_thread((workspaces / tifa["id"]).exists)
     await asyncio.to_thread(
         print,
         "Offline add/list/edit preserved identity and provider settings",
@@ -309,8 +308,8 @@ async def exercise(path: Path, source: str, tests: Path):
         )
         return found[0]["notifies_runtime"] if found else None
 
-    async def restarted(name: str, before: int) -> None:
-        endpoint = path / name / "channel.json"
+    async def restarted(agent_id: str, before: int) -> None:
+        endpoint = workspaces / agent_id / "channel.json"
         while True:
             if (await asyncio.to_thread(endpoint.stat)).st_mtime_ns != before:
                 return
@@ -348,9 +347,9 @@ async def exercise(path: Path, source: str, tests: Path):
             _, errors = await process.communicate()
             assert process.returncode == 0, errors.decode()
 
-    async def connect(name: str):
+    async def connect(agent_id: str):
         address = json.loads(
-            await asyncio.to_thread((path / name / "channel.json").read_text)
+            await asyncio.to_thread((workspaces / agent_id / "channel.json").read_text)
         )
         reader, writer = await asyncio.open_connection("127.0.0.1", address["port"])
         return Peer(reader, writer)
@@ -363,7 +362,7 @@ async def exercise(path: Path, source: str, tests: Path):
         mentions_agent=True,
     )
     async with running(), AsyncExitStack() as stack:
-        peer = await connect("Cloud")
+        peer = await connect(cloud["id"])
         stack.push_async_callback(peer.aclose)
         assert [item["id"] for item in await agents()] == [cloud["id"], tifa["id"]]
         assert "running" in await cli("agent", "list")
@@ -376,8 +375,8 @@ async def exercise(path: Path, source: str, tests: Path):
     )
 
     async with running(), AsyncExitStack() as stack:
-        cloud_peer = await connect("Cloud")
-        tifa_peer = await connect("Tifa")
+        cloud_peer = await connect(cloud["id"])
+        tifa_peer = await connect(tifa["id"])
         tifa_peer.automatic = True
         stack.push_async_callback(cloud_peer.aclose)
         stack.push_async_callback(tifa_peer.aclose)
@@ -651,11 +650,9 @@ async def exercise(path: Path, source: str, tests: Path):
             "test-channel",
             "--harness",
             "document",
-            "--set",
-            f"agent.workspace={path / 'Live'}",
         )
         live = (await agents())[-1]
-        endpoint = path / "Live" / "channel.json"
+        endpoint = workspaces / live["id"] / "channel.json"
         while True:
             if await asyncio.to_thread(endpoint.exists):
                 break
@@ -672,8 +669,8 @@ async def exercise(path: Path, source: str, tests: Path):
             "--set",
             "agent.session.config.sandbox.policy=danger-full-access",
         )
-        await restarted("Live", before)
-        peer = await connect("Live")
+        await restarted(live["id"], before)
+        peer = await connect(live["id"])
         peer.automatic = True
         stack.push_async_callback(peer.aclose)
         message = request.model_copy(
@@ -691,7 +688,7 @@ async def exercise(path: Path, source: str, tests: Path):
         assert message.body in report["inbox"]
         await cli("agent", "remove", live["id"])
         assert all(item["id"] != live["id"] for item in await agents())
-        assert await asyncio.to_thread((path / "Live").is_dir)
+        assert await asyncio.to_thread((workspaces / live["id"]).is_dir)
         await asyncio.to_thread(
             print,
             "Live CLI add/edit/remove apply without restarting the node",
@@ -704,7 +701,7 @@ async def exercise(path: Path, source: str, tests: Path):
     )
 
     await cli("agent", "remove", cloud["id"])
-    assert await asyncio.to_thread((path / "Cloud").is_dir)
+    assert await asyncio.to_thread((workspaces / cloud["id"]).is_dir)
     assert [item["id"] for item in await agents()] == [tifa["id"]]
     await cli("agent", "remove", "Tifa")
     assert not await agents()

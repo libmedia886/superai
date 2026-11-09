@@ -636,10 +636,14 @@ async def exercise(path: Path):
     inspection = await HarnessBuilderParameters.builder().inspect(path, timeout=30)
     assert inspection.available and inspection.version and inspection.skills
     await asyncio.to_thread(path.mkdir)
-    workspaces = {name: path / name for name in ("Cloud", "Tifa", "Barret")}
+    os.environ["BCN_HOME"] = str(path)
+    workspaces = {
+        name: path / ".bcn" / "workspaces" / name
+        for name in ("Cloud", "Tifa", "Barret")
+    }
     drafts = {}
     for name, workspace in workspaces.items():
-        await asyncio.to_thread(workspace.mkdir)
+        await asyncio.to_thread(workspace.mkdir, parents=True)
         draft = workspace / "draft.txt"
         await asyncio.to_thread(
             draft.write_text,
@@ -656,7 +660,6 @@ async def exercise(path: Path):
                         {
                             "id": name,
                             "name": name,
-                            "workspace": str(workspace),
                             "mode": "dangerous_individual"
                             if name == "Tifa"
                             else "session",
@@ -681,7 +684,7 @@ async def exercise(path: Path):
                                 },
                             ],
                         }
-                        for name, workspace in workspaces.items()
+                        for name in workspaces
                     ]
                 },
             ),
@@ -1060,7 +1063,7 @@ async def exercise(path: Path):
                 # Reordering runtimes of different kinds keeps both running: the
                 # existing conversation stays where it is, a new one takes the
                 # first.
-                order_workspace = path / "Order"
+                order_workspace = path / ".bcn" / "workspaces" / "Order"
                 await asyncio.to_thread(order_workspace.mkdir)
                 order_draft = order_workspace / "draft.txt"
                 await asyncio.to_thread(
@@ -1071,7 +1074,6 @@ async def exercise(path: Path):
                     {
                         "id": "Order",
                         "name": "Order",
-                        "workspace": str(order_workspace),
                         "session": {
                             "config": {"sandbox": {"policy": "danger-full-access"}}
                         },
@@ -1202,7 +1204,7 @@ async def exercise(path: Path):
                 )
 
                 # An idle timer releases the session after active approval and reply finish.
-                idle_workspace = path / "Idle"
+                idle_workspace = path / ".bcn" / "workspaces" / "Idle"
                 await asyncio.to_thread(idle_workspace.mkdir)
                 idle_draft = idle_workspace / "draft.txt"
                 await asyncio.to_thread(
@@ -1213,15 +1215,14 @@ async def exercise(path: Path):
                     {
                         "id": "Idle",
                         "name": "Idle",
-                        "workspace": str(idle_workspace),
                         "idle_timeout": 0.2,
                         "channel": [{"kind": "test-channel"}],
                         "harness": [{"kind": "document", "publication_delay": 1.2}],
                     }
                 )
-                batch_workspace = path / "Batch"
-                context_workspace = path / "Context"
-                failure_workspace = path / "Failure"
+                batch_workspace = path / ".bcn" / "workspaces" / "Batch"
+                context_workspace = path / ".bcn" / "workspaces" / "Context"
+                failure_workspace = path / ".bcn" / "workspaces" / "Failure"
                 for directory in (
                     batch_workspace,
                     context_workspace,
@@ -1241,21 +1242,18 @@ async def exercise(path: Path):
                         {
                             "id": "Batch",
                             "name": "Batch",
-                            "workspace": str(batch_workspace),
                             "channel": [{"kind": "test-channel"}],
                             "harness": [{"kind": "document", "input_mode": "batch"}],
                         },
                         {
                             "id": "Context",
                             "name": "Context",
-                            "workspace": str(context_workspace),
                             "channel": [{"kind": "test-channel"}],
                             "harness": [{"kind": "document", "publication_delay": 1.2}],
                         },
                         {
                             "id": "Failure",
                             "name": "Failure",
-                            "workspace": str(failure_workspace),
                             "channel": [{"kind": "test-channel"}],
                             "harness": [{"kind": "document"}],
                         },
