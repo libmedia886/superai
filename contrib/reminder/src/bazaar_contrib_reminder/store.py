@@ -55,13 +55,6 @@ class ReminderStore:
             lambda repository: repository.list_reminders(owner, statuses)
         )
 
-    async def list_scheduled_reminders(
-        self, owner: Thread | None
-    ) -> tuple[Reminder, ...]:
-        return await self._run(
-            lambda repository: repository.list_scheduled_reminders(owner)
-        )
-
     async def save_new_reminder(self, reminder: Reminder) -> Reminder:
         return await self._run(
             lambda repository: repository.save_new_reminder(reminder), mode="write"

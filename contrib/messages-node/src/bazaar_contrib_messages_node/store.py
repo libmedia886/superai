@@ -212,13 +212,6 @@ class MessageStore:
             lambda repository: repository.get_channel_session(channel_session_id)
         )
 
-    async def get_channel_sessions(
-        self, threads: Sequence[ThreadActor]
-    ) -> dict[str, ChannelSession]:
-        return await self._run(
-            lambda repository: repository.get_channel_sessions(threads)
-        )
-
     async def get_thread(self, actor: ThreadActor) -> Thread | None:
         return await self._run(lambda repository: repository.get_thread(actor))
 
@@ -296,18 +289,12 @@ class MessageStore:
         )
 
     async def list_inbox_targets(
-        self,
-        *,
-        limit: int | None = 100,
-        offset: int = 0,
-        review: Review | None,
-        thread_id: ThreadActor | None = None,
+        self, *, limit: int | None = 100, offset: int = 0, review: Review | None
     ) -> InboxTargetPage:
         return await self._run(
             lambda repository: repository.list_inbox_targets(
-                limit=limit, offset=offset, review=review, thread_id=thread_id
-            ),
-            mode="snapshot",
+                limit=limit, offset=offset, review=review
+            )
         )
 
     async def resolve_inbox_target(self, raw_target: str) -> ResolvedInboxTarget:
@@ -342,13 +329,6 @@ class MessageStore:
     async def list_ready_attachment_paths(self) -> tuple[str, ...]:
         return await self._run(
             lambda repository: repository.list_ready_attachment_paths()
-        )
-
-    async def get_inbound_attachment(
-        self, attachment_id: str
-    ) -> InboundAttachment | None:
-        return await self._run(
-            lambda repository: repository.get_inbound_attachment(attachment_id)
         )
 
     async def list_unread_message_owners(self) -> tuple[UnreadMessageOwner, ...]:
@@ -391,20 +371,6 @@ class MessageStore:
                 latest=latest,
                 limit=limit,
             )
-        )
-
-    async def list_first_messages(
-        self, threads: Sequence[ThreadActor]
-    ) -> tuple[Message[InboundAttachment | OutboundAttachment], ...]:
-        return await self._run(
-            lambda repository: repository.list_first_messages(threads)
-        )
-
-    async def list_latest_by_sender(
-        self, threads: Sequence[ThreadActor]
-    ) -> tuple[Message[InboundAttachment | OutboundAttachment], ...]:
-        return await self._run(
-            lambda repository: repository.list_latest_by_sender(threads)
         )
 
     async def get_message(

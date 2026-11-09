@@ -49,11 +49,11 @@ async def running(config: Path):
             assert process.returncode == 0
 
 
-async def exercise(path: Path, source: str):
-    config = path / "live.toml"
-    journal = path / "live.txt"
+async def configure(config: Path, source: str) -> None:
+    """Write a node configuration that installs this workspace's packages from the
+    local source and finds the example in a catalog beside it."""
     payload = await asyncio.to_thread(defaults)
-    catalog = path / "live-catalog.json"
+    catalog = config.with_name(f"{config.stem}-catalog.json")
     await asyncio.to_thread(
         catalog.write_text,
         json.dumps(
@@ -85,6 +85,12 @@ async def exercise(path: Path, source: str):
             if entry["entry"] == "logging":
                 entry["config"] = {"level": "WARNING"}
     await asyncio.to_thread(config.write_text, tomli_w.dumps(payload))
+
+
+async def exercise(path: Path, source: str):
+    config = path / "live.toml"
+    journal = path / "live.txt"
+    await configure(config, source)
 
     async def cli(*arguments: str, success: bool = True):
         print("bcn --config", config, "contrib", *arguments, flush=True)

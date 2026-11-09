@@ -139,13 +139,6 @@ class StorageOperationMixin:
             delivery_states=_HISTORY_DELIVERY_STATES,
             limit=1,
         )
-        newest = await self.list_messages(
-            ThreadActor(source_thread.id),
-            target=target.canonical_target,
-            delivery_states=_HISTORY_DELIVERY_STATES,
-            latest=True,
-            limit=1,
-        )
         references = await _referenced_messages(
             self, ThreadActor(source_thread.id), messages
         )
@@ -179,7 +172,6 @@ class StorageOperationMixin:
                 first_seq=messages[0].seq if messages else None,
                 last_seq=messages[-1].seq if messages else None,
                 has_before=bool(messages) and messages[0].seq > oldest[0].seq,
-                has_after=bool(messages) and messages[-1].seq < newest[0].seq,
                 referenced_messages=references,
                 target_projections=tuple(target_projections),
             ),

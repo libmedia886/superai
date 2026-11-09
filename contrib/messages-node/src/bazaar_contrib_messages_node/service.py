@@ -280,7 +280,7 @@ class NodeMessageService:
         self._concurrency = concurrency
         self._clock = clock
         self._channel = channel
-        self.workspace = workspace
+        self._workspace = workspace
         self._delivery = OutboundDeliveryService(
             channel, timer, timeout=provider_timeout
         )
@@ -736,7 +736,7 @@ class NodeMessageService:
 
         messages: list[Message[OutboundAttachment]] = []
         attachments = {
-            self.workspace / item.relative_path: item for item in outbound.attachments
+            self._workspace / item.relative_path: item for item in outbound.attachments
         }
 
         async def record(delivery: ChannelMessageDelivery) -> None:
@@ -799,7 +799,7 @@ class NodeMessageService:
                 attachments=tuple(
                     ChannelAttachment(
                         name=item.name,
-                        path=self.workspace / item.relative_path,
+                        path=self._workspace / item.relative_path,
                         media_type=item.media_type,
                         size_bytes=item.size_bytes,
                         sha256=item.sha256,

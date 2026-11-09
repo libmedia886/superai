@@ -22,6 +22,9 @@ contrib-manager = "bazaar_contrib_manager:manager"
 [project.entry-points."bazaar_compute_node.commands"]
 contrib = "bazaar_contrib_manager:command_entry"
 
+[project.entry-points."bazaar_compute_node.remotes"]
+contrib-manager = "bazaar_contrib_manager:remote"
+
 [project.urls]
 Repository = "https://github.com/yuchanns/bazaar-compute-node"
 

@@ -75,7 +75,6 @@ from .codec import (
     channel_session_from_row,
     consumer_cursor_from_row,
     encode_metadata,
-    inbound_attachment_from_row,
     inbox_target_summary_from_row,
     message_from_row,
     thread_from_row,
@@ -96,24 +95,6 @@ from .unread import (
     list_unread_message_owners,
     messages_from_rows,
     unread_query,
-)
-
-_CHANNEL_SESSION_FIELDS = (
-    "id",
-    "channel",
-    "provider_thread_id",
-    "created_at_ms",
-    "updated_at_ms",
-    "channel_identity",
-    "target_kind",
-    "following",
-    "review",
-    "last_inbound_at_ms",
-    "last_outbound_at_ms",
-    "target_display_name",
-    "target_handle",
-    "target_handle_key",
-    "provider_identity_ref_json",
 )
 
 
@@ -191,36 +172,6 @@ class Repository(StorageOperationMixin, RepositoryBase):
             )
         )
         return channel_session_from_row(row) if row is not None else None
-
-    async def get_channel_sessions(
-        self, threads: Sequence[ThreadActor]
-    ) -> dict[str, ChannelSession]:
-        """The channel session of each of these conversations, by thread."""
-
-        rows = await self._session.select(
-            Select(
-                table="threads",
-                alias="thread",
-                columns={
-                    "thread_id": Column(name="id", table="thread"),
-                    **{
-                        name: Column(name=name, table="channel")
-                        for name in _CHANNEL_SESSION_FIELDS
-                    },
-                },
-                joins=self._channel_join(),
-                where=self.scope(
-                    In(
-                        expression=Column(name="id", table="thread"),
-                        values=tuple(thread.id for thread in threads),
-                    ),
-                    table="thread",
-                ),
-            )
-        )
-        return {
-            cast(str, row["thread_id"]): channel_session_from_row(row) for row in rows
-        }
 
     async def get_thread(self, actor: ThreadActor) -> Thread | None:
         row = await self.one(
@@ -763,11 +714,25 @@ class Repository(StorageOperationMixin, RepositoryBase):
                 "metadata_json",
             )
         }
+        fields = (
+            "id",
+            "channel",
+            "provider_thread_id",
+            "created_at_ms",
+            "updated_at_ms",
+            "channel_identity",
+            "target_kind",
+            "following",
+            "review",
+            "last_inbound_at_ms",
+            "last_outbound_at_ms",
+            "target_display_name",
+            "target_handle",
+            "target_handle_key",
+            "provider_identity_ref_json",
+        )
         columns.update(
-            {
-                "channel_" + name: Column(name=name, table="channel")
-                for name in _CHANNEL_SESSION_FIELDS
-            }
+            {"channel_" + name: Column(name=name, table="channel") for name in fields}
         )
         columns["handle_count"] = Case(
             when=IsNull(expression=Column(name="target_handle_key", table="channel")),
@@ -828,7 +793,7 @@ class Repository(StorageOperationMixin, RepositoryBase):
             ResolvedInboxTarget(
                 thread=thread_from_row(row),
                 channel_session=channel_session_from_row(
-                    {name: row["channel_" + name] for name in _CHANNEL_SESSION_FIELDS}
+                    {name: row["channel_" + name] for name in fields}
                 ),
                 handle_is_unique=row["handle_count"] == 1,
             )
@@ -979,46 +944,6 @@ class Repository(StorageOperationMixin, RepositoryBase):
         )
         return tuple(str(row["relative_path"]) for row in rows)
 
-    async def get_inbound_attachment(
-        self, attachment_id: str
-    ) -> InboundAttachment | None:
-        row = await self.one(
-            Select(
-                table="inbound_attachments",
-                alias="attachment",
-                columns={
-                    name: Column(name=name, table="attachment")
-                    for name in (
-                        "attachment_id",
-                        "name",
-                        "kind",
-                        "state",
-                        "media_type",
-                        "relative_path",
-                        "size_bytes",
-                        "error",
-                    )
-                },
-                joins=(
-                    Join(
-                        table="messages",
-                        alias="message",
-                        on=Compare(
-                            left=Column(name="message_id", table="message"),
-                            operator="=",
-                            right=Column(name="message_id", table="attachment"),
-                        ),
-                    ),
-                ),
-                where=self.scope(
-                    equal("direction", "inbound", "message"),
-                    equal("attachment_id", attachment_id, "attachment"),
-                    table="message",
-                ),
-            )
-        )
-        return inbound_attachment_from_row(row) if row is not None else None
-
     def _unread_query(self) -> Select:
         return unread_query(self.owner)
 
@@ -1125,77 +1050,6 @@ class Repository(StorageOperationMixin, RepositoryBase):
         )
         if latest and around_message_id is None:
             rows = tuple(reversed(rows))
-        return await self._messages_from_rows(rows)
-
-    async def list_first_messages(
-        self, threads: Sequence[ThreadActor]
-    ) -> tuple[Message[InboundAttachment | OutboundAttachment], ...]:
-        """Each of these conversations' first message."""
-
-        return await self._ranked_messages(
-            threads, (Column(name="thread_id"),), latest=False
-        )
-
-    async def list_latest_by_sender(
-        self, threads: Sequence[ThreadActor]
-    ) -> tuple[Message[InboundAttachment | OutboundAttachment], ...]:
-        """Each sender's latest message in these conversations, the newest
-        first; whatever the agent sent is one sender's."""
-
-        return await self._ranked_messages(
-            threads,
-            (
-                Column(name="thread_id"),
-                Case(
-                    when=equal("direction", MessageDirection.OUTBOUND.value),
-                    then=Value(value=""),
-                    otherwise=Call(
-                        name="coalesce",
-                        arguments=(Column(name="sender_id"), Column(name="sender")),
-                    ),
-                ),
-            ),
-            latest=True,
-        )
-
-    async def _ranked_messages(
-        self,
-        threads: Sequence[ThreadActor],
-        partition_by: tuple[Expression, ...],
-        *,
-        latest: bool,
-    ) -> tuple[Message[InboundAttachment | OutboundAttachment], ...]:
-        """The first message, or the latest, of each part of these
-        conversations' history, the newest first."""
-
-        ranked = Select(
-            table="messages",
-            columns={
-                **{name: Column(name=name) for name in _MESSAGE_COLUMNS},
-                "message_rank": RowNumber(
-                    partition_by=partition_by,
-                    order_by=(Sort(expression=Column(name="seq"), descending=latest),),
-                ),
-            },
-            where=All(
-                conditions=(
-                    self._message_filters(delivery_states=_HISTORY_DELIVERY_STATES),
-                    In(
-                        expression=Column(name="thread_id"),
-                        values=tuple(thread.id for thread in threads),
-                    ),
-                )
-            ),
-        )
-        rows = await self._session.select(
-            Select(
-                table="ranked_message",
-                ctes={"ranked_message": ranked},
-                columns={name: Column(name=name) for name in _MESSAGE_COLUMNS},
-                where=equal("message_rank", 1),
-                order_by=(Sort(expression=Column(name="seq"), descending=True),),
-            )
-        )
         return await self._messages_from_rows(rows)
 
     async def get_message(
@@ -1843,7 +1697,7 @@ class Repository(StorageOperationMixin, RepositoryBase):
             body = Column(name="body", table="message")
             lower_body = Call(name="lower", arguments=(body,))
             length = Call(name="length", arguments=(body,))
-            rank: Expression = Value(value=0.0)
+            rank: Expression = Value(value=0)
             if sort == "relevance":
                 statistics = await self._session.select(
                     source.model_copy(
@@ -1963,19 +1817,10 @@ class Repository(StorageOperationMixin, RepositoryBase):
             for fragment in fragments:
                 if len(fragment) < 3:
                     predicates.append(Contains(expression=body, text=fragment))
-            total = await self.count(
-                source.model_copy(
-                    update={
-                        "columns": {"total": Call(name="count")},
-                        "where": All(conditions=tuple(predicates)),
-                    }
-                )
-            )
             columns: dict[str, Expression] = {
                 name: Column(name=name, table="message") for name in _MESSAGE_COLUMNS
             }
             columns["search_at_ms"] = search_time
-            columns["score"] = rank
             order = (
                 (Sort(expression=rank, descending=True),) if sort == "relevance" else ()
             )
@@ -2040,7 +1885,6 @@ class Repository(StorageOperationMixin, RepositoryBase):
                         at_ms=cast(int, row["search_at_ms"]),
                         body=message.body,
                         snippet=snippet,
-                        score=cast(float, row["score"]),
                     )
                 )
             return MessageSearchResult(
@@ -2050,7 +1894,6 @@ class Repository(StorageOperationMixin, RepositoryBase):
                 offset=request.offset,
                 has_more=has_more,
                 next_offset=request.offset + len(hits) if has_more else None,
-                total=total,
             )
         except StorageQueryTimeoutError as error:
             hint = "Search exceeded its execution budget; narrow the keywords or time range"
