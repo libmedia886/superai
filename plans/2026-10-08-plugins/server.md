@@ -46,6 +46,7 @@ BCN 仓库的改动在 `0.3-server` 上进行，该分支从 `0.3` 的 cd8470d �
 | bazaar-contrib-server-activity | open-bazaar/contrib-server-activity | server-activity | 活动模块：接管 events，持久化节点上报的事件并去重，投影回合与用量，以 ACTIVITY 提供给其他模块；动态中的回合与用量、完整活动记录、摊位中的智能体与概览的集市动态（第 14 阶段） |
 | bazaar-contrib-server-conversation | open-bazaar/contrib-server-conversation | server-conversation | 会话模块：经 call 读取会话、消息、成员、提醒与附件，审批、撤销与自动回复；会话页、智能体的会话 tab、动态中的提醒与概览的需要你处理；登记 agents.approve（第 14 阶段） |
 | bazaar-contrib-server-usage | open-bazaar/contrib-server-usage | server-usage | 用量插件：概览中 agent 的概况与所选时间范围的回合和用量（第 14 阶段） |
+| bazaar-contrib-starlink-conversation | open-bazaar/contrib-starlink-conversation | starlink-conversation | 节点端：经 DB 直接读取节点上会话、消息、附件与提醒的表，以 remote `conversation` 供 server 经 starlink 调用；由会话模块按需安装到节点上（第 14 阶段） |
 | bazaar-contrib-starlink | open-bazaar/contrib-starlink | starlink | 节点侧长轮询、经 sidecar 分发调用、回传结果、上报审计事件、退避重试 |
 
 - contrib-server-migrations 由原 contrib-server 改名而来；contrib-server、contrib-server-overview、contrib-server-access、contrib-server-github、contrib-server-computer、contrib-server-database、contrib-server-management 与 contrib-starlink 是新仓库。这些仓库都按现有 contrib 仓库建立 CI 与发版流程，十个新包各自登记到 contrib-index。
@@ -436,11 +437,12 @@ server-agent 对所有插件使用同一套画法：字符串为输入框，枚�
 
 ## 第 14 阶段：会话与活动（2026-11-08）
 
-依据消息 `c533cdfa-7b30-52f8-8383-f0dc5ba85667`、`dd55b063-0595-5f6c-8f8b-c2811cb34ed9`、`42dc6b1d-66a5-5d18-879f-b16e8c6c4b00`、`c05987a7-a88b-5ee1-8775-b48a719804fb`、`228520dc-6230-5bd9-8138-10bfff1ddff9`、`9df9efdc-cb1a-549d-a77c-6bd8389f45de`、`99fd628e-c0ee-5da4-bc12-e0af94299550`、`8746c197-721b-5893-96d8-8fbd664352f5`、`28d6c888-0dce-5bbf-8b15-9dcfb04f0dd3`、`9db89375-84f8-5cb6-a587-8c0669a0f528`、`aaae1ce8-cad8-571d-b04e-b52b6a84512c` 与 `5ad680ad-4a73-52de-8e96-e7b30b79293b`：
+依据消息 `c533cdfa-7b30-52f8-8383-f0dc5ba85667`、`dd55b063-0595-5f6c-8f8b-c2811cb34ed9`、`42dc6b1d-66a5-5d18-879f-b16e8c6c4b00`、`c05987a7-a88b-5ee1-8775-b48a719804fb`、`228520dc-6230-5bd9-8138-10bfff1ddff9`、`9df9efdc-cb1a-549d-a77c-6bd8389f45de`、`99fd628e-c0ee-5da4-bc12-e0af94299550`、`8746c197-721b-5893-96d8-8fbd664352f5`、`28d6c888-0dce-5bbf-8b15-9dcfb04f0dd3`、`9db89375-84f8-5cb6-a587-8c0669a0f528`、`aaae1ce8-cad8-571d-b04e-b52b6a84512c`、`5ad680ad-4a73-52de-8e96-e7b30b79293b`、`94e9eff5-1cb6-513d-af47-fc0e64aaf632`、`6052b0a4-730f-5bad-bf10-aa06abf97a0d`、`0d9124d3-ef6c-56c8-9584-0519a1133149`、`7222091c-de2f-51f2-9a10-29aab489f1e1`、`ef0e8271-2df2-59f2-97a5-57e5feaa439b` 、`4d9c842a-a040-5652-8984-ff1bc4d28ae0`、`f5165cac-a8b2-5f53-88ae-6062f6c92d2a` 与 `1f2a869b-8796-5074-ae5d-a1f3cfb3efaf`：
 
 - 页面以 [design](design/README.md) 中第 14 阶段的效果图为准：效果图上的每个字段都有真实的数据来源，建成的页面与效果图一致，验收以真实浏览器的截图与效果图对照，与第 13 阶段相同。页面只给出面向人的写法，不显示原始 JSON。效果图的对齐修正作为单独的改动，同时应用到 design 与已建的页面。
-- 第 14 阶段新增三个插件，各在自己的新仓库中维护，都在 server 的默认组合中：会话模块 server-conversation、活动模块 server-activity 与用量插件 server-usage。
+- 第 14 阶段新增四个插件，各在自己的新仓库中维护：server 默认组合中的会话模块 server-conversation、活动模块 server-activity 与用量插件 server-usage，以及节点端的 starlink-conversation，由会话模块按需安装到节点上。
 - 会话、消息与提醒留在节点上，server 经 call 读取，不保存副本，与 0.2 相同；节点上报的事件由活动模块持久化，回合、用量与动态由它投影。
+- server 的功能在节点上需要的读取由该功能自己的插件提供，消息与提醒插件不为这些读取改动：节点端的读取由独立的包 bazaar-contrib-starlink-conversation 提供，名字表明它只服务 server 经 starlink 的调用；它经 accept 的 DB 直接读取这些插件在节点数据库中的表。电脑连上 server 即表示使用这些功能：节点没有这个入口时，server 直接经节点 manager 的 contrib add 安装并启用它。
 - 工具调用按种类完整显示：命令写出命令文本、工作目录、退出码、时长与可展开的输出；文件的读取、列出与搜索写出路径或查询；网页写出地址或查询；MCP 写作「服务 / 工具」并附参数摘要；每次调用写出结果。这些字段由 harness 契约承载，codex 与 claudecode 按各自协议中的真实字段给出；运行时没有给出的字段不显示，例如 Claude Code 不报告退出码与工作目录。
 - 等待审批的联系人收到的自动回复沿用 0.2 的 `review.reply`，显示在审批卡片旁，并在那里编辑。
 - 移除群聊或私聊即撤销审批：会话信息中「审批 · 已允许」一行的「撤销」打开就地的确认，说明 agent 会停止回复、之后的消息照常保存、对方下次发消息时会话回到新联系人等待审批、设了自动回复的先收到自动回复；确认按钮为「不再回复」，提交 denied，与 0.2 移除会话时提交 review=denied 相同。私聊与群聊相同。
@@ -452,7 +454,7 @@ server-agent 对所有插件使用同一套画法：字符串为输入框，枚�
 
 #### 会话的 remote
 
-messages-node 的 remote `messages` 在 `request` 之外增加下列成员。读取经该 agent 运行中的消息绑定进行，以 agent 本身为读取者，与 0.2 的 server 读取以及 collaboration 的 `pending_contacts` 相同；agent 没有运行时，成员以 Agent is not available 失败。会话以 thread id 指定，每页 50 个，与 0.2 相同。这些成员与其他 remote 成员一样经 starlink 调用，每次限时 60 秒，节点退出时随 starlink 的在途调用一起结束。
+新仓库 open-bazaar/contrib-starlink-conversation 的 bazaar-contrib-starlink-conversation 提供节点端的入口 `starlink-conversation`。它 accept MESSAGES 与 REMINDER 声明对 messages-node 与 reminder 的依赖，使它们先于本入口启动、表已建好，节点缺少其一时本入口不启动，依据消息 `9447a9b9-b1d3-52b6-a9f6-596160a31644`：MESSAGES 取自接口包 bazaar-contrib-messages，REMINDER 取自只有一种实现的 bazaar-contrib-reminder，两者只用于声明依赖。读取只经 accept 的 DB，以 storage 的查询对象直接读取节点上会话、消息、入站附件与提醒的表，不依赖、也不导入 messages-node 与 agent-command 的包，依据消息 `8b0409a9-a639-5fcd-ab8c-fb673a583ef5`：插件只能依赖接口包；只会有一种实现的插件，接口与实现可以同在一个包中供依赖，另有接口包、会有多种实现的插件（如 messages 之下的 messages-node）只能经接口 accept，依据消息 `38060550-f430-5d58-8b4f-1df88ceb2645` 与 `fcf21a4c-e740-5255-a525-20c63513d751`。它 offer CONVERSATION，并以 RemoteEntry 登记 remote `conversation`，成员如下。读取不经 agent 的运行中绑定，agent 停止时同样可用。会话以 thread id 指定，每页 50 个，与 0.2 相同。这些成员与其他 remote 成员一样经 starlink 调用，每次限时 60 秒，节点退出时随 starlink 的在途调用一起结束。
 
 - `conversations(agent_id, review, offset=0, limit=50)`：review 为 approved 或 pending。会话按最后活动从新到旧排列，即节点现有目录的顺序。结果给出该审批状态的会话总数、等待审批的会话数与是否还有下一页，以及每个会话的：
   - thread id、名称与私聊对方的 handle：群聊的名称为 target_display_name；私聊为对方最近一条消息的发送者显示名，没有时为 handle；
@@ -461,8 +463,9 @@ messages-node 的 remote `messages` 在 `request` 之外增加下列成员。读
   - 第一条与最新一条消息：message id、发送者显示名、发送者类型、时间与正文的前 240 个字符，240 与节点搜索摘要的长度相同。
 - `conversation(agent_id, thread_id)`：一个会话的上述内容，加上首次联系的时间（channel_sessions 的 created_at_ms）、消息数（读取范围与 history 相同）与成员。成员按最近一次发言从新到旧排列，各给出发送者 id、名称、显示名、发送者类型（人类、智能体或系统）与是否为本 agent。
 - `history(agent_id, thread_id, around=None, limit=50)`：任意审批状态的会话都可以读取，读取范围与现有的 read_messages 相同，即入站消息与 queued、sent 的出站消息。给出 around 时以该消息为中心，没有时从会话开头读起；结果带 has_before 与 has_after。每条消息给出 message id、seq、方向、发送者（id、名称与显示名）、发送者类型、时间（provider_time，没有时为 received_at）、正文、system_message_kind，以及附件的 attachment id、名称、kind、状态、media_type 与大小。
-- `search(agent_id, query, sort, thread_id=None, sender=None, after_ms=None, before_ms=None, offset=0, limit=20)`：以现有的 search_messages 查询任意审批状态的会话，筛选与 0.2 相同，为会话、发送者（self、handle 或 id）与时间，sort 为 relevance 或 time。结果在现有内容之外给出匹配的总数与每条命中的相关度分值，即节点排序所用表达式的值；命中所在会话的名称按 `conversations` 的规则给出。
-- `attachment(agent_id, attachment_id, offset=0)`：一个状态为 ready 的入站附件从 offset 起的一段，给出 media_type、总大小与这一段的字节（base64）。文件按附件记录的相对路径在 agent 的工作区中读取。每段 512 KiB，base64 编码后约 683 KiB，留在 starlink 回传结果的 1 MiB 上限之内。
+- `search(agent_id, query, sort, thread_id=None, sender=None, after_ms=None, before_ms=None, offset=0, limit=20)`：检索在本入口中以消息表及其全文索引实现，查询任意审批状态的会话，筛选与 0.2 相同，为会话、发送者（self、handle 或 id）与时间，sort 为 relevance 或 time。结果在现有内容之外给出匹配的总数与每条命中的相关度分值，即节点排序所用表达式的值；命中所在会话的名称按 `conversations` 的规则给出。
+- `attachment(agent_id, attachment_id, offset=0)`：一个状态为 ready 的入站附件从 offset 起的一段，给出 media_type、总大小与这一段的字节（base64）。文件按附件记录的相对路径在该 agent 的工作区中读取，工作区为 BCN_HOME 下的 .bcn/workspaces/<agent id>，没有 BCN_HOME 时在用户主目录下，与 0.2 相同。每段 512 KiB，base64 编码后约 683 KiB，留在 starlink 回传结果的 1 MiB 上限之内。
+- `reminders(agent_id, thread_id=None)`：按下次触发时间列出该 agent 状态为 scheduled 的提醒，给出 thread_id 时只列该会话的；每个提醒给出 reminder id、所属会话的 thread id、名称（命名规则与 `conversations` 相同）与类型、标题、下次触发时间、repeat_rule 与时区。repeat_rule 为节点的规范写法：`every:<N><m|h|d>`、`daily@HH:MM` 或 `weekly:<星期>@HH:MM`。
 
 #### 审批与自动回复
 
@@ -471,8 +474,14 @@ messages-node 的 remote `messages` 在 `request` 之外增加下列成员。读
 
 #### 提醒
 
-- reminder 的 remote `reminder` 增加 `reminders(agent_id, thread_id=None)`：直接读取 reminder 的存储，agent 没有运行时同样可用，与 collaboration 的 `setting` 相同。结果按下次触发时间列出该 agent 状态为 scheduled 的提醒，给出 thread_id 时只列该会话的；每个提醒给出 reminder id、所属会话的 thread id、标题、下次触发时间、repeat_rule 与时区。repeat_rule 为节点的规范写法：`every:<N><m|h|d>`、`daily@HH:MM` 或 `weekly:<星期>@HH:MM`。
+- 提醒由节点端入口的 `reminders` 读取，见上。
 - `reminder.fired` 在审计上下文中带上它写入会话的系统消息的 message_id。
+
+#### 在节点上启用
+
+- manager 以 RemoteEntry 把 CONTRIB_MANAGER 登记为 remote `contrib-manager`，成员为 `add(name, source=None, version="", enable=None, config=None)` 与 `operation(id)`。add 与 `bcn contrib add` 走同一个方法：经目录选包，选不到时直接报错；选到后返回进行中的操作，安装完成后按 enable 启用条目（None 不启用，空字符串启用全部条目，名称只启用该条目），config 为条目配置；operation 给出操作的状态与结果。CLI 调用 add 后等待操作完成。
+- sidecar 监听 CONTRIB_CHANGED：条目启动、停止或移除时，它在线程中重新读取已装的包以 `bazaar_compute_node.remotes` 声明的 remote，此后的调用按新的表分派。manager 装好并启用的入口因此不经重启即可调用；停用的入口在调用时立即失败，卸载的包的 remote 随之去掉。依据消息 `df1a9853-5b67-563e-b9a5-d2cde6b4e0aa` 与 `b64bb9bc-70a9-5953-8bc4-7b36c32f460d`。
+- 会话模块调用节点的 `conversation` 时，节点没有这个服务，call 以 LookupError 失败；会话模块随即按自己声明的兼容版本范围调用该电脑 manager 的 add，安装 bazaar-contrib-starlink-conversation 并启用 `starlink-conversation`，轮询 operation 直到完成，再重新读取。处理请求的进程为每台电脑记下进行中的安装，同一台电脑同时只有一次；add 报错或 operation 失败时记下错误，之后读取该电脑时仍没有这个服务，就再装一次。
 
 #### 回合与发送的关联
 
@@ -506,7 +515,7 @@ codex 依据 app-server 协议的 ThreadItem 与通知：
 
 - commandExecution 为 command：command、cwd、exitCode、durationMs 与 aggregatedOutput 分别给出 command、cwd、exit_code、duration_ms 与 output；commandActions 照录为 actions，read、listFiles、search 与 unknown 各给出这一段的 command 以及 path 或 query。codex 给出的 command 带外层的 shell，例如 `/bin/bash -lc '…'`，各段的 command 是其中的命令。
 - mcpToolCall 为 mcp：server、tool 与 arguments 照录，result 取结果 content 中的文字，durationMs 为时长；失败照旧取 error.message。
-- fileChange 为 change，取 changes 中的 path 与 kind；webSearch 为 web，action 的 search、openPage 与 findInPage 分别给出 search（query）、open（url）与 find（url，pattern 作为 query）；imageView 为 file 的 read（path）；collabAgentToolCall 为 agent，description 取 prompt；其余的项为 other。没有 durationMs 的项，时长为 completedAtMs 减 startedAtMs。
+- fileChange 为 change，取 changes 中的 path 与 kind；webSearch 为 web，action 的 search、openPage 与 findInPage 分别给出 search（query）、open（url）与 find（url，pattern 作为 query），action 为空（开始时）或为 other 时为 search，query 取项上的 query；imageView 为 file 的 read（path）；collabAgentToolCall 为 agent，description 取 prompt；其余的项为 other。没有 durationMs 的项，时长为 completedAtMs 减 startedAtMs。
 - 模型：每个回合开始时给出 ModelUpdated，turn/start 带 model 时取它，否则取 thread/start 或 thread/resume 应答中的 model；收到 model/rerouted 时以 toModel 再给出一次，该通知不再落入丢弃的分支。
 
 claudecode 依据 stream-json 中 tool_use 的 name 与 input：
@@ -528,14 +537,14 @@ claudecode 依据 stream-json 中 tool_use 的 name 与 input：
   - 不带「前」的时间距离：「刚刚」「2 分钟」「2 小时」；
   - token 数：不足 100 时写原数；不足 100k 时以 k 为单位保留一位小数，小数为 0 时省略，例如「0.3k」「38.2k」「12k」；100k 起取整，例如「412k」；1M 起以 M 为单位保留两位小数，例如「1.24M」。server-agent 现有的 tokens 过滤器移入并改用这一写法。
 - server-access 的 ACCESS 增加带标签的签名：`sign(label, value)` 以 session.key 对「标签:值」做 HMAC-SHA256；`verify(label, value, signature)` 以恒定时间比较。0.2 的图片地址即以 `image` 为标签。
-- server-overview 的登记项增加顺序（order）、占用的行数（rows，1–2，缺省 1）与窄屏是否显示（narrow，缺省显示）。没有调整过顺序的账户按登记项的顺序看到概览，概览的网格按列数与行数排布，例如两行高的摊位右侧依次是需要你处理与集市动态。
+- server-overview 的登记项增加顺序（order）与占用的行数（rows，1–2，缺省 1）。没有调整过顺序的账户按登记项的顺序看到概览，概览的网格按列数与行数排布，例如两行高的摊位右侧依次是需要你处理与集市动态；窄屏为一列，全部内容按顺序竖排。
 - server-computer：
   - 处理请求的进程在电脑每次出现时，经 TIMER 把对它的检查推迟到 60 秒之后；到期时中转记录的最后出现时间没有变化，就 announce `COMPUTER_LEFT`，带电脑 id 与最后出现的时间。60 秒即在线的判定时长；多个副本各自 announce 时，活动模块按电脑与最后出现的时间去重。退出时撤销尚未到期的检查。
   - COMPUTERS 增加摊位内容的登记 `stall(src)`：摊位卡片在标题行之下以 iframe 载入登记的地址，地址带电脑的短编号；同时只有一个登记。
   - 摊位的概览登记项改为占两行，顺序在用量之后。
-  - 删除电脑时不再删除 events 中它的行，改由活动模块在 COMPUTER_REMOVED 时删除；这一改动在活动模块接管 events、去掉外键之后发布。
+  - 删除电脑时不再删除 events 中它的行，改由活动模块在 COMPUTER_REMOVED 时删除；这一改动在 server-migrations 去掉 events 的外键、活动模块接管 events 之后发布。
 - server-agent 提供公共服务 `AGENTS`：
-  - 详情 tab 的登记 `tab(AgentTab)`：键、名称的文案键、图标、顺序、在 iframe 中载入的地址、查看所需的权限点、可选的计数主题，以及可选的上级 tab。地址带 agent 的短编号，与详情页的相同；带上级 tab 的登记不出现在 tab 栏中，打开时高亮它的上级，例如完整活动记录在动态之下。server-agent 自己的工作区、技能与配置照旧，tab 按顺序排列，共享照旧为按钮。
+  - 详情 tab 的登记 `tab(AgentTab)`：键、名称的文案键、图标、顺序、在 iframe 中载入的地址、查看所需的权限点、可选的计数主题，以及可选的上级 tab。地址带 agent 的短编号，与详情页的相同；带上级 tab 的登记不出现在 tab 栏中，打开时高亮它的上级，例如完整活动记录在动态之下。详情页地址中 tab 与 kind 之外的查询参数原样带给所开 tab 的 iframe，例如完整活动记录的 turn。server-agent 自己的工作区、技能与配置照旧，tab 按顺序排列，共享照旧为按钮。
   - 动态区块的登记 `section(AgentSection)`：键、在 iframe 中载入的地址、所在的栏（主栏或侧栏）、顺序、查看所需的权限点，以及窄屏是否显示。动态 tab 由登记的区块组成，宽屏为主栏与侧栏两栏，窄屏为一栏，主栏在前。
   - 读取 `agents(account)` 与 `agent(account, agent_id)`：账户可见（agents.view）的 agent，各带电脑 id、名称、电脑是否在线、`agent-configuration.list` 给出的配置，以及最后一次取得的 `agent-activity.agents`；取得与缓存沿用第 13 阶段的规则。
   - server-agent 自己登记动态的状态区块（侧栏，顺序 10，窄屏不显示）：每个渠道一组，写出连接状态（正常、重新连接中与第几次、已断开）、机器人、连接于、最后活动（最后收到消息的时间）与最近错误，可以手动刷新。第 13 阶段动态中的智能体状态、运行时与今日用量卡片由第 14 阶段的各区块取代。
@@ -547,8 +556,9 @@ claudecode 依据 stream-json 中 tool_use 的 name 与 input：
 
 #### 表
 
-- 以 bazaar-contrib-server-migrations 的 v7 为前身：第 1 版以 0.2 的 events 为基线，旧库接续时接管该表；第 2 版：
-  - 把 events 重建为不带外键的表，数据原样保留，并加入 envelope、session_id、turn_id 与 message_id 列。0.3 的行在 payload 中保存审计事件的 payload，在 envelope 中保存其余的信封字段（id、level、error、context 与 observed_at_ms）；0.2 的行 envelope 为空，session_id 与 turn_id 取自 0.2 关联中的 runtime_session_id 与 turn_id。唯一约束照旧为电脑、run_id 与 seq，另按 turn 与 message_id 建索引。
+- bazaar-contrib-server-migrations 增加第 8 版：从 0.2 升级时把 events 重建为不带外键的表，数据与索引原样保留，与是否启用 server-activity 无关。events 的外键不等接管它的模块去掉，因为删除电脑的 server-computer 不接管 events。
+- server-activity 以它为前身：第 1 版以不带外键的 events 为基线，旧库接续时接管该表；第 2 版：
+  - 把 events 重建，数据原样保留，并加入 envelope、session_id、turn_id、message_id 与 contact 列。contact 标出开出新会话且等待审批的入站消息，即 channel_session_mapping 为 created、review 为 pending 的 `channel.inbound.persisted`：0.3 的行在写入时设置，0.2 的行在建立时按同样的条件设置。0.3 的行在 payload 中保存审计事件的 payload，在 envelope 中保存其余的信封字段（id、level、error、context 与 observed_at_ms）；0.2 的行 envelope 为空，session_id 与 turn_id 取自 0.2 关联中的 runtime_session_id 与 turn_id。唯一约束照旧为电脑、run_id 与 seq，另按 turn 与 message_id 建索引。
   - 新建 turns：电脑、agent、turn id、session id、会话的 thread id、渠道、会话类型、运行时连接名、模型、触发消息的 message id、开始与结束时间、结果与失败原因、本轮的输入、缓存命中与输出 token 数和费用、按种类计的工具调用次数，以及当前的步骤（回复、思考或工具）与它开始的时间；以电脑、agent 与 turn id 为键。
   - 新建 usage：每条用量事件一行，记电脑、agent、运行时会话、turn、时间、相对同一会话上一行的增量（输入、缓存命中、输出与费用）与该会话的累计值。
   - 新建 departures：电脑与最后出现的时间，两者为键。
@@ -594,19 +604,19 @@ claudecode 依据 stream-json 中 tool_use 的 name 与 input：
 
 - 动态的区块，经 AGENTS 登记：
   - 正在处理（主栏，顺序 10）：每个进行中的回合一张卡片，标题为「正在处理」加会话名称，旁边是渠道的 logo 与会话类型，以及从开始起算的计时；其下是触发它的消息（发送者与正文，提醒为标题）；步骤为本轮的工具调用，完成的打勾并写时长；当前步骤为回复时写「正在写回复…」，为思考时写「正在思考…」，并写这一步的计时；底部为本轮的输入、输出、缓存命中与已调用工具的次数。窄屏按效果图省去渠道、动词与时长。
-  - 今天（主栏，顺序 20）：标题旁为今天的回合数与失败数，右侧链接到完整活动记录；今天开始的回合从新到旧，每行为开始时间、来源（提醒到期，或渠道的 logo 加会话名称）、触发的文字、结果（完成、失败或进行中）、时长与 tokens。宽屏按卡片的高度列出，窄屏列出最新的 3 个。
+  - 今天（主栏，顺序 20）：标题旁为今天的回合数与失败数，取消的回合不算失败，右侧链接到完整活动记录；今天开始的回合从新到旧，每行为开始时间、来源（提醒到期，或渠道的 logo 加会话名称）、触发的文字、结果（完成、失败、已取消或进行中）、时长与 tokens。宽屏按卡片的高度列出，窄屏列出最新的 3 个。
   - 今日用量（侧栏，顺序 20）：今天的 tokens、费用与缓存命中，以及 24 根按查看者时区逐小时的柱子，高度相对当天最大的一小时，没有用量的小时为短桩，当前小时着色。
-- 完整活动记录经 AGENTS 登记为动态之下的 tab：事件从新到旧、按天分组，每页 50 条，与 0.2 相同，末尾为「加载更早的记录」；新的事件经统一总线加在顶部。筛选为全部、回合、渠道、运行时、提醒与失败。各行的来源与写法：
-  - 智能体：`harness.turn.requested` 为「开始处理」加会话名称，说明为模型；`harness.completed` 为「本轮完成」，右侧为时长、输入、输出、缓存命中与工具次数；`harness.failed` 为本轮失败与原因；
+- 完整活动记录经 AGENTS 登记为动态之下的 tab：事件从新到旧、按天分组，每页 50 条，与 0.2 相同，末尾为「加载更早的记录」；新的事件经统一总线加在顶部。以 `turn` 参数打开时，从该回合最新的一行起往更早载入一页，该回合的各行底色标出，顶上带「回到最新」；回执即以此链到它的回合，ACTIVITY 给出的回执因此带上回合的 turn id。筛选为全部、回合、渠道、运行时、提醒与失败。各行的来源与写法：
+  - 智能体：`harness.turn.requested` 为「开始处理」加会话名称，说明为模型；`harness.completed` 为「本轮完成」，右侧为时长、输入、输出、缓存命中与工具次数；`harness.failed` 为本轮失败与原因；`harness.cancelled` 为「本轮取消」；
   - 渠道：`channel.inbound.persisted` 为「收到 X 在 Y 的消息」，说明为正文；`channel.outbound.sent`、`partial` 与 `queued` 为「回复了」加会话名称，说明为正文，`failed` 与 `unknown` 为发送失败；`channel.connection.connected` 在同一连接失败之后为「重新连上」，否则为「连上」，说明为机器人；`channel.connection.failed` 为连接失败、错误与下次重试；
   - 运行时：`harness.tool.completed` 与 `harness.tool.failed` 按上面的种类写出，载荷被 starlink 去掉时，按同一 call id 的 `harness.tool.started` 写出，并注明「输出过大，未上报」；`harness.pool.banned` 为「A 被限流，改用 B」，没有 fallback 时为「A 被限流」，说明为会话名称；连接的模型取该连接最近一次报告的模型，还没有报告时取配置中的 model；
   - 提醒：`reminder.fired` 为「提醒到期」加标题，说明为会话名称；
-  - 失败筛选列出上面标为失败的行。0.2 的行按 0.2 的事件名列入同一类，0.2 没有记录的模型与工具字段不写。
-- 摊位中的智能体，经 COMPUTERS 的 `stall` 登记：该电脑上账户可见的 agent，每个一行，为灯笼、名字、渠道与运行时的 logo，以及一句近况：进行中的回合写「正在处理」加会话名称与计时；空闲时写「空闲」与最后一次活动的时间，最后一次活动是回复时写成「在 Y 回复了 X」；电脑离线时写「电脑离线」。
-- 集市动态是概览内容（键 feed，一列，顺序 40，窄屏不显示），标题为「集市动态」：账户可见的 agent 与电脑的近况，从新到旧，取最新的 50 条，按卡片的高度显示；每条为图标、加粗的主语与事件，以及不带「前」的时间距离：
+  - 失败筛选列出上面标为失败的行，取消的回合不在其中。0.2 的行按 0.2 的事件名列入同一类，0.2 没有记录的模型与工具字段不写。
+- 摊位中的智能体，经 COMPUTERS 的 `stall` 登记：该电脑上账户可见的 agent，每个一行，为灯笼、名字、渠道与运行时的 logo，以及一句近况：进行中的回合写「正在处理」加会话名称与计时；空闲时写「空闲」与最后一次活动的时间，最后一次活动是回复时写成「在 Y 回复了 X」；电脑离线时写「电脑离线」。行末为近七天的走势：每 6 小时的回合数，共 28 个点，按查看者所在时区的零点对齐。
+- 集市动态是概览内容（键 feed，一列，顺序 40），标题为「集市动态」：账户可见的 agent 与电脑的近况，从新到旧，取最新的 50 条，按卡片的高度显示；每条为图标、加粗的主语与事件，以及不带「前」的时间距离：
   - 开始处理：`harness.turn.requested`，主语为 agent；
   - 回复：sent、partial 与 queued 的出站事件，写作「在 Y 回复了 X」，X 为 reply_to_message_id 所指消息的发送者，没有时省去；
-  - 新联系人：开出新会话且等待审批的 `channel.inbound.persisted`，私聊写作「X 请求私聊 A」，群聊写作「Y 想让 A 加入群聊」；
+  - 新联系人：events 中 contact 标出的 `channel.inbound.persisted`，私聊写作「X 请求私聊 A」，群聊写作「Y 想让 A 加入群聊」；
   - 回合的工具调用：有工具调用的回合结束时，按回执的写法汇总本轮全部调用，例如「运行了 6 条命令」，主语为 agent；
   - 提醒到期：`reminder.fired`，写作「A 的提醒到期：标题」；
   - 断开连接：departures，主语为电脑。
@@ -615,20 +625,20 @@ claudecode 依据 stream-json 中 tool_use 的 name 与 input：
 
 ### 会话模块 server-conversation
 
-- 新仓库 open-bazaar/contrib-server-conversation 的 bazaar-contrib-server-conversation 提供 `server-conversation`，accept SERVER、ACCESS、OVERVIEW、COMPUTERS、AGENTS 与 ACTIVITY，offer `CONVERSATIONS`，以 server 本体的 `module("chats", …)` 提供页面。仓库按现有 contrib 仓库建立 CI 与发版流程，包登记到 contrib-index。
+- 新仓库 open-bazaar/contrib-server-conversation 的 bazaar-contrib-server-conversation 提供 server 端的 `server-conversation`，并声明它兼容的 bazaar-contrib-starlink-conversation 版本范围，在节点上按这个范围安装。`server-conversation` accept SERVER、ACCESS、OVERVIEW、COMPUTERS、AGENTS 与 ACTIVITY，offer `CONVERSATIONS`，以 server 本体的 `module("chats", …)` 提供页面。仓库按现有 contrib 仓库建立 CI 与发版流程，包登记到 contrib-index。
 - 权限点 agents.approve 由它经 server 本体的 `permission` 登记，并以 ACCESS 的 `points` 在 `agent` 上追加，导入的 0.2 分享照常生效。允许、拒绝与撤销需要该 agent 的 agents.approve；编辑自动回复需要 agents.update，与 0.2 在 agent 配置中编辑它时相同；其余页面需要 agents.view。
 - CONVERSATIONS 给出账户可见的、等待审批的会话数，供用量插件的概况使用。
 
 #### 数据
 
-- 会话模块没有自己的表。每个 agent 的会话经 call 取得：`messages.conversations` 给出列表，`messages.conversation` 与 `messages.history` 给出会话的信息与消息，`messages.search` 给出搜索结果，`reminder.reminders` 给出提醒，`collaboration` 的成员完成审批与自动回复。
+- 会话模块没有自己的表。每个 agent 的会话经 call 取得：`conversation.conversations` 给出列表，`conversation.conversation` 与 `conversation.history` 给出会话的信息与消息，`conversation.search` 给出搜索结果，`conversation.reminders` 给出提醒，`collaboration` 的成员完成审批与自动回复。
 - 等待审批的会话与会话总数缓存在处理请求的进程中：该 agent 的消息事件游标没有变化、且结果不满 60 秒时沿用，否则在电脑在线时重新下发；同一个 agent 同时只有一次在途，节点没有回应时保留上次的结果，与第 13 阶段相同。
-- 跨 agent 的列表与搜索合并各 agent 的结果：列表按最后活动排列，搜索按所选的顺序排列，最相关时按节点给出的分值；翻页时记下每个 agent 已读到的位置。电脑离线或 agent 没有运行时，它的会话暂时不在列表中，列表上方写明暂时看不到的 agent。
-- 正在处理与回执取自 ACTIVITY：会话中有进行中的回合时，消息末尾写「正在处理」与计时；agent 的回复下方写这条回复的回执，点开后转到完整活动记录中的这个回合。
+- 跨 agent 的列表与搜索合并各 agent 的结果：列表按最后活动排列，搜索按所选的顺序排列，最相关时按节点给出的分值；翻页时记下每个 agent 已读到的位置。电脑离线或会话功能正在它上面安装时，它的 agent 的会话暂时不在列表中，列表上方写明暂时看不到的 agent 及原因：电脑离线、正在这台电脑上启用会话功能，或安装失败时的错误。
+- 正在处理与回执取自 ACTIVITY：会话中有进行中的回合时，消息末尾写「正在处理」与计时；agent 的回复下方写这条回复的回执，点开后转到完整活动记录中的这个回合，即 `/agents/<短编号>?tab=log&turn=<turn id>`。动态的提醒区块写出的会话名称取自节点 `reminders` 给出的名称。
 
 #### 图片
 
-- 附件中的图片在消息中直接显示，宽度与效果图相同，下方写文件名与大小；其他附件只写文件名与大小。图片地址为 `/ui/chats/files/<agent 的短编号>/<attachment id>` 加 ACCESS 以 `attachment` 为标签对 agent id 与 attachment id 的签名；请求时校验签名与账户在该 agent 上的 agents.view，再按段经 `messages.attachment` 读取并依次写出，每段是一次限时 60 秒的 call。响应带 `Cache-Control: private, max-age=86400`、`Content-Security-Policy: sandbox` 与 `X-Content-Type-Options: nosniff`，附件按 id 不会改变。
+- 附件中的图片在消息中直接显示，宽度与效果图相同，下方写文件名与大小；其他附件只写文件名与大小。图片地址为 `/ui/chats/files/<agent 的短编号>/<attachment id>` 加 ACCESS 以 `attachment` 为标签对 agent id 与 attachment id 的签名；请求时校验签名与账户在该 agent 上的 agents.view，再按段经 `conversation.attachment` 读取并依次写出，每段是一次限时 60 秒的 call。响应带 `Cache-Control: private, max-age=86400`、`Content-Security-Policy: sandbox` 与 `X-Content-Type-Options: nosniff`，附件按 id 不会改变。
 - 正文中以 Markdown 写出的 http(s) 图片沿用 0.2 的代取：地址为 `/ui/chats/images?u=<地址>&s=<签名>`，签名以 `image` 为标签；只接受 http 与 https，主机须解析为公网地址，最多跟随 3 次重定向且每次重新检查，整体限时 20 秒并经 TIMER，上游须为 image/* 且声明的长度不超过 10 MiB，按 64 KiB 读取并在超过 10 MiB 时停止，响应头与上面相同；签名不符为 403，其余失败为 502。
 
 #### 页面
@@ -644,7 +654,7 @@ claudecode 依据 stream-json 中 tool_use 的 name 与 input：
 - 搜索：结果代替列表，为找到的条数、会话、发送者与时间的筛选和排序（最相关或最新）；每条命中为会话、所属 agent、「发送者：摘要」与时间，匹配的词按节点给出的片段标出。打开命中时，消息区以它为中心载入，命中的一条底色标出，并带「回到最新」。会话筛选列出范围内 agent 的会话，发送者筛选列出所选会话的成员与 agent 自己，时间为今天、近 7 天、近 30 天与不限。
 - 智能体详情的会话 tab，经 AGENTS 登记在动态之后，计数为该 agent 的会话总数：左侧为会话与新联系人两个子 tab，每行为头像与渠道 logo、名称、「群聊 · N 位成员」或「私聊」、最新一条消息、时间与 agent 未读的消息数；右侧为新联系人的卡片（允许与拒绝）与自动回复。点开一行时转到会话页中的这个会话。
 - 动态的提醒区块（侧栏，顺序 30，窄屏不显示），经 AGENTS 登记：待触发的提醒数，每个为触发时间与「标题 · 会话名称」。
-- 需要你处理是概览内容（键 attention，一列，顺序 30，窄屏不显示）：标题旁为条数，右侧「全部」打开会话页的新联系人；各条从新到旧，为账户可见的新联系人（私聊附第一条消息，群聊附成员数与第一条消息距今多久，都带允许与拒绝），以及 AGENTS 给出的状态为出错的 agent，写作「A 在 <电脑> 上启动失败」，下方为原因，即智能体列表中「出错」所写的原因。
+- 需要你处理是概览内容（键 attention，一列，顺序 30）：标题旁为条数，右侧「全部」打开会话页的新联系人；各条从新到旧，为账户可见的新联系人（私聊附第一条消息，群聊附成员数与第一条消息距今多久，都带允许与拒绝），以及 AGENTS 给出的状态为出错的 agent，写作「A 在 <电脑> 上启动失败」，下方为原因，即智能体列表中「出错」所写的原因。
 - 统一总线的主题：`chats.count` 为徽标；`chats.list`（范围为智能体筛选）的状态为范围内 agent 的消息事件游标与离线的电脑；`chats.thread`（范围为 agent 与会话）为该会话的消息事件游标与进行中的回合；`chats.agent`（范围为 agent）为会话 tab 的计数。页面随之重新取得变化的部分，与 0.2 相同。
 
 ### 用量插件 server-usage
@@ -657,12 +667,21 @@ claudecode 依据 stream-json 中 tool_use 的 name 与 input：
   - 处理轮次：所选范围内开始的回合数、与前一个同样长的范围相比的升降（今天为较昨日），以及走势：今天为从零点到当前小时的逐小时回合数，近 7 天与近 30 天为逐日；
   - 用量：tokens 与费用，以及输入、缓存命中与输出的构成条与图例。
 - 窄屏按效果图使用短标签，省去走势与构成条。
-- 统一总线的主题 `usage.overview` 的状态为可见 agent 的事件游标、agent 的状态摘要、等待审批的会话数与离线的电脑数，有变化时卡片重新计算。
+- 统一总线的主题 `usage.overview` 的状态为可见 agent 的事件游标、agent 的状态摘要、等待审批的会话数、离线的电脑数与按 15 分钟取整的当前时刻，有变化时卡片重新计算。各时区的整点都落在 15 分钟的整数倍上，查看者所在时区每过一个整点卡片随之重算，没有其他变化时今天与近 7 天、近 30 天的范围也在零点前移。
 
 ### 默认配置与 V4→V5
 
 - server-management 的默认配置加入 server-activity（retention_days = 30）、server-conversation 与 server-usage；~/.bcs 存在时，按 0.2 的规则把 ~/.bcs/config.toml 顶层的 retention_days 写入 server-activity 条目。
 - config-versions 的 V4→V5 转换在 ~/.bcs 存在时声明三者的包并启用其条目，server-activity 条目写入 0.2 的 retention_days。
+
+### 插件索引的刷新
+
+依据消息 `04270749-b887-599d-ba53-1442c8251f44`、`31bc4375-58da-50c6-9906-09c67b98254b`、`803e86d0-5507-590e-9946-ec655e11e78c`、`feed60b1-7b78-5ede-bb60-c9243f4bbc04`、`b11cd361-6bee-526d-a4fa-2ae401619a7a`、`d27e238b-d3d4-55ca-be34-223c68836774`、`83ead17b-be9d-56da-831f-2512ce081d5d`、`53091712-6854-5ef4-adf6-7d6a842d5dbb`、`9c25bc0c-42e5-5fc0-9a61-dcfff69c3e57`、`e76bba68-bdf3-54ca-afa7-f01c6d2c5502`、`20d45d49-1cf5-56a8-a549-60e8645d9bf2`、`e9af99c9-287d-5351-863a-280c20d9bb6c` 与 `1cdf8c35-fc70-5c5e-94d4-eb0f234db53b`，随 Task 65 交付：
+
+- node-management 与 server-management 的默认配置在两份内置索引之后加入 contrib-index 的在线地址 `https://raw.githubusercontent.com/open-bazaar/contrib-index/main/index.json`，并启用 contrib-indexes。config-versions 的 V4→V5 转换此前不写 contrib_indexes，0.2 升级上来的节点没有任何索引；转换改为写入同样的三份索引，并在 contrib-manager 旁启用 contrib-indexes。内置快照照旧保留，在线索引尚未读到时由它提供 contrib-index 的内容；同一个包与来源出现在多份索引中时照旧合为一条。
+- 读取索引不访问网络：http/https 索引只读 manager 数据目录（`<BCN_HOME 或 ~>/.bcn/contrib/indexes`）中刷新写下的缓存文件，没有时为空；内置资源与本地文件照旧在读取时直接读。运行中的节点与各个 bcn 命令是不同的进程，读同一份文件，读取不经 sidecar。
+- ContribCatalog 提供统一的刷新：并发读取配置中全部 http/https 索引，下载后校验再原子写入缓存文件；读取失败时保留原有条目，并把错误写入同一缓存文件，任何进程的 `bcn contrib index list` 都能看到。每个 bcn 命令都会启动 contrib-manager，后台刷新不放在它的 lifespan 中：bazaar-contrib-manager 新增入口 contrib-indexes，没有插件 accept 它，只在 bcn run 激活整个组合时启动，启动后在后台刷新一次，此后经 TIMER 每小时一次。`contrib index add` 加入索引后刷新一次；新增命令 `bcn contrib index refresh` 手动刷新并输出各索引的状态。server 端的手动刷新留给第 15 阶段的市场模块。
+- catalog 在本进程内记下正在失败的索引，一份索引开始失败时发布事件 `CONTRIB_INDEX_FAILED`，载荷为该索引的状态；持续失败不重复发布，恢复后再失败时再发布。node-health 监听该事件并发布审计事件 `contrib.index.refresh_failed`，载荷为索引地址与错误，审计事件经 starlink 送到 server。server 主机没有审计，失败记在 `bcn contrib index list` 的状态中。
 
 ### 验收
 
@@ -752,28 +771,40 @@ claudecode 依据 stream-json 中 tool_use 的 name 与 input：
   - 验证：agent 停下后 `reminders` 仍列出待触发的提醒，并可按会话筛选；提醒触发的回合与 `reminder.fired` 带同一个 message_id；`channel.inbound.persisted` 带所记录消息的 message_id。
   - 验证：回合中经 bcc 发出的回复，其出站事件带该回合的 session id、turn id 与 reply_to_message_id；回合的事件带运行时的连接名；运行时被限流后 `harness.pool.banned` 给出改用的连接名，没有可用的运行时时为空。
   - 验证：`harness.tool.*` 带 call_id，`harness.*` 审计事件中没有 raw；starlink 收到超过一批的事件时以 omitted 代替载荷发出，server 收到的序号连续。
-- Task 60：contrib-codex 与 contrib-claudecode 按 Task 59 的契约给出工具调用的种类、字段与时长，以及每个回合的模型，各自发布 rc。发版顺序为 bazaar-compute（Task 59）、bazaar-contrib-codex、bazaar-contrib-claude-code。
-  - 验证：codex 的 e2e 中，命令给出命令文本、cwd、退出码、时长与输出，读取文件的命令带 actions，非零退出的命令为 tool.failed 并带退出码；MCP 的 test 服务给出 server、tool、arguments 与结果的文字；每个回合给出与 thread/start 应答相同的模型。
-  - 验证：claudecode 的 e2e 中，Bash 给出命令、description、输出与时长，退出码与工作目录为空；Read 与 Edit 分别给出 file 与 change 及其路径；`mcp__test__get_value` 分出 test 与 get_value；每个回合给出 system/init 中的模型。
-- Task 61：server 侧的公共改动：contrib-server 的共用写法，tokens 过滤器由 server-agent 移入；contrib-server-access 带标签的签名；contrib-server-overview 登记项的顺序、行数与窄屏显示；contrib-server-computer 的 COMPUTER_LEFT、摊位内容的登记与摊位的顺序和行数；contrib-server-agent 的 AGENTS（tab 与动态区块的登记、agent 的读取）与按渠道列出的状态区块。发版顺序为 bazaar-contrib-server、bazaar-contrib-server-access、bazaar-contrib-server-overview、bazaar-contrib-server-computer、bazaar-contrib-server-agent。
+- Task 60：contrib-codex 与 contrib-claudecode 按 Task 59 的契约给出工具调用的种类、字段与时长，以及每个回合的模型，各自发布 rc。发版顺序为 bazaar-compute（Task 59）、bazaar-contrib-codex、bazaar-contrib-claude-code。按消息 `1cb7ef16-04ad-5d1e-8977-d577db5efdc3` 与 `025a43ee-e09f-5a57-b85a-5be05acaf9df`，两者的 e2e 沿用已有的任务，在这些任务产生的工具调用上检查新字段。
+  - 验证：codex 的 e2e 中，每个命令给出命令文本、cwd 与时长，退出码为 0 时为 tool.completed，否则为 tool.failed；MCP 的 test 服务给出 server、tool、arguments 与结果的文字；每个回合给出与 thread/start 应答相同的模型。
+  - 验证：claudecode 的 e2e 中，Bash 给出命令、输出与时长，退出码与工作目录为空；`mcp__test__get_value` 分出 test 与 get_value 并给出结果的文字；每个回合给出 system/init 中的模型。
+- Task 61：BCN `0.3-server`：按消息 `0d9124d3-ef6c-56c8-9584-0519a1133149` 与 `ef0e8271-2df2-59f2-97a5-57e5feaa439b`，去掉 Task 59 在 messages-node 与 reminder 上为 server 加的 remote 成员 `conversations`、`conversation`、`history`、`search`、`attachment` 与 `reminders`，以及只为它们写的查询：批量取会话、每个会话的第一条、每个发送者的最新一条、按 id 取附件、历史的 has_after、搜索的总数与分值；事件上的字段保留，即入站与提醒事件的 message_id、出站事件的 session、turn 与 reply_to_message_id、工具事件的 call_id。manager 把 CONTRIB_MANAGER 登记为 remote，成员为 add 与 operation。完成后发布 bazaar-compute 的 rc。
+  - 验证：真实节点经 sidecar 调用 manager 的 add，从测试目录中的本地包源安装一个小包并启用它的条目，operation 依次给出进行中与完成，条目随后运行；再次 add 同一个包照常完成，条目仍只启用一次。
+  - 验证：事件上保留的字段照旧出现。
+- Task 62：server 侧的公共改动：contrib-server 的共用写法，tokens 过滤器由 server-agent 移入；contrib-server-access 带标签的签名；contrib-server-overview 登记项的顺序与行数；contrib-server-computer 的 COMPUTER_LEFT、摊位内容的登记与摊位的顺序和行数；contrib-server-agent 的 AGENTS（tab 与动态区块的登记、agent 的读取）与按渠道列出的状态区块。发版顺序为 bazaar-contrib-server、bazaar-contrib-server-access、bazaar-contrib-server-overview、bazaar-contrib-server-computer、bazaar-contrib-server-agent。
   - 验证：签名对同一标签与值成立，换标签、改值或改签名时不成立。
-  - 验证：概览按登记的顺序、列数与行数排布，两行高的内容右侧依次排下两个一列的内容；窄屏不显示的内容在 390px 下不出现。
+  - 验证：概览按登记的顺序、列数与行数排布，两行高的内容右侧依次排下两个一列的内容；390px 下全部内容按顺序竖排为一列。
   - 验证：电脑停止连接 60 秒后 announce 一次 COMPUTER_LEFT，其间再次出现时不 announce；摊位卡片载入登记的内容。
   - 验证：测试目录中的小包登记的 tab 按顺序出现在 tab 栏中并带计数，带上级的 tab 不在 tab 栏中、打开时高亮上级；动态由登记的区块组成，窄屏不显示的区块在 390px 下不出现；撤销登记后随之消失；AGENTS 的读取只给出账户可见的 agent；状态区块为每个渠道一组。
-- Task 62：新仓库 contrib-server-activity 的 server-activity；随后 contrib-server-computer 删除电脑时不再删除 events。发版顺序为 bazaar-contrib-server-activity、bazaar-contrib-server-computer。测试经 server-computer 的 report 接口上报按契约构造的事件。
-  - 验证：空库建立 events 与三张投影表；0.2 的 v7 库带 0.2 的事件接续后，events 不带外键、行数与内容不变，turns 与 usage 由 0.2 的行建立；再次启动不重复执行。
+- Task 63：contrib-server 的 Pages 给出查看者的时区（zone）；contrib-server-migrations 的第 8 版去掉 events 的外键；新仓库 contrib-server-activity 的 server-activity；contrib-server-agent 中没有内容的动态区块不占位；随后 contrib-server-computer 删除电脑时不再删除 events。发版顺序为 bazaar-contrib-server、bazaar-contrib-server-migrations、bazaar-contrib-server-activity、bazaar-contrib-server-agent、bazaar-contrib-server-computer。测试经 server-computer 的 report 接口上报按契约构造的事件。
+  - 验证：空库建立 events 与三张投影表；0.2 的 v7 库带 0.2 的事件升级后，events 不带外键、行数与内容不变，未启用 server-activity 时删除电脑也不因 events 失败；接续后 turns 与 usage 由 0.2 的行建立，0.2 的新联系人标出 contact；再次启动不重复执行。
   - 验证：同一批事件重复上报只写入一次、投影只更新一次；用量按增量写入，会话重新计数时以新值为增量；保留期按 retention_days 清理，node.health 每台电脑只留一条；删除电脑后四张表中它的行随之删除；重复的 COMPUTER_LEFT 只记一次。
   - 验证：以真实浏览器在 1440px 与 390px 宽度下，动态的正在处理（命令、文件、网页、MCP 与子任务的步骤，以及写回复）、今天与今日用量，完整活动记录的筛选、按天分组与加载更早的记录，摊位中的智能体与集市动态，与 design 中的效果图一致；0.2 的回合与消息出现在完整活动记录中。
-- Task 63：新仓库 contrib-server-conversation 的 server-conversation。测试以真实的节点进程为另一端，与 server-agent 的测试相同。
+- Task 64：BCN `0.3-server` 的 sidecar 监听 CONTRIB_CHANGED 刷新 remote 表；agent 的配置去掉 0.3 新增的 workspace，工作区固定为 BCN_HOME 下的 .bcn/workspaces/<agent id>，与 0.2 相同，不做兼容，依据消息 `d5b8caab-38d9-5db5-920f-1d58a7b0fee6`；用到它的测试，包括 contrib-codex 与 contrib-claudecode 的 e2e，先改为以 BCN_HOME 隔离；新仓库 contrib-starlink-conversation 的节点端入口 `starlink-conversation`，新仓库 contrib-server-conversation 的 server-conversation，以及节点没有 `starlink-conversation` 时经 manager 的安装。测试以真实的节点进程为另一端，与 server-agent 的测试相同。发版顺序为 bazaar-compute、bazaar-contrib-starlink-conversation、bazaar-contrib-server-agent、bazaar-contrib-server-activity、bazaar-contrib-server-conversation；其中 server-agent 把查询参数带给 tab，server-activity 的完整活动记录可以打开到某个回合，依据消息 `c8cc6a62-3d09-5ad4-a156-9e8c562ad21b` 与 `3bd1ddc7-af96-55f8-b586-97617af045a3`。
+  - 验证：真实节点经 manager 的 add 安装并启用一个声明了 remote 的小包后，不经重启即可经 sidecar 调用它的成员。
+  - 验证：节点端：conversations 分别列出已允许与等待审批的会话，按最后活动排列，给出总数、第一条与最新一条消息以及群聊的成员数；conversation 给出首次联系、消息数与成员，本 agent 发过言时在其中；history 读取等待审批与已拒绝的会话，以最新一条为中心与不带中心时各读一次，has_before 与 has_after 与实际一致；search 给出总数与分值，最相关时按分值排列；attachment 逐段读完一个图片附件，拼起的字节与工作区中的文件相同；reminders 列出待触发的提醒并可按会话筛选；agent 停止后这些成员照常可用。
+  - 验证：节点没有 `starlink-conversation` 时，会话模块读取该电脑即经 manager 在兼容的版本范围内装上 bazaar-contrib-starlink-conversation 并启用 `starlink-conversation`，其间会话页的列表上方写明正在这台电脑上启用会话功能，装好后列出该电脑的会话；包源中没有这个包时，列表上方写出 add 给出的错误。
   - 验证：只分享了查看的角色看得到会话，但不能允许、拒绝或撤销，分享了 agents.approve 后可以；agent 的分享页出现 agents.approve；编辑自动回复需要 agents.update。
   - 验证：跨 agent 的列表按最后活动合并并翻页；允许后会话进入会话 tab，拒绝后离开新联系人；撤销后会话离开列表、节点上为 denied，对方再发消息时回到新联系人并先收到自动回复；搜索合并两个 agent 的结果并给出总数，打开命中时以它为中心。
   - 验证：附件图片经签名地址按段取得并显示，签名不符为 403，没有该 agent 的 agents.view 时为 404；Markdown 图片的代取拒绝非公网地址与签名不符的地址。
   - 验证：以真实浏览器在 1440px 与 390px 宽度下完成会话、新联系人的审批与自动回复、撤销、搜索、会话信息、智能体的会话 tab 与需要你处理，与 design 中的效果图一致。
-- Task 64：新仓库 contrib-server-usage 的 server-usage。
+- Task 65：合并只会有一种实现的拆包，依据消息 `a66deef9-1176-5cba-b311-a56e9e7c7afc`、`1f53d261-18ef-58a7-84a5-bd855533e32d`、`a6c30251-43ba-5f9c-b148-ccbc28adb01f` 与 `57a23407-c84d-512c-b2f3-a461caece1e0`：保留接口包的包名，把实现移入，入口名不变，不做兼容。
+  - BCN `0.3-server`：bazaar-contrib-messages 收入 `messages-node` 入口，删除 bazaar-contrib-messages-node；bazaar-contrib-agent 收入 `agent-command` 入口，删除 bazaar-contrib-agent-command；bazaar-contrib-timer 收入 `timer-wheel` 入口，open-bazaar/contrib-timer-wheel 不再发布。默认配置、自举与各包的依赖声明改用合并后的包名。manager 与 node-management 按[插件索引的刷新](#插件索引的刷新)读取与刷新索引。然后发布 bazaar-compute 的 rc。
+  - 依赖这些包的独立仓库随之抬高依赖下限，测试依赖中的 bazaar-contrib-timer-wheel 去掉；contrib-server-management 的默认配置改由 bazaar-contrib-timer 提供 `timer-wheel`，加入 contrib-index 的在线地址并启用 contrib-indexes，随后发布它的 rc；contrib-index 去掉 bazaar-contrib-timer-wheel 的登记，在 bazaar-compute 的 rc 之前合并，内置快照随之不再含它。
+  - 新的 rc 发布后，PyPI 上的 bazaar-contrib-timer-wheel、bazaar-contrib-messages-node 与 bazaar-contrib-agent-command 设为归档，open-bazaar/contrib-timer-wheel 在 GitHub 上设为 archived，依据消息 `748b4ec4-7929-5e52-9c8e-4bab9d8a8156` 与 `c77fb6ba-56bf-524c-a924-1d7e50edd637`。
+  - 验证：节点与 server 照常启动，默认配置只声明合并后的包；原有各包的测试在合并后的包中照常通过；contrib-index 的检查通过。
+  - 验证：在线索引不可达时，列出插件与 contrib add 不等待网络，内置快照中的插件照常可用；刷新成功后在线索引新增的包可以安装；刷新失败保留上一次的结果，节点只发布一次 contrib.index.refresh_failed，恢复后再失败时再发布；`bcn contrib index refresh` 输出各索引的状态；节点停止时后台刷新随之结束；0.2 升级上来的节点的配置含三份索引并启用 contrib-indexes。
+- Task 66：新仓库 contrib-server-usage 的 server-usage。
   - 验证：今天、近 7 天与近 30 天的回合数、升降、走势与用量按事件计算，没有费用的回合不计入费用；概况中数字为 0 的一句省去；以真实浏览器在 1440px 与 390px 宽度下，与 design 中的概览效果图一致。
-- Task 65：contrib-server-management 的默认配置加入 server-activity、server-conversation 与 server-usage，并写入 0.2 的 retention_days；config-versions 的 V4→V5 转换在 ~/.bcs 存在时加入三者并写入 retention_days；contrib-index 登记三个新包，然后发布 bazaar-compute 的 rc，内置索引随之带上它们。发版顺序为 bazaar-contrib-server-management、contrib-index、bazaar-compute。
+- Task 67：contrib-server-management 的默认配置加入 server-activity、server-conversation 与 server-usage，并写入 0.2 的 retention_days；config-versions 的 V4→V5 转换在 ~/.bcs 存在时加入三者并写入 retention_days；contrib-index 登记四个新包，然后发布 bazaar-compute 的 rc，内置索引随之带上它们。发版顺序为 bazaar-contrib-server-management、contrib-index、bazaar-compute。
   - 验证：只装 bazaar-compute 与 server-management 的 host 首次运行即启用三者，retention_days 为 30；以带 retention_days = 7 的 0.2 ~/.bcs 首次运行时，server-activity 条目为 7；已有 0.2 节点配置与 ~/.bcs 时，V4→V5 转换声明三者的包并启用其条目，retention_days 与 0.2 一致；contrib-index 的检查通过。
-- Task 66：两端验收：contrib-server-management 的两端用例加入会话与活动。
+- Task 68：两端验收：contrib-server-management 的两端用例加入会话与活动。
   - 验证：分进程的 server 与节点上，节点的 agent 经 TestChannel 收到首次联系，会话页的新联系人与概览的需要你处理随之出现；允许后 agent 回复，撤销后节点上为 denied；回合、工具调用、用量与回复出现在动态、完整活动记录、集市动态与概览中；附件图片从节点取得并显示。
   - 验证：server 重启后节点重放的事件只记一次；节点停止 60 秒后集市动态出现断开连接。
   - 三平台 CI。

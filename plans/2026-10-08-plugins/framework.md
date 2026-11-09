@@ -1449,7 +1449,7 @@ app 的最小 wheel／sdist 验收使用其自举和通用组合，配置选择 
 
 插件公开 `AGENT` 服务和纯 Python `compose(AgentConfig)`，构造单实体组合；agent 入口逐个用
 `ctx.enable(..., local=(AGENT,))` 管理实例。实体 lifespan 创建所属工作区并提供身份与路径，
-默认沿用 BCN_HOME／home 下 `.bcn/workspaces/<id>`，显式 workspace 可选择实际项目路径。
+工作区固定为 BCN_HOME／home 下 `.bcn/workspaces/<id>`，与 0.2 相同。
 工作区通过工作线程创建并沿用原权限；退出后保留持久文件，消费者先于所属实体退出。
 全新配置启用 agent，`config.agents=[]` 时保持实体数为零。持久数据服务与执行服务在消费它们的后续 commit 接入。
 
