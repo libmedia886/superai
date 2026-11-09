@@ -25,6 +25,7 @@ from bazaar_contrib_reminder.concurrency import ThreadLockRegistry
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     directory: Path
+    agents: tuple[str, ...] = ("Cloud", "Tifa")
 
 
 @asynccontextmanager
@@ -61,6 +62,8 @@ async def lifespan(ctx: Context, config: Config):
                 ("Cloud", Mode.SESSION),
                 ("Tifa", Mode.DANGEROUS_INDIVIDUAL),
             ):
+                if name not in config.agents:
+                    continue
                 workspace = config.directory / name
                 await asyncio.to_thread(workspace.mkdir, parents=True, exist_ok=True)
 

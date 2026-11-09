@@ -62,6 +62,7 @@ class CollaborationService:
         metadata: Mapping[str, object] | None = None,
         error_kind: ErrorKind | None = None,
         error_message: str | None = None,
+        message_id: str | None = None,
     ) -> None:
         # Convert identities only at the shared audit boundary.
         at_ms = time_ns() // 1_000_000
@@ -86,7 +87,7 @@ class CollaborationService:
                 agent_id=self.storage.owner.id,
                 channel=correlation.channel,
                 thread_id=correlation.thread_id,
-                message_id=correlation.outbound_message_id,
+                message_id=message_id,
                 session_id=correlation.runtime_session_id,
                 turn_id=correlation.turn_id,
             ),
@@ -221,6 +222,7 @@ class CollaborationService:
                     provider_thread_id=message.provider_thread_id,
                     inbound_seq=message.seq,
                 ),
+                message_id=message.message_id,
                 metadata={
                     "notifies_runtime": message.notifies_runtime,
                     "review": recorded.channel_session.review.value,

@@ -276,6 +276,8 @@ async def exercise(directory: Path):
         pending = await peers["Cloud"].inbound("你好，我想请你一起整理下周的活动材料。")
         pending_row = await received(directory, pending)
         assert not pending_row["notifies_runtime"]
+        persisted = await events(directory, "channel.inbound.persisted")
+        assert persisted[0]["context"]["message_id"] == pending_row["message_id"]
         replies = await events(directory, "channel.review.replied")
         assert replies[-1]["payload"]["state"] == "completed"
         assert any(

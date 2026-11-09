@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
+from dataclasses import replace
 from pathlib import Path
 from time import time_ns
+from typing import cast
 from uuid import NAMESPACE_URL, uuid5
 
 from bazaar_contrib_channel import CHANNEL, CHANNEL_INPUT, ChannelInput
@@ -111,9 +113,20 @@ async def bind(ctx: Context) -> AsyncIterator[None]:
                         )
                     },
                 )
-                await service.storage.record_inbound(
-                    message, now_ms=time_ns() // 1_000_000, opening=Review.APPROVED
+                # the peer says where its conversation stands with the agent
+                review = Review(cast(str, inbound.metadata.get("review", "approved")))
+                now_ms = time_ns() // 1_000_000
+                recorded = await service.storage.record_inbound(
+                    message, now_ms=now_ms, opening=review
                 )
+                if recorded.channel_session.review is not review:
+                    await service.storage.save_channel_session(
+                        replace(
+                            recorded.channel_session,
+                            review=review,
+                            updated_at_ms=now_ms,
+                        )
+                    )
 
         task = asyncio.create_task(receive())
         try:

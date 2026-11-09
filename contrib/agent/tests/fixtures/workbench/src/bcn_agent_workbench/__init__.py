@@ -72,6 +72,7 @@ from bazaar_contrib_harness import (
     HarnessSessionUnavailable,
     HarnessSkill,
     HarnessTurn,
+    ModelUpdated,
     ProviderCallResult,
     ProviderCallStatus,
     SessionInput,
@@ -608,6 +609,8 @@ class DocumentStream:
                     match event["kind"]:
                         case "started":
                             payload = TurnStarted(event_name="document.started")
+                        case "model":
+                            payload = ModelUpdated(model=event["model"])
                         case "completed":
                             payload = TurnCompleted(event_name="document.completed")
                         case "text":
@@ -619,7 +622,7 @@ class DocumentStream:
                                 call=ToolCall(
                                     call_id=metadata["id"],
                                     name=metadata["name"],
-                                    input=metadata,
+                                    detail=metadata["detail"],
                                 )
                             )
                         case "tool.completed":
@@ -627,8 +630,8 @@ class DocumentStream:
                                 call=ToolCall(
                                     call_id=metadata["id"],
                                     name=metadata["name"],
-                                    input=metadata,
-                                    output=metadata["result"],
+                                    duration_ms=metadata["duration_ms"],
+                                    detail=metadata["detail"],
                                 )
                             )
                         case "inbox.checked":
@@ -636,7 +639,7 @@ class DocumentStream:
                                 call=ToolCall(
                                     call_id=str(uuid7()),
                                     name="inbox.checked",
-                                    output=metadata["messages"],
+                                    detail=metadata["detail"],
                                 )
                             )
                         case kind:

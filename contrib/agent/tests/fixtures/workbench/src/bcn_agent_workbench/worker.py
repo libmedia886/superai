@@ -35,6 +35,7 @@ def main():
 
     try:
         emit("started")
+        emit("model", model="word-count")
         command = shutil.which("bcc")
         if command is None:
             raise FileNotFoundError("The harness session has no bcc command in PATH")
@@ -92,13 +93,21 @@ def main():
         parts = []
         for path in paths:
             path = str(Path(path).absolute())
-            call = {"id": str(uuid7()), "name": "file.read", "path": path}
+            call = {
+                "id": str(uuid7()),
+                "name": "file.read",
+                "detail": {"kind": "file", "action": "read", "path": path},
+            }
             emit("tool.started", metadata=call)
+            started = time_ns()
             content = Path(path).read_text()
-            emit("tool.completed", metadata=call | {"result": content})
+            emit(
+                "tool.completed",
+                metadata=call | {"duration_ms": (time_ns() - started) // 1_000_000},
+            )
             parts.append(content)
         text = "\n".join(parts) or prompt
-        header = re.search(r"\[target=(.*?) msg=([^ ]+)", prompt)
+        header = re.search(r"\[target=(.*?) msg=([^ \]]+)", prompt)
         if header is None:
             raise ValueError("The conversation message has no reply address")
         target, message_id = header.groups()
@@ -158,10 +167,28 @@ def main():
                         )
                         + "\n"
                     )
-                emit("inbox.checked", metadata={"messages": update.stdout})
+                emit(
+                    "inbox.checked",
+                    metadata={
+                        "detail": {
+                            "kind": "command",
+                            "command": "bcc message check",
+                            "exit_code": update.returncode,
+                            "output": update.stdout,
+                        }
+                    },
+                )
         if decision["decision"] == "approved":
-            call = {"id": str(uuid7()), "name": "file.write", "path": str(report)}
-            emit("tool.started", metadata=call | {"arguments": data})
+            call = {
+                "id": str(uuid7()),
+                "name": "file.write",
+                "detail": {
+                    "kind": "change",
+                    "changes": [{"path": str(report), "kind": "add"}],
+                },
+            }
+            emit("tool.started", metadata=call)
+            started = time_ns()
             data["context"] = {
                 name: os.environ.get(variable)
                 for name, variable in (
@@ -172,7 +199,10 @@ def main():
                 )
             }
             report.write_text(json.dumps(data) + "\n")
-            emit("tool.completed", metadata=call | {"result": data})
+            emit(
+                "tool.completed",
+                metadata=call | {"duration_ms": (time_ns() - started) // 1_000_000},
+            )
             body = (
                 f"Saved {data['words']} words across {data['lines']} lines to {report}."
             )
@@ -193,7 +223,7 @@ def main():
             json.dumps({"inbox": checked.stdout})
         )
         subprocess.run(
-            [command, "message", "send", "--target", target],
+            [command, "message", "send", "--target", target, "--reply-to", message_id],
             input=body,
             text=True,
             capture_output=True,

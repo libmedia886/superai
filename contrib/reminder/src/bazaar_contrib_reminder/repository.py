@@ -94,6 +94,24 @@ class Repository:
         )
         return tuple(reminder_from_row(row) for row in rows)
 
+    async def list_scheduled_reminders(
+        self, owner: Thread | None
+    ) -> tuple[Reminder, ...]:
+        rows = await self._session.select(
+            Select(
+                table="reminders",
+                where=self.scope(
+                    equal("state", ReminderState.SCHEDULED.value),
+                    *(() if owner is None else (equal("owner_thread_id", owner.id),)),
+                ),
+                order_by=tuple(
+                    Sort(expression=Column(name=name))
+                    for name in ("next_fire_at_ms", "reminder_id")
+                ),
+            )
+        )
+        return tuple(reminder_from_row(row) for row in rows)
+
     async def _update_reminder(self, owner: Agent, reminder: Reminder) -> None:
         values = cast(dict[str, Scalar], serialize_reminder(reminder))
         await self._session.update(
