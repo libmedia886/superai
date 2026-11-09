@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
+lazy import asyncio
 lazy import inspect
 lazy from importlib.metadata import entry_points
 
@@ -32,12 +33,23 @@ def remotes(group: str = "bazaar_compute_node.remotes") -> dict[str, RemoteEntry
     return entries
 
 
+class Remotes:
+    """The remote entries the installed packages declare, read again whenever
+    the contribs change."""
+
+    def __init__(self, entries: dict[str, RemoteEntry]) -> None:
+        self.entries = entries
+
+    async def refresh(self) -> None:
+        self.entries = await asyncio.to_thread(remotes)
+
+
 class Session:
     """One connection calls the declared members of installed remote entries."""
 
-    def __init__(self, ctx: Context, entries: dict[str, RemoteEntry]) -> None:
+    def __init__(self, ctx: Context, remotes: Remotes) -> None:
         self.ctx = ctx
-        self.entries = entries
+        self.remotes = remotes
 
     async def __aenter__(self):
         return self.dispatch
@@ -47,7 +59,7 @@ class Session:
 
     async def dispatch(self, request: Request) -> Result | Failure:
         try:
-            entry = self.entries.get(request.service)
+            entry = self.remotes.entries.get(request.service)
             if entry is None or request.method not in entry.members:
                 raise LookupError(
                     f"remote member is not exposed: {request.service}.{request.method}"

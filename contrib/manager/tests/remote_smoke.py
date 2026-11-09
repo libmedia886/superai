@@ -91,6 +91,8 @@ async def exercise(path: Path, source: str):
                 indent=2
             )
             assert "started:remote" in await asyncio.to_thread(journal.read_text)
+            # The package's remote is served as soon as it is added.
+            assert await clients[0].call("example", "name") == journal.name
             # Adding the package again completes with its entry enabled once.
             again = await add()
             assert again[-1].phase == "complete", again[-1].model_dump_json(indent=2)
