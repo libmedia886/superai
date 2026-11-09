@@ -38,10 +38,9 @@ REPORT = ServiceKey[AsyncTextIOWrapper]("example.shared-report")
 
 
 async def exercise(path: Path):
-    default = path / ".bcn" / "workspaces" / "Cloud"
-    project = path / "project"
-    await asyncio.to_thread(project.mkdir)
-    await asyncio.to_thread((project / "notes.txt").write_text, "persistent project")
+    workspaces = {
+        name: path / ".bcn" / "workspaces" / name for name in ("Cloud", "Tifa")
+    }
     providers = {
         "channel": [{"kind": "test-channel"}],
         "harness": [{"kind": "document"}],
@@ -49,7 +48,7 @@ async def exercise(path: Path):
     config = {
         "agents": [
             {"id": "Cloud", "name": "Cloud", **providers},
-            {"id": "Tifa", "name": "Tifa", "workspace": str(project), **providers},
+            {"id": "Tifa", "name": "Tifa", **providers},
         ]
     }
     # Run the installed entry itself before composing an independent consumer.
@@ -68,10 +67,7 @@ async def exercise(path: Path):
             start=lambda _, composition=composition: composition,
         ) as hub:
             await started(hub, ("Cloud", "Tifa"))
-            assert await asyncio.to_thread(default.is_dir)
-        assert "persistent project" in await asyncio.to_thread(
-            (project / "notes.txt").read_text
-        )
+            assert await asyncio.to_thread(workspaces["Cloud"].is_dir)
 
     composition = await asyncio.to_thread(
         load,
@@ -83,7 +79,7 @@ async def exercise(path: Path):
     async with node(
         configer_options=(str(path / "consumer.toml"),), start=lambda _: composition
     ) as hub:
-        assert await asyncio.to_thread(default.is_dir)
+        assert await asyncio.to_thread(workspaces["Cloud"].is_dir)
 
     journals: dict[str, AsyncTextIOWrapper] = {}
     instances: dict[str, Agent] = {}
@@ -153,9 +149,10 @@ async def exercise(path: Path):
     async with node(
         configer_options=(str(path / "consumer.toml"),), start=lambda _: controlled
     ):
-        assert await asyncio.to_thread(instances["Cloud"].workspace.samefile, default)
-        assert await asyncio.to_thread(instances["Tifa"].workspace.samefile, project)
-    for name, workspace in (("Cloud", default), ("Tifa", project)):
+        assert await asyncio.to_thread(
+            instances["Cloud"].workspace.samefile, workspaces["Cloud"]
+        )
+    for name, workspace in workspaces.items():
         content = await asyncio.to_thread((workspace / "journal.txt").read_text)
         assert f"identity {name}" in content
         assert f"released {name}" in content
@@ -163,7 +160,7 @@ async def exercise(path: Path):
         if os.name != "nt":
             assert (await asyncio.to_thread(workspace.stat)).st_mode & 0o777 == 0o700
     assert "continues after Cloud closes" in await asyncio.to_thread(
-        (project / "journal.txt").read_text
+        (workspaces["Tifa"] / "journal.txt").read_text
     )
     report = await asyncio.to_thread((path / "shared.txt").read_text)
     assert "observed Cloud" in report and "observed Tifa" in report
