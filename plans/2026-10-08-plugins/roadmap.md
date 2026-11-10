@@ -63,7 +63,7 @@ Actor 是内部流通的身份原语，内部身份参数、业务调用与归�
 ## 发行包、模块入口与内置组合
 
 以下清单确定 `0.3` 的包边界、发行名、模块入口及内置归属。BCN 必要包首次正式发行版本为 `0.3.0`。
-应用、公共接口与节点业务模块留在 BCN：app/、core/ 与 contrib/<功能>/；SQLite、时间轮、文件配置、原生 sidecar 传输与日志默认实现，以及下方官方可选能力表中的包，在 open-bazaar 的独立仓库维护版本和发行。
+应用、公共接口与节点业务模块留在 BCN：app/、core/ 与 contrib/<功能>/；SQLite、文件配置、原生 sidecar 传输与日志默认实现，以及下方官方可选能力表中的包，在 open-bazaar 的独立仓库维护版本和发行。
 Python 模块名由发行名中的连字符改为下划线，例如 `bazaar-contrib-logging` 对应 `bazaar_contrib_logging`。
 app 通过普通 Python 入口调用 core 的统一运行接口，提供启动输入、退出信号与业务默认资源，消费版本包的 VERSIONS。
 core 作为框架运行内核，由应用直接 import，执行发现、自举装配、校验、本地绑定与完整生命周期；
@@ -88,7 +88,7 @@ provider 的 builder 用于发现、配置和创建实例，连接或进程由�
 | `bazaar-contrib-config` | ConfigStore、ConfigSnapshot、CONFIG_STORE、ConfigConverter、ConfigCandidate、CONFIG_CURRENT、CONFIG_V1…CONFIG_V5、修订条件提交与错误契约 | 公共配置加载器、filesystem／自定义配置中心载体、app 参数绑定、CLI 和管理入口 | 1 | 默认、应用组合的依赖 |
 | `bazaar-contrib-audit` | AuditContext、AuditEvent、AUDIT、AUDIT_EVENT 与 NodeAudit 发布服务 | agent 必需的事件发布依赖；记录、starlink 上报与 BCS 网关分析分别订阅 | 7、11 | agent 的包与服务依赖；消费入口由组合按需启用 |
 | `bazaar-contrib-storage` | `Database`、`BackendRegistry`、`STORAGE`、`DB`、`backend_key(name)`，数据／schema／显式查询／事务契约；`storage` 和 `database` 两入口，默认共享 | 全部数据库实现和持久化业务模块 | 3 | 默认、server |
-| `bazaar-contrib-timer` | timer 接口、`TIMER`、定时句柄和到期／取消结果 | 时间轮、Reminder、agent、channel / harness、管理和远程模块 | 2 | 默认、server 的依赖 |
+| `bazaar-contrib-timer` | timer 接口、`TIMER`、定时句柄和到期／取消结果；`timer-wheel`：共享，提供 TIMER，持有时间轮与驱动任务（第 14 阶段 Task 65 并入） | 时间轮、Reminder、agent、channel / harness、管理和远程模块 | 2 | 默认、server 的依赖 |
 | `bazaar-contrib-channel` | `Channel`、`ChannelBuilder`、输入／发送／回执／审批模型与 `CHANNEL_BUILDERS`；附带 `channel-builders` 共享注册入口 | agent、渠道 provider | 7 | 默认 |
 | `bazaar-contrib-harness` | `Harness`、`HarnessBuilder`、会话／turn／输出／审批与发现模型、`HARNESS_BUILDERS`；附带 `harness-builders` 共享注册入口 | agent、Codex／Claude Code 等执行 provider、模型查询 | 7 | 默认 |
 
@@ -115,12 +115,10 @@ channel 与 harness 的接口和登记服务分别归上述公共包；具体 pr
 | `bazaar-contrib-sqlite` | `sqlite`：共享 | 依赖 STORAGE、登记 sqlite 后端、提供 backend_key("sqlite")；持有连接和公共操作翻译 | 3 | 默认；节点初始存储后端 |
 | `bazaar-contrib-legacy-node-migrations` | `legacy-node-migrations`：共享 | 依赖 SCHEMA，仅接续已有 Node 1～32 历史，提供 LEGACY_NODE_MIGRATIONS；业务 contrib 自行登记自己的基线与后续版本 | 3 | Node 持久化业务插件的依赖 |
 | `bazaar-contrib-schema` | `schema`：共享 | 模型／索引注册、模块版本、已有进度、表归属交接与 ledger；通过 DB 在事务内执行业务包拥有的迁移 | 3 | 默认、server |
-| `bazaar-contrib-messages` | 公共契约 | 消息／会话、Actor、请求与结果、消息及通用会话读写 Protocol、共享 MESSAGES key 和纯回执转换；依赖 core 和 channel 公共契约 | 4 | 消息实现、协作及 server 投影的契约依赖 |
-| `bazaar-contrib-messages-node` | `messages-node`：共享 | 历史、未读、搜索、附件、草稿、收发回执和 thread follow 的本机实现；持有目标解析、草稿、交付和数据作用域；业务请求经公共服务处理；bcc Click 命令及格式化归 Agent 工具 | 4 | 默认配置选择并由 manager 恢复 |
+| `bazaar-contrib-messages` | 公共契约；`messages-node`：共享（第 14 阶段 Task 65 并入） | 消息／会话、Actor、请求与结果、消息及通用会话读写 Protocol、共享 MESSAGES key 和纯回执转换；messages-node 为历史、未读、搜索、附件、草稿、收发回执和 thread follow 的本机实现，持有目标解析、草稿、交付和数据作用域，业务请求经公共服务处理，bcc Click 命令及格式化归 Agent 工具；依赖 core 和 channel 公共契约 | 4 | 消息实现、协作及 server 投影的契约依赖 |
 | `bazaar-contrib-collaboration` | `collaboration`：共享 | 复用消息的 sender／contact、Actor 和会话公共契约，迁入准入、登记、审核、消息引用关联及设置；消息数据经消息接口读写，审核决策和审计由协作持有，设置等自身数据通过 DB 管理；通过 agent 生命周期绑定并共享会话锁；页面短数字 refs 归 server 本体 | 5 | 默认配置选择并由 manager 恢复；会话模块的契约依赖 |
-| `bazaar-contrib-timer-wheel` | `timer-wheel`：共享 | 提供 TIMER，持有时间轮与驱动任务 | 2 | 默认、server |
 | `bazaar-contrib-reminder` | `reminder`：共享 | Reminder 的模型、持久化、到期、snooze、更新、取消；依赖 storage、schema、timer 和消息 | 6 | 默认 |
-| `bazaar-contrib-agent` | `agent`：配置入口；`agent-execution`：共享 AGENTS；实体提供局部 AGENT 身份与执行服务 | 拥有 agent 配置及管理命令、实体展开、默认 BCN 指令、bcc 工具环境、上下文与通讯编排；依赖 channel／harness 接口、消息、协作、Reminder、timer | 7 | 默认、可替换；配置与行为整体由所选 agent 实现拥有 |
+| `bazaar-contrib-agent` | `agent`：配置入口；`agent-execution`：共享 AGENTS；实体提供局部 AGENT 身份与执行服务；`agent-command`：agent 管理命令与 AGENT_CONFIGURATION（第 14 阶段 Task 65 并入） | 拥有 agent 配置及管理命令、实体展开、默认 BCN 指令、bcc 工具环境、上下文与通讯编排；依赖 channel／harness 接口、消息、协作、Reminder、timer | 7 | 默认、可替换；配置与行为整体由所选 agent 实现拥有 |
 | `bazaar-contrib-node-management` | `node-management`：共享 | 首阶段接收已实现的 run 命令、配置激活与退出等待；后续节点配置、workspace／文件、模型／skills、健康、系统服务与升级按阶段交付；agent 配置及命令由 agent 包拥有 | 2、10 | 默认 |
 
 ### server 与可选能力模块包
@@ -140,7 +138,7 @@ WeCom 从消息内的 quote 补录安静入站消息时，保留当前消息发�
 | `bazaar-contrib-claude-code` | `claudecode-builder`：共享；`claudecode`：接受 harness 输入 | Claude Code 进程、事件解析、模型／能力与审批；实现 Harness，依赖 harness、timer；配置模型带表单标注 | 9、13 | 可选；实际实例由 agent 配置选择 |
 | `bazaar-contrib-http` | `http` | HTTP route／middleware／静态资源登记、监听能力与请求生命周期；提供 HTTP，导出 HTTP 契约 | 11 | server 依赖 |
 | `bazaar-contrib-server-database` | `server-database` | 在 open-bazaar/contrib-server-database 维护；以私有绑定装配 server 的数据库（缺省为通用 sqlite 的私有实例，打开 ~/.bcn/bcs.sqlite3），以 SERVER_DB 与 SERVER_SCHEMA 提供；打开数据库前从 ~/.bcs 复制数据库与登录密钥 | 11 | server 默认组合 |
-| `bazaar-contrib-server-migrations` | `server-migrations` | 在 open-bazaar/contrib-server-migrations 维护；接受 SERVER_SCHEMA，以原 v01–v07 为历史、以 upgrade_only 接续 0.2 的 BCS 表结构并提供 SERVER_MIGRATIONS；空库不建表，各模块以它的 v07 为前身登记自己的基线 | 3、11 | server 默认组合 |
+| `bazaar-contrib-server-migrations` | `server-migrations` | 在 open-bazaar/contrib-server-migrations 维护；接受 SERVER_SCHEMA，以原 v01–v07 为历史、以 upgrade_only 接续 0.2 的 BCS 表结构并提供 SERVER_MIGRATIONS，第 08 版去掉 events 的外键；空库不建表，各模块以它为前身登记自己的基线 | 3、11 | server 默认组合 |
 | `bazaar-contrib-server` | `server`、`server-theme-night`、`server-theme-day` | 在 open-bazaar/contrib-server 维护；server 是 server 本体：外壳与嵌入工具、侧边栏、设置页、统一总线、权限点登记、THEME 接口、语言、refs 与 API 挂载；server-theme-night 与 server-theme-day 分别登记夜市与晨市；原 BCS 数据结构保留 | 11 | server 默认组合 |
 | `bazaar-contrib-server-overview` | `server-overview` | 在 open-bazaar/contrib-server-overview 维护；概览页与问候、概览内容的登记（OVERVIEW，含占用的列数）与每个账户的排序 | 11 | server 默认组合 |
 | `bazaar-contrib-server-management` | 无 contrib 入口，defaults 入口 `server` | 在 open-bazaar/contrib-server-management 维护；在 `bazaar_compute_node.defaults` 登记 server 的默认配置，在顶层启用 server 的条目；生成配置时读取 ~/.bcs 中 0.2 的设置；与 bazaar-compute 一起安装 | 11 | 可选；与它一起新装的 host 即为 server |
@@ -149,7 +147,8 @@ WeCom 从消息内的 quote 补录安静入站消息时，保留当前消息发�
 | `bazaar-contrib-server-github` | `server-github` | 在 open-bazaar/contrib-server-github 维护；以 GitHub 账户登录，配置与 GitHub 用户的对应保存在自己的表中 | 11 | 可选；需要 GitHub 登录时加入 |
 | `bazaar-contrib-server-computer` | `server-computer`、`server-relay-memory` | 在 open-bazaar/contrib-server-computer 维护；server-computer 持有电脑的登记、身份、在线状态与机器信息，注册 listen／announce／report，定义中转契约并提供对电脑的 call，以及电脑的页面；server-relay-memory 是中转的单进程实现；接管 computers 表 | 12 | server 默认组合 |
 | `bazaar-contrib-server-agent` | `server-agent` | agent 模块：accept server-computer，经 call 调用节点上 agent 管理的 remote，提供列表、详情、新建、配置、删除与近况的页面；渠道与运行时表单按插件配置模型的 schema 绘制 | 13 | server 默认组合 |
-| `bazaar-contrib-server-conversation` | `server-conversation` | 会话模块：accept agent 与活动模块，经 call 读取会话列表、会话详情、搜索与提醒，审批联系人并编辑自动回复，代取聊天中的图片；提供会话页、智能体的会话 tab、动态中的提醒与概览的需要你处理；登记 agents.approve | 14 | server 默认组合 |
+| `bazaar-contrib-server-conversation` | `server-conversation` | 会话模块：accept agent 与活动模块，经 call 读取会话列表、会话详情、搜索与提醒，审批联系人并编辑自动回复，代取聊天中的图片；提供会话页、智能体的会话 tab、动态中的提醒与概览的需要你处理；登记 agents.approve；节点没有 starlink-conversation 时，经节点 manager 的 contrib add 按兼容的版本范围安装并启用 | 14 | server 默认组合 |
+| `bazaar-contrib-starlink-conversation` | `starlink-conversation` | 在 open-bazaar/contrib-starlink-conversation 维护；节点端，经 DB 直接读取节点上会话、消息、附件与提醒的表，以 remote `conversation` 供 server 经 starlink 调用 | 14 | 节点上由会话模块在读取时安装 |
 | `bazaar-contrib-server-activity` | `server-activity` | 活动模块：accept agent 模块，listen server-computer 发布的节点事件，持久化到 events 并按电脑、run_id 与 seq 去重，投影回合与用量；提供动态中的回合与用量、完整活动记录、摊位中的智能体与概览的集市动态；接管 events 表 | 14 | server 默认组合 |
 | `bazaar-contrib-server-usage` | `server-usage` | 用量插件：accept agent 模块、活动模块、会话模块与 server-computer，在概览登记占三列的一行卡片，第一行为概况：正在工作的 agent、等待审批的会话与离线的电脑；卡片为运行中的智能体、正在工作、处理轮次与用量（tokens、费用及输入、缓存命中与输出的占比），右上角在今天、近 7 天与近 30 天之间切换 | 14 | server 默认组合 |
 | `bazaar-contrib-server-market` | `server-market` | 市场模块：accept server-computer，按电脑展示各自的索引与已装 contrib，经 call 安装、升级、配置、启停与卸载；登记 contribs.* 权限点 | 15 | server 默认组合 |
@@ -525,7 +524,7 @@ bazaar-contrib-config-versions 导出五个共享入口，Vn accepts 前一版�
 ### 定时器契约与时间轮实现
 
 定时能力在数据库之前单独用一个 commit 交付，完成后停下 review；数据库随后用另一个 commit 交付。
-公共 `bazaar-contrib-timer` 与实现 `bazaar-contrib-timer-wheel` 是两个独立发行包，消费者和第三方实现共同依赖公共包。
+公共 `bazaar-contrib-timer` 与实现 `bazaar-contrib-timer-wheel` 是两个独立发行包，消费者和第三方实现共同依赖公共包。第 14 阶段 Task 65 起，时间轮只有这一种实现，并入 `bazaar-contrib-timer` 的 `timer-wheel` 入口，不再单独发行。
 定时能力拆成公共 timer 契约和提供该契约的实现模块。时间轮模块承接分层时间轮实现，
 在 lifespan 中创建并启动驱动任务，通过 `ctx.offer(TIMER, timer_service)` 提供服务，退出时关闭驱动与未完成定时器。
 BCN 组合声明使用共享 TIMER 绑定的时间轮条目，按所选消费者根的依赖闭包启用；
@@ -624,8 +623,8 @@ V5 转换沿已有 V1→V2→V3→V4 链追加 V4→V5，旧能力参数移入�
 详见 [V5 配置与版本转换](framework.md#v5-配置与版本转换)。
 用户统一配置顶层 contribs 中的入口与参数；组合按业务输入和 builder 明确创建实例，local 决定私有服务与事件，宿主生成内部实例标识。
 管理列表分别展示统一配置条目和它派生的运行实例，配置编辑更新同一来源条目。
-`contrib_indexes` 保存官方及额外模块索引的本地文件路径、HTTP(S) 或 resource:// 包内资源地址。官方索引在 manager 构建时从 uv.lock 中的全部 contrib/ 工作区包自动生成，随 manager 发行；默认配置声明 resource://bazaar_contrib_manager/catalog.json，读取无需联网，未安装的包同样可见。
-索引条目提供 package 和 source，管理服务读取并缓存登记的安装清单，远端失败显示原因及缓存，节点继续启动。
+`contrib_indexes` 保存官方及额外模块索引的本地文件路径、HTTP(S) 或 resource:// 包内资源地址。官方索引在 manager 构建时从 uv.lock 中的全部 contrib/ 工作区包自动生成，随 manager 发行；默认配置声明 resource://bazaar_contrib_manager/catalog.json、contrib-index 的内置快照与它的在线地址，未安装的包同样可见。
+索引条目提供 package 和 source。HTTP(S) 索引由 manager 的 contrib-indexes 在后台并发刷新，读取时只读刷新写下的本地缓存，不访问网络；刷新失败保留上次的结果并显示原因，节点继续启动。
 选择的包与来源交给 uv，安装后通过发行元数据关联到入口，用户填写参数经该宿主的 CONFIG_STORE 保存配置文档。
 contrib 市场页面与 CLI 共用索引及模块管理服务；当前节点和选中的远端节点分别安装，由目标宿主运行自己的 uv。
 市场通过普通 页面模块登记，安装进度、已装状态、配置和下次启动生效状态见 [市场计划](bazaar.md)。
