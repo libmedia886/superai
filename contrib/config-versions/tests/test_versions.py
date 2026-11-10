@@ -280,6 +280,9 @@ def test_v4_brings_the_server_along_when_bcs_has_its_settings(
         "server-relay-memory",
         "server-computer",
         "server-agent",
+        "server-activity",
+        "server-conversation",
+        "server-usage",
     }
 
     def converted() -> tuple[dict[str, dict[str, object]], set[str]]:
@@ -297,7 +300,8 @@ def test_v4_brings_the_server_along_when_bcs_has_its_settings(
     assert not server & converted()[0].keys()
     (tmp_path / ".bcs").mkdir()
     (tmp_path / ".bcs" / "config.toml").write_text(
-        'listen = "127.0.0.1:9876"\nstorage = "sqlite"\nsession_minutes = 25\n',
+        'listen = "127.0.0.1:9876"\nstorage = "sqlite"\nsession_minutes = 25\n'
+        "retention_days = 7\n",
         encoding="utf-8",
     )
     enabled, packages = converted()
@@ -312,8 +316,11 @@ def test_v4_brings_the_server_along_when_bcs_has_its_settings(
         "server-relay-memory",
         "server-computer",
         "server-agent",
+        "server-conversation",
+        "server-usage",
     } <= enabled.keys()
     assert enabled["server-access"] == {"session_minutes": 25}
+    assert enabled["server-activity"] == {"retention_days": 7}
     assert {
         f"bazaar-contrib-{name}"
         for name in (
@@ -325,6 +332,9 @@ def test_v4_brings_the_server_along_when_bcs_has_its_settings(
             "server-access",
             "server-computer",
             "server-agent",
+            "server-activity",
+            "server-conversation",
+            "server-usage",
         )
     } <= packages
 
