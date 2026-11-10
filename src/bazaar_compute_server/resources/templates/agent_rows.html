@@ -1,6 +1,0 @@
-{% import "components.html" as c with context %}
-{# a row is named by two numbers, its computer's and its own #}
-{% for agent in page.agents %}
-{% include "agent_row.html" %}
-{% endfor %}
-{% if page.edge %}{% set edge = ref(page.agents[-1].computer_id) ~ "/" ~ ref(page.agents[-1].id) %}{{ c.edge(edge, page.more, "/agents/list?after=" ~ edge ~ ("&selected=" ~ selected_key if selected_key else "")) }}{% endif %}
