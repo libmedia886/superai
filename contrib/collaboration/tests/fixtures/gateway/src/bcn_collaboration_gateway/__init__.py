@@ -20,8 +20,8 @@ from bazaar_contrib_messages.models import (
     Message,
     SenderIdentity,
 )
+from bazaar_contrib_messages.node import ThreadLockRegistry
 from bazaar_contrib_messages.states import ChannelTargetKind, MessageDirection, Review
-from bazaar_contrib_messages_node import ThreadLockRegistry
 from bazaar_core import Composition, Context, Contrib, ContribEntry
 from bcn_agent_workbench import channel
 from pydantic import BaseModel, ConfigDict

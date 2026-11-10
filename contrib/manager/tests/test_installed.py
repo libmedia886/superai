@@ -44,7 +44,6 @@ def wheels(tmp_path_factory):
             f"contrib/{name}"
             for name in (
                 "agent",
-                "agent-command",
                 "audit",
                 "channel",
                 "timer",
@@ -57,7 +56,6 @@ def wheels(tmp_path_factory):
                 "storage",
                 "schema",
                 "messages",
-                "messages-node",
                 "collaboration",
                 "reminder",
                 "node-management",

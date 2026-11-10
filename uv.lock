@@ -7,7 +7,6 @@ members = [
     "bazaar-compute",
     "bazaar-compute-node",
     "bazaar-contrib-agent",
-    "bazaar-contrib-agent-command",
     "bazaar-contrib-audit",
     "bazaar-contrib-channel",
     "bazaar-contrib-collaboration",
@@ -17,7 +16,6 @@ members = [
     "bazaar-contrib-invoke",
     "bazaar-contrib-manager",
     "bazaar-contrib-messages",
-    "bazaar-contrib-messages-node",
     "bazaar-contrib-node-management",
     "bazaar-contrib-reminder",
     "bazaar-contrib-schema",
@@ -136,41 +134,6 @@ requires-dist = [
     { name = "bazaar-contrib-sidecar", editable = "contrib/sidecar" },
     { name = "bazaar-contrib-storage", editable = "contrib/storage" },
     { name = "bazaar-contrib-timer", editable = "contrib/timer" },
-    { name = "bazaar-core", editable = "core" },
-    { name = "click", specifier = ">=8.1.0" },
-    { name = "jinja2", specifier = ">=3.1.6" },
-    { name = "pydantic", specifier = ">=2.12.0" },
-]
-
-[[package]]
-name = "bazaar-contrib-agent-command"
-version = "0.3.0rc25"
-source = { editable = "contrib/agent-command" }
-dependencies = [
-    { name = "bazaar-contrib-agent" },
-    { name = "bazaar-contrib-channel" },
-    { name = "bazaar-contrib-collaboration" },
-    { name = "bazaar-contrib-config" },
-    { name = "bazaar-contrib-harness" },
-    { name = "bazaar-contrib-invoke" },
-    { name = "bazaar-contrib-messages" },
-    { name = "bazaar-contrib-sidecar" },
-    { name = "bazaar-core" },
-    { name = "click" },
-    { name = "jinja2" },
-    { name = "pydantic" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "bazaar-contrib-agent", editable = "contrib/agent" },
-    { name = "bazaar-contrib-channel", editable = "contrib/channel" },
-    { name = "bazaar-contrib-collaboration", editable = "contrib/collaboration" },
-    { name = "bazaar-contrib-config", editable = "contrib/config" },
-    { name = "bazaar-contrib-harness", editable = "contrib/harness" },
-    { name = "bazaar-contrib-invoke", editable = "contrib/invoke" },
-    { name = "bazaar-contrib-messages", editable = "contrib/messages" },
-    { name = "bazaar-contrib-sidecar", editable = "contrib/sidecar" },
     { name = "bazaar-core", editable = "core" },
     { name = "click", specifier = ">=8.1.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
@@ -344,27 +307,9 @@ name = "bazaar-contrib-messages"
 version = "0.3.0rc25"
 source = { editable = "contrib/messages" }
 dependencies = [
-    { name = "bazaar-contrib-channel" },
-    { name = "bazaar-contrib-storage" },
-    { name = "bazaar-core" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "bazaar-contrib-channel", editable = "contrib/channel" },
-    { name = "bazaar-contrib-storage", editable = "contrib/storage" },
-    { name = "bazaar-core", editable = "core" },
-]
-
-[[package]]
-name = "bazaar-contrib-messages-node"
-version = "0.3.0rc25"
-source = { editable = "contrib/messages-node" }
-dependencies = [
     { name = "bazaar-contrib-audit" },
     { name = "bazaar-contrib-channel" },
     { name = "bazaar-contrib-legacy-node-migrations" },
-    { name = "bazaar-contrib-messages" },
     { name = "bazaar-contrib-schema" },
     { name = "bazaar-contrib-sidecar" },
     { name = "bazaar-contrib-storage" },
@@ -379,7 +324,6 @@ requires-dist = [
     { name = "bazaar-contrib-audit", editable = "contrib/audit" },
     { name = "bazaar-contrib-channel", editable = "contrib/channel" },
     { name = "bazaar-contrib-legacy-node-migrations", specifier = "~=0.3.0rc1" },
-    { name = "bazaar-contrib-messages", editable = "contrib/messages" },
     { name = "bazaar-contrib-schema", editable = "contrib/schema" },
     { name = "bazaar-contrib-sidecar", editable = "contrib/sidecar" },
     { name = "bazaar-contrib-storage", editable = "contrib/storage" },
@@ -513,10 +457,14 @@ version = "0.3.0rc25"
 source = { editable = "contrib/timer" }
 dependencies = [
     { name = "bazaar-core" },
+    { name = "pydantic" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "bazaar-core", editable = "core" }]
+requires-dist = [
+    { name = "bazaar-core", editable = "core" },
+    { name = "pydantic", specifier = ">=2.12.0" },
+]
 
 [[package]]
 name = "bazaar-core"

@@ -101,10 +101,10 @@ def migrate_v5(payload: Mapping[str, object]) -> ConfigCandidate:
         add("channel-builders", "channel")
         add("harness-builders", "harness")
         add("legacy-node-migrations", "legacy-node-migrations")
-        add("messages-node", "messages-node")
+        add("messages-node", "messages")
         add("collaboration", "collaboration")
         add("reminder", "reminder")
-    add("timer-wheel", "timer-wheel")
+    add("timer-wheel", "timer")
     add("contrib-manager", "manager")
     add("audit", "audit")
     changes.extend(
@@ -236,7 +236,7 @@ def migrate_v5(payload: Mapping[str, object]) -> ConfigCandidate:
         add("agent", "agent", {"agents": agents})
         add("agent-execution", "agent")
         add("agent-activity", "agent")
-        add("agent-command", "agent-command")
+        add("agent-command", "agent")
     document = ConfigDocument(
         contribs=tuple(
             ContribPackage(
