@@ -327,3 +327,26 @@ def test_v4_brings_the_server_along_when_bcs_has_its_settings(
             "server-agent",
         )
     } <= packages
+
+
+def test_v4_node_refreshes_its_indexes_beside_the_manager(tmp_path: Path, monkeypatch):
+    from bazaar_contrib_config import ConfigDocument
+
+    from bazaar_contrib_config_versions import Converter
+
+    monkeypatch.setenv("BCN_HOME", str(tmp_path))
+    candidate = Converter("5", Converter("4")).convert(
+        {"version": "4", "node": {}, "agent": []}
+    )
+    document = ConfigDocument.model_validate(candidate.payload)
+    manager = next(
+        package
+        for package in document.contribs
+        if any(entry.entry == "contrib-manager" for entry in package.enabled)
+    )
+    assert any(entry.entry == "contrib-indexes" for entry in manager.enabled)
+    assert {
+        "resource://bazaar_contrib_manager/catalog.json",
+        "resource://bazaar_contrib_manager/open_bazaar_index.json",
+        "https://raw.githubusercontent.com/open-bazaar/contrib-index/main/index.json",
+    } <= set(document.contrib_indexes)

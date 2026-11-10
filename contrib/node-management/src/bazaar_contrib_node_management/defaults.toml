@@ -2,6 +2,7 @@ version = "5"
 contrib_indexes = [
     "resource://bazaar_contrib_manager/catalog.json",
     "resource://bazaar_contrib_manager/open_bazaar_index.json",
+    "https://raw.githubusercontent.com/open-bazaar/contrib-index/main/index.json",
 ]
 
 [[contribs]]
@@ -57,6 +58,8 @@ entry = "status"
 package = "bazaar-contrib-manager~=0.3.0rc1"
 [[contribs.enabled]]
 entry = "contrib-manager"
+[[contribs.enabled]]
+entry = "contrib-indexes"
 
 [[contribs]]
 package = "bazaar-contrib-logging~=0.3.0rc1"

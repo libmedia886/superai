@@ -1,17 +1,21 @@
-"""Read every configured index and retain usable cached results independently."""
+"""Read every configured index, the online ones from the cache their refresh writes."""
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 lazy import asyncio
 lazy from datetime import UTC, datetime
 lazy from hashlib import sha256
+lazy from http.client import HTTPException
 lazy from importlib.resources import files
 lazy from pathlib import Path
 lazy from urllib.parse import urlsplit
 lazy from urllib.request import urlopen
 
-from bazaar_core import ServiceKey
+from bazaar_contrib_timer import TIMER
+from bazaar_core import Contrib, EventKey, ServiceKey
 lazy from bazaar_contrib_config import ConfigDocument, Configuration
+lazy from bazaar_core import Context
 lazy from packaging.utils import canonicalize_name
 
 from .contracts import CatalogEntry, IndexDocument, IndexStatus
@@ -20,9 +24,11 @@ lazy from .files import write
 
 
 class ContribCatalog:
-    def __init__(self, configuration: Configuration, path: Path) -> None:
+    def __init__(self, configuration: Configuration, path: Path, ctx: Context) -> None:
         self.configuration = configuration
         self.path = path
+        self.ctx = ctx
+        self._failing: set[str] = set()
         self._lock = asyncio.Lock()
 
     async def indexes(self) -> tuple[IndexStatus, ...]:
@@ -38,10 +44,35 @@ class ContribCatalog:
                 )
             )
 
-    def _read(self, location: str) -> IndexStatus:
+    async def refresh(self) -> tuple[IndexStatus, ...]:
+        """Read every online index again, announcing each one that starts failing."""
+        candidate, _ = await self.configuration.read()
+        document = ConfigDocument.model_validate(candidate.payload)
+        indexes = await asyncio.gather(
+            *(
+                asyncio.to_thread(self._read, location, refresh=True)
+                for location in document.contrib_indexes
+                if location.startswith(("http://", "https://"))
+            )
+        )
+        for index in indexes:
+            if index.error is None:
+                self._failing.discard(index.location)
+            elif index.location not in self._failing:
+                self._failing.add(index.location)
+                await self.ctx.announce(CONTRIB_INDEX_FAILED, index)
+        return tuple(indexes)
+
+    def _read(self, location: str, *, refresh: bool = False) -> IndexStatus:
         path = self.path / f"{sha256(location.encode()).hexdigest()}.json"
+        online = location.startswith(("http://", "https://"))
+        if online and not refresh:
+            try:
+                return IndexStatus.model_validate_json(path.read_bytes())
+            except OSError, ValueError:
+                return IndexStatus(location=location)
         try:
-            if location.startswith(("http://", "https://")):
+            if online:
                 with urlopen(location, timeout=20) as response:
                     raw = response.read()
             elif location.startswith("resource://"):
@@ -61,14 +92,17 @@ class ContribCatalog:
             )
             write(path, status.model_dump(mode="json"))
             return status
-        except (ImportError, OSError, ValueError) as error:
+        except (HTTPException, ImportError, OSError, ValueError) as error:
             try:
                 status = IndexStatus.model_validate_json(path.read_bytes())
             except OSError, ValueError:
                 status = IndexStatus(location=location)
-            return status.model_copy(
+            status = status.model_copy(
                 update={"cached": bool(status.read_at), "error": str(error)}
             )
+            if online:
+                write(path, status.model_dump(mode="json"))
+            return status
 
     async def entries(self) -> tuple[CatalogEntry, ...]:
         merged: dict[tuple[str, str], CatalogEntry] = {}
@@ -113,3 +147,26 @@ class ContribCatalog:
 
 
 CONTRIB_CATALOG = ServiceKey[ContribCatalog]("contrib.catalog")
+CONTRIB_INDEX_FAILED = EventKey[IndexStatus]("contrib.index.failed")
+
+
+@asynccontextmanager
+async def refresh(ctx: Context):
+    catalog = ctx.accept(CONTRIB_CATALOG)
+    timer = ctx.accept(TIMER)
+
+    async def watch() -> None:
+        """Read the online indexes once the node runs, and again every hour."""
+        while True:
+            await catalog.refresh()
+            await timer.create(3_600_000).wait()
+
+    async with asyncio.TaskGroup() as tasks:
+        task = tasks.create_task(watch())
+        try:
+            yield
+        finally:
+            task.cancel()
+
+
+indexes = Contrib(accepts=[CONTRIB_CATALOG, TIMER], lifespan=refresh)

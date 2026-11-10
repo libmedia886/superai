@@ -186,6 +186,7 @@ def wheels(tmp_path_factory):
             for workflow in ("installed_smoke.py", "live_smoke.py")
         ),
         ("tool", "remote_smoke.py"),
+        ("venv", "index_smoke.py"),
         ("alias", "extras_smoke.py"),
         ("extra", "extras_smoke.py"),
     ],

@@ -11,7 +11,7 @@ import click
 from jinja2 import Environment, PackageLoader, StrictUndefined
 from pydantic import BaseModel, Field, ValidationError
 
-from .contracts import InstalledPackage, Operation, Positions
+from .contracts import IndexStatus, InstalledPackage, Operation, Positions
 from .service import ContribManager
 
 
@@ -129,6 +129,22 @@ def create_commands(manager: ContribManager) -> click.Group:
             result=result, details=details
         )
 
+    def statuses(indexes: tuple[IndexStatus, ...]) -> str:
+        return templates.get_template("indexes.tpl").render(
+            rows=(
+                (
+                    index.location,
+                    str(len(index.entries)),
+                    f"cached ({index.error})"
+                    if index.cached and index.error
+                    else "cached"
+                    if index.cached
+                    else index.error or "ready",
+                )
+                for index in indexes
+            ),
+        )
+
     @click.group("contrib", help="Manage contribs")
     def contrib():
         pass
@@ -209,24 +225,11 @@ def create_commands(manager: ContribManager) -> click.Group:
 
     @index.command("list", help="List configured contrib indexes")
     def index_list():
-        return execute(
-            manager,
-            lambda manager: manager.catalog.indexes(),
-            lambda indexes: templates.get_template("indexes.tpl").render(
-                rows=(
-                    (
-                        index.location,
-                        str(len(index.entries)),
-                        f"cached ({index.error})"
-                        if index.cached and index.error
-                        else "cached"
-                        if index.cached
-                        else index.error or "ready",
-                    )
-                    for index in indexes
-                ),
-            ),
-        )
+        return execute(manager, lambda manager: manager.catalog.indexes(), statuses)
+
+    @index.command("refresh", help="Refresh online contrib indexes")
+    def index_refresh():
+        return execute(manager, lambda manager: manager.catalog.refresh(), statuses)
 
     @index.command("add", help="Add a contrib index")
     @click.argument("location")

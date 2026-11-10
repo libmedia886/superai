@@ -106,6 +106,7 @@ def migrate_v5(payload: Mapping[str, object]) -> ConfigCandidate:
         add("reminder", "reminder")
     add("timer-wheel", "timer")
     add("contrib-manager", "manager")
+    add("contrib-indexes", "manager")
     add("audit", "audit")
     changes.extend(
         [
@@ -238,6 +239,11 @@ def migrate_v5(payload: Mapping[str, object]) -> ConfigCandidate:
         add("agent-activity", "agent")
         add("agent-command", "agent")
     document = ConfigDocument(
+        contrib_indexes=(
+            "resource://bazaar_contrib_manager/catalog.json",
+            "resource://bazaar_contrib_manager/open_bazaar_index.json",
+            "https://raw.githubusercontent.com/open-bazaar/contrib-index/main/index.json",
+        ),
         contribs=tuple(
             ContribPackage(
                 package=package + packages[package].version,
