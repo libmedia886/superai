@@ -18,4 +18,6 @@ version = "5"
 package = "bazaar-contrib-manager==0.3.*"
 [[contribs.enabled]]
 entry = "contrib-manager"
+[[contribs.enabled]]
+entry = "contrib-indexes"
 ```

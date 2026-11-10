@@ -483,6 +483,8 @@ class ContribManager:
                 ).model_dump(mode="json"),
                 snapshot.revision if snapshot is not None else None,
             )
+            if not remove:
+                await self.catalog.refresh()
 
         return await self._submit("index-remove" if remove else "index-add", action)
 
@@ -810,7 +812,7 @@ async def lifespan(ctx: Context, config: ManagerConfig):
         config.host_source,
     )
     configuration = ctx.accept(CONFIGURATION)
-    catalog = ContribCatalog(configuration, path / "indexes")
+    catalog = ContribCatalog(configuration, path / "indexes", ctx)
     async with asyncio.TaskGroup() as tasks:
         service = ContribManager(configuration, catalog, packages, tasks, ctx)
         ctx.offer(CONTRIB_CATALOG, catalog)

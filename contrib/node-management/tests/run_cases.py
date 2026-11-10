@@ -5,17 +5,23 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import TypedDict
 lazy import asyncio
+lazy import json
 lazy import os
 lazy import signal
 lazy import sys
+lazy import threading
 lazy import time
+lazy from functools import partial
+lazy from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 lazy from importlib.metadata import version
 lazy from pathlib import Path
 
 import pytest
 import tomli_w
 lazy from bazaar_compute_node.boot import build, defaults, node
+lazy from bazaar_contrib_audit import AUDIT_EVENT, AuditEvent, AuditFailure
 lazy from bazaar_contrib_config import ConfigDocument
+lazy from bazaar_contrib_manager import CONTRIB_CATALOG, ContribCatalog
 lazy from bazaar_contrib_sidecar import CLIENT, Client, RemoteError
 lazy from bazaar_core import Composition, Context, Contrib, ContribEntry
 lazy from packaging.version import Version
@@ -163,3 +169,81 @@ async def test_node_service_reports_the_node_and_its_machine(
         if process.returncode is None:
             process.kill()
             await process.wait()
+
+
+async def test_node_audits_an_index_each_time_it_starts_failing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("BCN_HOME", str(tmp_path / "node"))
+    published = tmp_path / "published"
+
+    def serve() -> tuple[ThreadingHTTPServer, threading.Thread]:
+        published.mkdir()
+        server = ThreadingHTTPServer(
+            ("127.0.0.1", 0),
+            partial(SimpleHTTPRequestHandler, directory=str(published)),
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        return server, thread
+
+    server, thread = await asyncio.to_thread(serve)
+    location = f"http://127.0.0.1:{server.server_port}/index.json"
+    configured = tmp_path / "node.toml"
+    payload = await asyncio.to_thread(defaults)
+    payload["contrib_indexes"] = [location]
+    await asyncio.to_thread(configured.write_text, tomli_w.dumps(payload))
+    catalogs: list[ContribCatalog] = []
+    failures: asyncio.Queue[AuditFailure] = asyncio.Queue()
+
+    @asynccontextmanager
+    async def observe(ctx: Context):
+        catalogs.append(ctx.accept(CONTRIB_CATALOG))
+        yield
+
+    def audited(ctx: Context, event: AuditEvent) -> None:
+        if (
+            isinstance(event, AuditFailure)
+            and event.event_name == "contrib.index.refresh_failed"
+        ):
+            failures.put_nowait(event)
+
+    def select(document: ConfigDocument) -> Composition:
+        composition = build(document)
+        entry = ContribEntry(
+            name="index-observer",
+            definition=Contrib(
+                accepts=[CONTRIB_CATALOG],
+                lifespan=observe,
+                listen={AUDIT_EVENT: audited},
+            ),
+        )
+        return composition.model_copy(
+            update={
+                "entries": (*composition.entries, entry),
+                "roots": (entry.name, "node-health"),
+            }
+        )
+
+    index = published / "index.json"
+    try:
+        async with node(configer_options=(str(configured),), start=select):
+            (missing,) = await catalogs[0].refresh()
+            # It keeps failing, now for another reason, then reads again.
+            await asyncio.to_thread(index.write_text, "{")
+            await catalogs[0].refresh()
+            await asyncio.to_thread(index.write_text, json.dumps({"contribs": []}))
+            await catalogs[0].refresh()
+            await asyncio.to_thread(index.unlink)
+            (removed,) = await catalogs[0].refresh()
+            async with asyncio.timeout(60):
+                first = await failures.get()
+                second = await failures.get()
+    finally:
+        await asyncio.to_thread(server.shutdown)
+        await asyncio.to_thread(server.server_close)
+        await asyncio.to_thread(thread.join)
+    for event, status in ((first, missing), (second, removed)):
+        assert isinstance(event.payload, dict)
+        assert event.payload.get("location") == location
+        assert event.error.message == status.error

@@ -10,6 +10,7 @@ dependencies = [
     "bazaar-contrib-config~=0.3.0rc1",
     "bazaar-contrib-invoke~=0.3.0rc1",
     "bazaar-contrib-sidecar~=0.3.0rc1",
+    "bazaar-contrib-timer~=0.3.0rc7",
     "filelock>=3.16.0",
     "jinja2>=3.1.6",
     "packaging>=25.0",
@@ -18,6 +19,7 @@ dependencies = [
 
 [project.entry-points."bazaar_compute_node.contribs"]
 contrib-manager = "bazaar_contrib_manager:manager"
+contrib-indexes = "bazaar_contrib_manager:indexes"
 
 [project.entry-points."bazaar_compute_node.commands"]
 contrib = "bazaar_contrib_manager:command_entry"
