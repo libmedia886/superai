@@ -3,7 +3,7 @@
 The message contracts are installed with the Node implementation.
 
 ```sh
-bcn contrib add messages-node --enable messages-node
+bcn contrib add messages --enable messages-node
 ```
 
 The corresponding entry in `config.toml`:
@@ -12,7 +12,7 @@ The corresponding entry in `config.toml`:
 version = "5"
 
 [[contribs]]
-package = "bazaar-contrib-messages-node==0.3.*"
+package = "bazaar-contrib-messages==0.3.*"
 [[contribs.enabled]]
 entry = "messages-node"
 ```

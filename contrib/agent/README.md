@@ -19,6 +19,8 @@ entry = "agent-execution"
 entry = "agent"
 [contribs.enabled.config]
 agents = []
+[[contribs.enabled]]
+entry = "agent-command"
 ```
 
 Enable the channel and harness contribs you want to use, then create an agent:
@@ -58,5 +60,13 @@ bcn agent add \
   --set agent.mode=dangerous_individual
 ```
 
-See [agent commands](../agent-command/README.md) for listing, editing, removing
-agents and reviewing conversations.
+Manage agents and approve or deny conversations:
+
+```sh
+bcn agent list
+bcn agent edit Desk --set agent.idle_timeout=300
+bcn agent remove Desk
+bcn agent review list AGENT_ID
+bcn agent review approve THREAD_ID
+bcn agent review deny THREAD_ID
+```

@@ -1,10 +1,10 @@
 # bazaar-contrib-timer
 
-The timer contracts and timeout utility are installed with a provider.
+The timer contracts and timeout utility are installed with the `timer-wheel` provider.
 Use `TIMER` from `bazaar_contrib_timer`.
 
 ```sh
-bcn contrib add timer-wheel --enable
+bcn contrib add timer --enable
 ```
 
 The corresponding entry in `config.toml`:
@@ -13,7 +13,7 @@ The corresponding entry in `config.toml`:
 version = "5"
 
 [[contribs]]
-package = "bazaar-contrib-timer-wheel==0.3.*"
+package = "bazaar-contrib-timer==0.3.*"
 [[contribs.enabled]]
 entry = "timer-wheel"
 ```

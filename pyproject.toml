@@ -29,14 +29,12 @@ bazaar-compute-node = { workspace = true }
 bazaar-core = { workspace = true }
 bazaar-contrib-status = { workspace = true }
 bazaar-contrib-agent = { workspace = true }
-bazaar-contrib-agent-command = { workspace = true }
 bazaar-contrib-audit = { workspace = true }
 bazaar-contrib-channel = { workspace = true }
 bazaar-contrib-harness = { workspace = true }
 bazaar-contrib-storage = { workspace = true }
 bazaar-contrib-schema = { workspace = true }
 bazaar-contrib-messages = { workspace = true }
-bazaar-contrib-messages-node = { workspace = true }
 bazaar-contrib-collaboration = { workspace = true }
 bazaar-contrib-reminder = { workspace = true }
 bazaar-contrib-timer = { workspace = true }

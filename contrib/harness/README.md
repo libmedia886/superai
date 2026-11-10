@@ -25,5 +25,4 @@ bcn agent add --name Desk --channel CHANNEL_KIND --harness HARNESS_KIND
 ```
 
 Replace `HARNESS_KIND` and `CHANNEL_KIND` with your enabled contrib names.
-See [agent configuration](../agent/README.md) for permissions and
-[agent commands](../agent-command/README.md) for managing agents.
+See [agent configuration](../agent/README.md) for permissions and managing agents.
