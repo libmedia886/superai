@@ -417,7 +417,8 @@ server-agent 对所有插件使用同一套画法：字符串为输入框，枚�
 - 权限点沿用 0.2：agents.view、agents.create、agents.update 与 agents.delete，经 server 本体的 `permission` 登记；agents.approve 随第 14 阶段的会话模块登记。
 - agent 经 ACCESS 登记为可分享的类型 `agent`，以 agent id 为目标，与 0.2 相同，导入的 0.2 分享照常生效；分享点为 agents.view、agents.update 与 agents.delete，分享所需的权限点为 agents.view，即拥有者即可分享，与 0.2 相同。
 - ACCESS 增加 `points(kind, points)`：在已登记的分享类型上追加分享点，退出时撤销。server-agent 以它在 `computer` 上追加 agents.create，与 0.2 的电脑分享点相同；第 14 阶段的会话模块以它在 `agent` 上追加 agents.approve。
-- 从页面新建的 agent 在保存成功后，经 ACCESS 的 `own` 把新建者记为拥有者，与写入 `agents` 表在同一事务中。节点上以其他方式创建的 agent 没有拥有者，admin 可见，由 admin 分享给角色。
+- 从页面新建的 agent 在保存成功后，经 ACCESS 的 `own` 把新建者记为拥有者，与写入 `agents` 表在同一事务中；`own` 取代目标原有的拥有者。
+- 电脑的列表带来的 agent 尚无拥有者时，记为该电脑的拥有者，与写入 `agents` 表在同一事务中，与 0.2 相同。ACCESS 增加 `owners(kind, ids)`：一次给出一批目标各自的拥有者。
 - 列表只列出账户可见（agents.view）的 agent；新建向导的电脑只列出账户可以新建 agent（agents.create）的在线电脑；行末菜单与详情中的操作按 agents.update、agents.delete 与能否分享给出。
 
 #### 页面
