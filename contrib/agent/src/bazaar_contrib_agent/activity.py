@@ -86,6 +86,9 @@ class Activity:
     event_at_ms: int | None
     started_at_ms: int | None
     working: Working | None
+    # the turns running, as of when this was said
+    turns: tuple[str, ...]
+    said_at_ms: int
     channels: tuple[ChannelStatus, ...]
     runtimes: tuple[RuntimeStatus, ...]
 
@@ -171,6 +174,7 @@ class AgentActivity:
 
     def agents(self) -> dict[str, Activity]:
         self._roll(date.today())
+        said_at_ms = time_ns() // 1_000_000
         usage: dict[str, Usage] = {}
         for session, (agent, total) in self.totals.items():
             usage[agent] = usage.get(agent, Usage()).plus(
@@ -270,6 +274,14 @@ class AgentActivity:
                     key=lambda item: item.since_ms,
                     default=None,
                 ),
+                turns=()
+                if loop is None
+                else tuple(
+                    item.active.turn.id
+                    for item in loop.actor_loops.values()
+                    if item.active is not None
+                ),
+                said_at_ms=said_at_ms,
                 channels=tuple(channels),
                 runtimes=tuple(runtimes),
             )
