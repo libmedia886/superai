@@ -877,6 +877,9 @@ async def exercise(path: Path):
                 _, pending = await submit(primary, drafts["Cloud"])
                 working = status("Cloud").working
                 assert working is not None and working.since_ms
+                # the turn under way is named, with when that was said
+                assert status("Cloud").turns
+                assert status("Cloud").said_at_ms
                 identity = registries[0].running["Cloud"]
                 entry = next(
                     entry for entry in composition.entries if entry.name == "agent"
@@ -1059,6 +1062,7 @@ async def exercise(path: Path):
                 data = json.loads(await asyncio.to_thread(new.read_text))
                 assert data["title"] == "Revised editorial report"
                 await settled(lambda: status("Cloud").working is None)
+                assert not status("Cloud").turns
 
                 # Reordering runtimes of different kinds keeps both running: the
                 # existing conversation stays where it is, a new one takes the

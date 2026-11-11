@@ -370,6 +370,7 @@ agent-activity 的 `agents()` 在现有的状态、原因、今日用量与最�
 
 - `started_at_ms`：agent 开始运行的时间，由 agent 启动时记下。
 - `working`：进行中的回合里最早开始的一个，给出开始时间与所在会话的显示名，由 agent 在回合开始时记下；没有进行中的回合时为空。
+- `turns` 与 `said_at_ms`：进行中的回合的 id，以及给出这份状态时节点的时间。回合从 `harness.turn.requested` 发出之前到结束事件发出之后都在其中。
 - `channels`：按配置顺序列出每个渠道连接的 kind、连接名、状态、机器人身份（`Channel.get_identity()`）、连接时间、最后收到消息的时间、连接后连续失败的次数与最近错误。
   - 状态取自该连接条目的快照；运行中而最后一个连接事件为失败时，插件还会重试的为重新连接中，不再重试的为已断开。
   - 连接时间、失败次数与最近错误取自统一的连接事件，按事件上下文中的 connection 对应到连接；条目失败时，最近错误取快照中的错误。
@@ -404,6 +405,7 @@ server-agent 对所有插件使用同一套画法：字符串为输入框，枚�
 
 - 每台电脑的 agent 经 call 取得：`agent-configuration.list` 给出配置，`agent-activity.agents` 给出状态与今日用量。结果缓存在处理请求的 server 进程中，做法与电脑模块的机器信息相同：页面或侧边栏读到在线电脑的 agent 时，结果满 60 秒就再下发；同一台电脑同时只有一次在途；节点没有回应时保留上次的结果。
 - inspect 的结果按电脑、agent 与运行时的 kind 缓存 60 秒，与 0.2 节点上的缓存时长相同，详情的动态与技能 tab 用到时才下发。
+- 每取得一台电脑的 `agent-activity.agents`，announce `AGENTS_SAID`，带电脑 id 与这份状态。
 - 收到 REPORTED 的 `harness.started`、`harness.completed`、`harness.failed`、`harness.cancelled`、`channel.connection.connected` 或 `channel.connection.failed` 时，立即重新下发该电脑的 `agent-activity.agents`，侧边栏与页面经统一总线随之刷新。
 - 每台电脑最后一次取得的 agent 列表存入 server-agent 自己的表 `agents`：电脑 id、agent id、名称、`list()` 给出的配置与取得时间，以电脑 id 与 agent id 为键，表结构经 SERVER_SCHEMA 登记为第 1 版。电脑离线时页面照这份列表列出它的 agent，状态为离线。
 - 新取得的列表中不再有的 agent，删除对应的行；一个 agent id 在所有电脑上都不再出现时，经 ACCESS 的 `forget` 删除它的归属与分享。
@@ -570,6 +572,7 @@ claudecode 依据 stream-json 中 tool_use 的 name 与 input：
 - 收到 REPORTED 时，在一个事务中插入 events，以电脑、run_id 与 seq 的唯一约束去重，冲突时什么也不做；只有真正插入了一行时，才在同一事务中更新投影。逐段的流式文字（`harness.content.delta` 与 `harness.tool.text.delta`）与运行时的原生协议行（`harness.source.*`）不写入 events，只在步骤的种类变化时更新所在回合的当前步骤：agent_message 为回复，plan、reasoning_text 与 reasoning_summary 为思考，`harness.tool.started` 为工具。载荷被 starlink 去掉的事件照常写入，投影只取其中的事件名、信封与上下文。同一台电脑的批次由 starlink 依次发送，事件因此按 seq 依次写入。created_at_ms 为事件的 occurred_at_ms，received_at_ms 为 server 收到的时间；agent_id、thread_id、session_id、turn_id 与 message_id 取自审计上下文。
 - 投影：
   - `harness.turn.requested` 建立回合，记下开始时间、会话、运行时连接名与触发消息的 message id；`harness.model.updated` 记下模型；`harness.tool.completed` 与 `harness.tool.failed` 按其中的种类计数，codex 的网页搜索开始时还没有动作，结束时才知道种类；`harness.completed`、`harness.failed` 与 `harness.cancelled` 记下结束时间、结果与失败原因。
+  - starlink 的待发队列满时会丢掉事件，回合的结束事件可能因此到不了。收到 server-agent 的 `AGENTS_SAID` 时，状态中带 `turns` 的 agent，它在这台电脑上还没结束、不在 `turns` 中、且开始早于 `said_at_ms` 的回合就此结束：结束时间为这个回合最后一条事件的时间，结果为未知。之后到达的结束事件照常改写结束时间与结果。
   - `harness.usage.updated` 以 total 相对同一运行时会话上一行的累计值计算增量：输入为 input_tokens 与 cache_write_input_tokens 之和，缓存命中为 cached_input_tokens，输出为 output_tokens，费用为 cost_usd，与 0.2 的口径相同；某一项小于上一行时，视为运行时重新计数，以新值为增量。增量同时计入所在的回合。
   - 触发回合的消息以 message id 在 events 中找到：入站消息为 `channel.inbound.persisted`，给出发送者与正文；提醒为 `reminder.fired`，给出提醒的标题。
   - `node.health` 每台电脑只保留最新的一条，与 0.2 相同。
@@ -604,7 +607,7 @@ claudecode 依据 stream-json 中 tool_use 的 name 与 input：
 
 - 动态的区块，经 AGENTS 登记：
   - 正在处理（主栏，顺序 10）：每个进行中的回合一张卡片，标题为「正在处理」加会话名称，旁边是渠道的 logo 与会话类型，以及从开始起算的计时；其下是触发它的消息（发送者与正文，提醒为标题）；步骤为本轮的工具调用，完成的打勾并写时长；当前步骤为回复时写「正在写回复…」，为思考时写「正在思考…」，并写这一步的计时；底部为本轮的输入、输出、缓存命中与已调用工具的次数。窄屏按效果图省去渠道、动词与时长。
-  - 今天（主栏，顺序 20）：标题旁为今天的回合数与失败数，取消的回合不算失败，右侧链接到完整活动记录；今天开始的回合从新到旧，每行为开始时间、来源（提醒到期，或渠道的 logo 加会话名称）、触发的文字、结果（完成、失败、已取消或进行中）、时长与 tokens。宽屏按卡片的高度列出，窄屏列出最新的 3 个。
+  - 今天（主栏，顺序 20）：标题旁为今天的回合数与失败数，取消的回合不算失败，右侧链接到完整活动记录；今天开始的回合从新到旧，每行为开始时间、来源（提醒到期，或渠道的 logo 加会话名称）、触发的文字、结果（完成、失败、已取消、未知或进行中）、时长与 tokens。宽屏按卡片的高度列出，窄屏列出最新的 3 个。
   - 今日用量（侧栏，顺序 20）：今天的 tokens、费用与缓存命中，以及 24 根按查看者时区逐小时的柱子，高度相对当天最大的一小时，没有用量的小时为短桩，当前小时着色。
 - 完整活动记录经 AGENTS 登记为动态之下的 tab：事件从新到旧、按天分组，每页 50 条，与 0.2 相同，末尾为「加载更早的记录」；新的事件经统一总线加在顶部。以 `turn` 参数打开时，从该回合最新的一行起往更早载入一页，该回合的各行底色标出，顶上带「回到最新」；回执即以此链到它的回合，ACTIVITY 给出的回执因此带上回合的 turn id。筛选为全部、回合、渠道、运行时、提醒与失败。各行的来源与写法：
   - 智能体：`harness.turn.requested` 为「开始处理」加会话名称，说明为模型；`harness.completed` 为「本轮完成」，右侧为时长、输入、输出、缓存命中与工具次数；`harness.failed` 为本轮失败与原因；`harness.cancelled` 为「本轮取消」；
