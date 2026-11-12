@@ -797,7 +797,9 @@ class ContribManager:
 
 
 CONTRIB_MANAGER = ServiceKey[ContribManager]("contrib.manager")
-remote = RemoteEntry(CONTRIB_MANAGER, ("add", "operation"))
+remote = RemoteEntry(
+    CONTRIB_MANAGER, ("add", "operation", "installed", "detail", "index")
+)
 
 
 @asynccontextmanager

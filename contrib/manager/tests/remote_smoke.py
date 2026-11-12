@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import signal
 import sys
@@ -15,8 +16,14 @@ from bazaar_contrib_config import ConfigDocument
 from bazaar_contrib_sidecar import CLIENT, Client
 from bazaar_core import Composition, Context, Contrib, ContribEntry
 from live_smoke import configure
+from pydantic import TypeAdapter
 
-from bazaar_contrib_manager import Operation
+from bazaar_contrib_manager import (
+    CatalogEntry,
+    IndexStatus,
+    InstalledPackage,
+    Operation,
+)
 
 FINISHED = ("complete", "failed", "cancelled")
 
@@ -93,6 +100,70 @@ async def exercise(path: Path, source: str):
             assert "started:remote" in await asyncio.to_thread(journal.read_text)
             # The package's remote is served as soon as it is added.
             assert await clients[0].call("example", "name") == journal.name
+            installed = TypeAdapter(tuple[InstalledPackage, ...]).validate_python(
+                await clients[0].call("contrib-manager", "installed")
+            )
+            assert any(
+                item.package == "bazaar-contrib-example"
+                and any(entry.name == "example-file" for entry in item.entries)
+                for item in installed
+            )
+            detail = InstalledPackage.model_validate(
+                await clients[0].call("contrib-manager", "detail", "example")
+            )
+            assert detail.version and detail.package == "bazaar-contrib-example"
+
+            # The catalog and its subscriptions belong to this running host.
+            online = path / "registry" / "market.json"
+            await asyncio.to_thread(
+                online.write_text,
+                json.dumps(
+                    {
+                        "contribs": [
+                            {
+                                "package": "bazaar-contrib-example",
+                                "source": source,
+                                "summary": "From the remote catalog",
+                            }
+                        ]
+                    }
+                ),
+            )
+            location = source.replace("one/simple/", "market.json")
+            for remove in (False, True):
+                operation = Operation.model_validate(
+                    await clients[0].call(
+                        "contrib-manager", "index", location, remove=remove
+                    )
+                )
+                while operation.phase not in FINISHED:
+                    operation = Operation.model_validate(
+                        await clients[0].call(
+                            "contrib-manager", "operation", operation.id
+                        )
+                    )
+                    await asyncio.sleep(0.1)
+                assert operation.phase == "complete", operation.model_dump_json()
+                indexes = TypeAdapter(tuple[IndexStatus, ...]).validate_python(
+                    await clients[0].call("contrib-catalog", "indexes")
+                )
+                assert any(item.location == location for item in indexes) != remove
+                if not remove:
+                    refreshed = TypeAdapter(tuple[IndexStatus, ...]).validate_python(
+                        await clients[0].call("contrib-catalog", "refresh")
+                    )
+                    assert any(
+                        item.location == location and item.entries for item in refreshed
+                    )
+                    catalog = TypeAdapter(tuple[CatalogEntry, ...]).validate_python(
+                        await clients[0].call("contrib-catalog", "entries")
+                    )
+                    assert any(
+                        item.package == "bazaar-contrib-example"
+                        and item.summary == "From the remote catalog"
+                        and location in item.indexes
+                        for item in catalog
+                    )
             # Adding the package again completes with its entry enabled once.
             again = await add()
             assert again[-1].phase == "complete", again[-1].model_dump_json(indent=2)

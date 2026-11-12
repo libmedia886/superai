@@ -12,6 +12,7 @@ lazy from pathlib import Path
 lazy from urllib.parse import urlsplit
 lazy from urllib.request import urlopen
 
+from bazaar_contrib_sidecar import RemoteEntry
 from bazaar_contrib_timer import TIMER
 from bazaar_core import Contrib, EventKey, ServiceKey
 lazy from bazaar_contrib_config import ConfigDocument, Configuration
@@ -146,6 +147,7 @@ class ContribCatalog:
 
 CONTRIB_CATALOG = ServiceKey[ContribCatalog]("contrib.catalog")
 CONTRIB_INDEX_FAILED = EventKey[IndexStatus]("contrib.index.failed")
+remote = RemoteEntry(CONTRIB_CATALOG, ("indexes", "entries", "refresh"))
 
 
 @asynccontextmanager

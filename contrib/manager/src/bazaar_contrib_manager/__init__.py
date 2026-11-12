@@ -5,6 +5,7 @@ from bazaar_contrib_invoke import CommandEntry
 command_entry = CommandEntry(contrib="contrib-manager", help="Manage contribs")
 
 lazy from .catalog import CONTRIB_CATALOG, CONTRIB_INDEX_FAILED, ContribCatalog, indexes
+lazy from .catalog import remote as catalog_remote
 lazy from .contracts import (
     CatalogEntry,
     EntryInfo,
@@ -33,6 +34,7 @@ __all__ = [
     "ManagerConfig",
     "Operation",
     "Package",
+    "catalog_remote",
     "command_entry",
     "indexes",
     "manager",
