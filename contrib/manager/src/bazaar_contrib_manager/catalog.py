@@ -110,10 +110,8 @@ class ContribCatalog:
             for package in index.entries:
                 key = package.package, package.source
                 previous = merged.get(key)
-                if previous is not None:
-                    package = previous
                 merged[key] = CatalogEntry(
-                    **package.model_dump(exclude={"indexes"}),
+                    **package.model_dump(),
                     indexes=(*previous.indexes, index.location)
                     if previous is not None
                     else (index.location,),
