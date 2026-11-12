@@ -20,6 +20,13 @@ app 提供启动输入和默认资源，core 的统一运行接口执行目标�
 
 ## 模块索引与 Python 包源
 
+### 2026-11-12 展示字段支持
+
+- [x] manager 的公共索引条目接受可选 `summary`、`description`、`icon_url`，缓存与合并结果保留它们。
+- [x] 同包同源采用最后配置索引的展示字段，保留全部来源；缺省字段对应空展示。
+- [x] 真实独立安装验收覆盖旧资源索引、HTTP 展示字段、缓存读取、失败后的缓存、追加本地索引及调换顺序。manager 的 index workflow 通过（1 passed），ruff 和仓库根目录 Pyright 检查通过。
+- [ ] 发布 manager，升级宿主后更新 Open Bazaar 索引的公开契约依赖与格式说明。
+
 模块索引是包的安装清单。manager 构建时从 uv.lock 的解析结果筛选全部 contrib/ 工作区包，按包名排序生成官方 package/source 索引，随 manager 的 wheel 和 sdist 发行；官方包源使用 PyPI。未安装的包同样在索引中。
 app 默认配置声明 `resource://bazaar_contrib_manager/catalog.json`，由 manager 读取包内资源。索引列表支持本地文件、HTTP(S) 和 resource:// 地址；配置决定索引的追加和删除，包内官方索引可离线读取。
 每个宿主的配置文档通过 contrib_indexes 保存订阅列表；以下是默认 filesystem 的 TOML 表示：
@@ -28,11 +35,13 @@ app 默认配置声明 `resource://bazaar_contrib_manager/catalog.json`，由 ma
 version = "5"
 
 contrib_indexes = [
-    "/home/user/.bcn/contrib/catalog.json",
+    "resource://bazaar_contrib_manager/catalog.json",
+    "resource://bazaar_contrib_manager/open_bazaar_index.json",
+    "https://raw.githubusercontent.com/open-bazaar/contrib-index/main/index.json",
 ]
 ```
 
-首次配置只带入内置官方索引的本地路径，用户可在 CLI 或页面追加、移除本地文件路径或 HTTP(S) 地址。
+首次配置带入内置官方索引、构建时获取的 Open Bazaar 快照和在线 Open Bazaar 索引，用户可在 CLI 或页面追加、移除索引地址。
 本地路径由目标宿主解析；远端索引不可达时显示该索引的读取错误及已有缓存，节点继续启动。每份索引采用相同 JSON 结构：
 
 ```json
@@ -40,7 +49,10 @@ contrib_indexes = [
   "contribs": [
     {
       "package": "bazaar-contrib-logging",
-      "source": "https://pypi.org/simple/"
+      "source": "https://pypi.org/simple/",
+      "summary": "记录节点运行日志",
+      "description": "将节点运行事件写入日志，便于查看运行情况。",
+      "icon_url": "https://example.org/icons/logging.svg"
     },
     {
       "package": "bazaar-contrib-pg",
@@ -54,17 +66,22 @@ contrib_indexes = [
 | --- | --- | --- |
 | package | Python 发行包名 | uv 依赖要求与已安装发行包对应 |
 | source | Python 包源 URL，如 PyPI 或私有 Simple API 地址 | uv 的包来源绑定、后续升级 |
+| summary | 可选的简短介绍 | 市场卡片 |
+| description | 可选的 Markdown 详情 | 包详情 |
+| icon_url | 可选的图片 URL | 卡片和详情图标 |
+
+三个展示字段由索引维护者填写，缺少哪个就省略对应展示区域。manager 在索引读取、缓存和条目查询中保留它们；市场直接消费目标宿主返回的索引展示字段。
 
 索引读取边界使用 Pydantic 校验位置类型、JSON、包名和源 URL。本地路径或 HTTP(S) 地址标识安装清单，
 条目的 `source` 标识 Python 包源，两者在页面及记录中分别展示。
 每个条目的包名和安装源即可支持选择安装；版本、依赖、平台产物和下载地址由 uv 解析。
 用户可保留默认版本选择，或在安装请求中填写版本范围。
 
-页面展示订阅索引中的登记条目并按来源筛选。同一发行包和包源重复登记时合并展示，保留所有索引来源；
+页面展示订阅索引中的登记条目并按来源筛选。同一发行包和包源重复登记时合并展示，按配置顺序采用最后一项的展示字段（包括缺省值），保留所有索引来源；
 同名包来自不同包源时分别列出，操作使用用户选中的 `package/source` 组合。
 同一宿主的同名发行包对应一个安装来源，用户改选其他来源时更新该包的候选声明，经完整组合解析后替换。
 目录条目通过发行包名匹配已安装元数据，再结合配置中的依赖声明显示所选包源。
-包名、版本、入口和描述等安装后信息从目标宿主读取；官方索引由 BCN workspace 的 contrib 工作区包生成，额外索引作者维护其安装清单。
+包名、版本、入口和实际运行状态从目标宿主读取；官方索引由 BCN workspace 的 contrib 工作区包生成，额外索引作者维护其安装清单和展示信息。
 
 索引内容由目标宿主管理服务读取和缓存，记录读取时间与成功状态。
 离线或读取失败时展示已有缓存及更新时间，并提供重试；读取失败的索引单独显示原因。
@@ -207,7 +224,7 @@ ContribManager 提供替换：在同一次配置保存中停用一个条目、�
 
 市场模块经 server 本体登记，外壳路径为 `/market`，包含“索引”和“已安装”两个视图，共用目标选择器和模块详情。
 索引视图提供本地路径及 HTTP(S) 地址的订阅管理、条目列表、包源筛选、缓存状态与安装操作。
-安装前详情展示索引路径或地址、包名、包源和版本要求输入；安装后补充实际版本、包描述、入口与兼容信息。
+安装前详情展示索引路径或地址、包名、包源、已提供的简介／Markdown 详情／图标和版本要求输入；安装后补充实际版本、入口与兼容信息。
 已安装视图展示包与所属组合、入口、配置实例及实际运行状态，提供参数编辑、启停、升级和卸载。
 用户启用一个条目、而它提供的服务已由另一个条目提供时，启用按钮显示为「替换 X」（X 为现有提供者的入口名），确认后执行替换。
 

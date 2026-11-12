@@ -28,6 +28,9 @@ class IndexEntry(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     package: Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")]
     source: str
+    summary: str | None = None
+    description: str | None = None
+    icon_url: str | None = None
 
     @field_validator("package")
     @classmethod

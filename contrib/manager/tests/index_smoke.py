@@ -51,11 +51,19 @@ async def exercise(path: Path, source: str, other: str) -> None:
         ]
         await asyncio.to_thread(config.write_text, tomli_w.dumps(payload))
 
-    async def publish(name: str, package: str, package_source: str) -> str:
+    async def publish(
+        name: str, package: str, package_source: str, **display: str
+    ) -> str:
         """Serve an index from the local registry, returning where it is read."""
         await asyncio.to_thread(
             (path / "registry" / name).write_text,
-            json.dumps({"contribs": [{"package": package, "source": package_source}]}),
+            json.dumps(
+                {
+                    "contribs": [
+                        {"package": package, "source": package_source, **display}
+                    ]
+                }
+            ),
         )
         return source.replace("one/simple/", name)
 
@@ -88,7 +96,14 @@ async def exercise(path: Path, source: str, other: str) -> None:
         assert "bazaar-contrib-node-management" in await cli("entries")
         assert not connections
 
-    online = await publish("one/online.json", "bazaar-contrib-example", source)
+    display = {
+        "summary": "An indexed plugin",
+        "description": "## Example\n\nInstall this plugin from the catalog.",
+        "icon_url": source.replace("one/simple/", "example.svg"),
+    }
+    online = await publish(
+        "one/online.json", "bazaar-contrib-example", source, **display
+    )
     await subscribe(unreachable, online)
     refreshed = await invoke(options, lambda manager: manager.catalog.refresh())
     assert any(
@@ -97,11 +112,51 @@ async def exercise(path: Path, source: str, other: str) -> None:
     )
     entries = await invoke(options, lambda manager: manager.catalog.entries())
     assert any(
-        entry.package == "bazaar-contrib-example" and online in entry.indexes
+        entry.package == "bazaar-contrib-example"
+        and online in entry.indexes
+        and entry.summary == display["summary"]
+        and entry.description == display["description"]
+        and entry.icon_url == display["icon_url"]
         for entry in entries
     )
     selected = await invoke(options, lambda manager: manager.catalog.select("example"))
     assert selected.source == source
+
+    # A later local index can replace the online entry's display information.
+    local = path / "local-index.json"
+    await asyncio.to_thread(
+        local.write_text,
+        json.dumps(
+            {
+                "contribs": [
+                    {
+                        "package": "bazaar-contrib-example",
+                        "source": source,
+                        "summary": "Local description",
+                    }
+                ]
+            }
+        ),
+    )
+    await subscribe(online, str(local))
+    entries = await invoke(options, lambda manager: manager.catalog.entries())
+    entry = next(
+        entry for entry in entries if entry.package == "bazaar-contrib-example"
+    )
+    assert entry.summary == "Local description"
+    assert entry.description is None and entry.icon_url is None
+    assert online in entry.indexes and str(local) in entry.indexes
+    # Reversing the configured order makes the cached online display take precedence.
+    await subscribe(str(local), online)
+    entries = await invoke(options, lambda manager: manager.catalog.entries())
+    entry = next(
+        entry for entry in entries if entry.package == "bazaar-contrib-example"
+    )
+    assert entry.summary == display["summary"]
+    assert entry.description == display["description"]
+    assert entry.icon_url == display["icon_url"]
+    assert online in entry.indexes and str(local) in entry.indexes
+    await subscribe(unreachable, online)
 
     async def truncate(
         reader: asyncio.StreamReader, writer: asyncio.StreamWriter
@@ -124,6 +179,13 @@ async def exercise(path: Path, source: str, other: str) -> None:
     await asyncio.to_thread((path / "registry" / "one" / "online.json").unlink)
     failed = await invoke(options, lambda manager: manager.catalog.refresh())
     assert any(index.location == online and index.entries for index in failed)
+    entries = await invoke(options, lambda manager: manager.catalog.entries())
+    entry = next(
+        entry for entry in entries if entry.package == "bazaar-contrib-example"
+    )
+    assert entry.summary == display["summary"]
+    assert entry.description == display["description"]
+    assert entry.icon_url == display["icon_url"]
     listed = await cli("index", "list")
     assert all(index.error and index.error in listed for index in failed)
     selected = await invoke(options, lambda manager: manager.catalog.select("example"))
