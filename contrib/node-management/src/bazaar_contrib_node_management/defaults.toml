@@ -2,6 +2,7 @@ version = "5"
 contrib_indexes = [
     "resource://bazaar_contrib_manager/catalog.json",
     "resource://bazaar_contrib_manager/open_bazaar_index.json",
+    "https://raw.githubusercontent.com/open-bazaar/contrib-index/main/index.json",
 ]
 
 [[contribs]]
@@ -18,9 +19,6 @@ agents = []
 entry = "agent-execution"
 [[contribs.enabled]]
 entry = "agent-activity"
-
-[[contribs]]
-package = "bazaar-contrib-agent-command~=0.3.0rc1"
 [[contribs.enabled]]
 entry = "agent-command"
 
@@ -60,6 +58,8 @@ entry = "status"
 package = "bazaar-contrib-manager~=0.3.0rc1"
 [[contribs.enabled]]
 entry = "contrib-manager"
+[[contribs.enabled]]
+entry = "contrib-indexes"
 
 [[contribs]]
 package = "bazaar-contrib-logging~=0.3.0rc1"
@@ -106,7 +106,7 @@ package = "bazaar-contrib-legacy-node-migrations~=0.3.0rc1"
 entry = "legacy-node-migrations"
 
 [[contribs]]
-package = "bazaar-contrib-messages-node~=0.3.0rc1"
+package = "bazaar-contrib-messages~=0.3.0rc1"
 [[contribs.enabled]]
 entry = "messages-node"
 
@@ -121,6 +121,6 @@ package = "bazaar-contrib-reminder~=0.3.0rc1"
 entry = "reminder"
 
 [[contribs]]
-package = "bazaar-contrib-timer-wheel~=0.3.0rc1"
+package = "bazaar-contrib-timer~=0.3.0rc1"
 [[contribs.enabled]]
 entry = "timer-wheel"

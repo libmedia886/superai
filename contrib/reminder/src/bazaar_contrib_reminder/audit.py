@@ -27,6 +27,7 @@ class ReminderAudit:
         metadata: Mapping[str, object] | None = None,
         error_kind: ErrorKind | None = None,
         error_message: str | None = None,
+        message_id: str | None = None,
     ) -> None:
         at_ms = now_ms()
         payload: dict[str, object] = {
@@ -50,7 +51,7 @@ class ReminderAudit:
                 agent_id=correlation.node_id or "",
                 channel=correlation.channel,
                 thread_id=correlation.thread_id,
-                message_id=correlation.outbound_message_id,
+                message_id=message_id,
                 session_id=correlation.runtime_session_id,
                 turn_id=correlation.turn_id,
             ),

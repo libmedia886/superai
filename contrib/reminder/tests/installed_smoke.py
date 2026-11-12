@@ -317,6 +317,9 @@ async def exercise(directory: Path):
             wakes[-1]["thread_id"] == cloud_actor and wakes[-1]["agent_id"] == "Cloud"
         )
         assert "确认讲师介绍" in wakes[-1]["body"]
+        # the firing names the message it wrote, the one the agent wakes on
+        fired = await events(directory, "reminder.fired")
+        assert fired[0]["context"]["message_id"] == wakes[-1]["message_id"]
         state = (await command(reminders, "Cloud", cloud_actor, "list"))["reminders"]
         assert any(
             reminder["reminder_id"] == first_id and reminder["state"] == "fired"

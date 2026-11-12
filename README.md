@@ -50,9 +50,9 @@ bcn agent add \
 bcn run
 ```
 
-New conversations wait for approval; see [agent commands](contrib/agent-command/README.md).
+New conversations wait for approval; see [agent commands](contrib/agent/README.md).
 
-新会话需经批准后才会处理，见 [agent 命令](contrib/agent-command/README.md)。
+新会话需经批准后才会处理，见 [agent 命令](contrib/agent/README.md)。
 
 ## Contribs
 

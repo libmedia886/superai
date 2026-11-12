@@ -8,6 +8,7 @@ from .contracts import (
     MessageService,
     MessageSession,
     MessageStorage,
+    RuntimeSession,
     SessionBindingError,
     SessionBindingValidator,
 )
@@ -22,6 +23,7 @@ __all__ = [
     "MessageStorage",
     "Messages",
     "Mode",
+    "RuntimeSession",
     "SessionBindingError",
     "SessionBindingValidator",
     "Thread",

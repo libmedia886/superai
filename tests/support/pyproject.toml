@@ -1,7 +1,7 @@
 [project]
 name = "bcn-test-support"
 version = "0.1.0"
-description = "Test-only adapters for Bazaar Compute Node"
+description = "Pytest plugin that keeps Bazaar Compute tests out of the real BCN_HOME"
 requires-python = ">=3.14"
 dependencies = []
 
@@ -13,4 +13,4 @@ requires = ["uv_build>=0.12.2,<0.13.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-module-name = ["bcn_test_support", "bcn_pytest"]
+module-name = "bcn_pytest"

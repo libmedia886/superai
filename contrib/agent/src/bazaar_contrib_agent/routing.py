@@ -37,8 +37,11 @@ class Connection:
     provider: ProviderConfig
     priority: int
     context: Context
+    # the connection's key in its agent, `<kind>:<position among that kind>`
+    key: str
     state: states.ConnectionState = states.ConnectionState.RUNNING
     ready: asyncio.Event = field(default_factory=asyncio.Event)
+    received_at_ms: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

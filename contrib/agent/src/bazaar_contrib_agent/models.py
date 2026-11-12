@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Literal, Self
 from uuid import UUID
@@ -56,12 +57,16 @@ class AgentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
     name: str = Field(min_length=1)
-    workspace: Path | None = None
     mode: Literal["session", "dangerous_individual"] = "session"
     session: SessionMode | None = None
     idle_timeout: float = Field(default=0, ge=0, allow_inf_nan=False)
     channel: tuple[ProviderConfig, ...] = ()
     harness: tuple[ProviderConfig, ...] = ()
+
+    def directory(self) -> Path:
+        """The workspace the agent works in, its own under the node's home."""
+        root = Path(os.environ.get("BCN_HOME") or Path.home())
+        return (root / ".bcn" / "workspaces" / self.id).expanduser().resolve()
 
     @model_validator(mode="after")
     def session_configuration(self) -> Self:

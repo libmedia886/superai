@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import AbstractAsyncContextManager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
@@ -40,7 +41,18 @@ from .results import (
 )
 from .states import MessageDirection, Review
 
-SessionBindingValidator = Callable[[Actor, Mapping[str, object]], Awaitable[None]]
+
+@dataclass(frozen=True, slots=True)
+class RuntimeSession:
+    """The runtime session a command is bound to, and the turn it has under way."""
+
+    id: str
+    turn_id: str | None = None
+
+
+SessionBindingValidator = Callable[
+    [Actor, Mapping[str, object]], Awaitable[RuntimeSession]
+]
 
 
 class SessionBindingError(ValueError):

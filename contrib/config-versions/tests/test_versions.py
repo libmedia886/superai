@@ -217,3 +217,146 @@ def test_v4_node_timer_mapping_and_v5_provider_selection(tmp_path: Path, monkeyp
         ],
     }
     assert converter.convert(payload).payload == payload
+
+
+def test_v4_node_connected_to_a_server_keeps_its_link(tmp_path: Path, monkeypatch):
+    from bazaar_contrib_config import ConfigDocument
+
+    from bazaar_contrib_config_versions import Converter
+
+    monkeypatch.setenv("BCN_HOME", str(tmp_path))
+    # what `bcn server connect` left in 0.2's configuration
+    candidate = Converter("5", Converter("4")).convert(
+        {
+            "version": "4",
+            "node": {
+                "audit": "server",
+                "control": "server",
+                "server": {"url": "https://bcs.example.test", "token_env": "BCS_TOKEN"},
+            },
+            "agent": [],
+        }
+    )
+    document = ConfigDocument.model_validate(candidate.payload)
+    starlink = next(
+        entry.config
+        for package in document.contribs
+        for entry in package.enabled
+        if entry.entry == "starlink"
+    )
+    assert starlink["server"] == "https://bcs.example.test"
+    # the token stays where 0.2 kept it, in the environment variable it named
+    assert starlink["token_env"] == "BCS_TOKEN"
+    assert any(
+        requirement.package == "bazaar-contrib-starlink"
+        for requirement in candidate.required_packages
+    )
+    # and the audit is still logged on the node, beside what starlink reports
+    assert any(
+        entry.entry == "logging"
+        for package in document.contribs
+        for entry in package.enabled
+    )
+
+
+def test_v4_brings_the_server_along_when_bcs_has_its_settings(
+    tmp_path: Path, monkeypatch
+):
+    from bazaar_contrib_config import ConfigDocument
+
+    from bazaar_contrib_config_versions import Converter
+
+    monkeypatch.setenv("BCN_HOME", str(tmp_path))
+    converter = Converter("5", Converter("4"))
+    server = {
+        "http",
+        "server-database",
+        "server-migrations",
+        "server",
+        "server-theme-night",
+        "server-theme-day",
+        "server-overview",
+        "server-access",
+        "server-relay-memory",
+        "server-computer",
+        "server-agent",
+        "server-activity",
+        "server-conversation",
+        "server-usage",
+    }
+
+    def converted() -> tuple[dict[str, dict[str, object]], set[str]]:
+        candidate = converter.convert({"version": "4", "node": {}, "agent": []})
+        document = ConfigDocument.model_validate(candidate.payload)
+        return (
+            {
+                entry.entry: entry.config
+                for package in document.contribs
+                for entry in package.enabled
+            },
+            {requirement.package for requirement in candidate.required_packages},
+        )
+
+    assert not server & converted()[0].keys()
+    (tmp_path / ".bcs").mkdir()
+    (tmp_path / ".bcs" / "config.toml").write_text(
+        'listen = "127.0.0.1:9876"\nstorage = "sqlite"\nsession_minutes = 25\n'
+        "retention_days = 7\n",
+        encoding="utf-8",
+    )
+    enabled, packages = converted()
+    assert enabled["http"] == {"listen": "127.0.0.1:9876"}
+    assert enabled["server-database"]["storage"] == "sqlite"
+    assert "server-migrations" in enabled
+    assert {
+        "server",
+        "server-theme-night",
+        "server-theme-day",
+        "server-overview",
+        "server-relay-memory",
+        "server-computer",
+        "server-agent",
+        "server-conversation",
+        "server-usage",
+    } <= enabled.keys()
+    assert enabled["server-access"] == {"session_minutes": 25}
+    assert enabled["server-activity"] == {"retention_days": 7}
+    assert {
+        f"bazaar-contrib-{name}"
+        for name in (
+            "http",
+            "server-database",
+            "server-migrations",
+            "server",
+            "server-overview",
+            "server-access",
+            "server-computer",
+            "server-agent",
+            "server-activity",
+            "server-conversation",
+            "server-usage",
+        )
+    } <= packages
+
+
+def test_v4_node_refreshes_its_indexes_beside_the_manager(tmp_path: Path, monkeypatch):
+    from bazaar_contrib_config import ConfigDocument
+
+    from bazaar_contrib_config_versions import Converter
+
+    monkeypatch.setenv("BCN_HOME", str(tmp_path))
+    candidate = Converter("5", Converter("4")).convert(
+        {"version": "4", "node": {}, "agent": []}
+    )
+    document = ConfigDocument.model_validate(candidate.payload)
+    manager = next(
+        package
+        for package in document.contribs
+        if any(entry.entry == "contrib-manager" for entry in package.enabled)
+    )
+    assert any(entry.entry == "contrib-indexes" for entry in manager.enabled)
+    assert {
+        "resource://bazaar_contrib_manager/catalog.json",
+        "resource://bazaar_contrib_manager/open_bazaar_index.json",
+        "https://raw.githubusercontent.com/open-bazaar/contrib-index/main/index.json",
+    } <= set(document.contrib_indexes)

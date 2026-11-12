@@ -1,0 +1,657 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="night">
+<head>
+<meta charset="utf-8">
+<title>Bazaar · 有马佳奈</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,500..700,0..100;1,9..144,500..700,0..100&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@600;700&display=block" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="flat.css">
+<script src="logos.js"></script>
+<script src="ui.js"></script>
+<script src="awning.js"></script>
+<style>
+  .content { padding-top: 20px; }
+  .tabs { margin: 16px -28px 0; }
+  /* ?tab= shows one of: activity (the default), activity-log, chats, workspace, skills, config, share */
+  .pane { display: none !important; }
+  /* single items whose glyphs sit a pixel off the rest of their component */
+  .tabs .tab[data-t~="activity"] svg.i, .tabs .tab[data-t="share"] svg.i { position: relative; top: -1px; }
+  .live-turn .step:nth-child(2) .k { position: relative; top: 1px; }
+  .cfgform .sec:nth-child(2) h4 .add svg { position: relative; top: -1px; }
+  .ev.bad .w svg { position: relative; top: 1px; }
+  .turn-hd .chip { line-height: 17px; }
+  .main { position: relative; }
+  .okt { display: inline-flex; align-items: center; gap: 6px; color: var(--jade); font-size: 13px; font-weight: 600; line-height: 20px; }
+  .warnt { display: inline-flex; align-items: center; gap: 6px; color: var(--saffron); font-size: 12.5px; font-weight: 600; line-height: 17px; }
+  .warnt svg { position: relative; top: -1px; }
+  .cfgpane { grid-template-columns: 1fr 320px; gap: 20px; flex: 1; min-height: 0; margin-top: 18px; }
+  :root[data-tab="config"] .cfgpane { display: grid !important; }
+  .cfgform { padding: 6px 22px 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .sec { padding: 12px 0 13px; display: grid; gap: 11px; }
+  .sec + .sec { border-top: 1px dashed var(--line); }
+  .sec h4 { margin: 0; font-size: 14px; font-weight: 650; display: flex; align-items: center; }
+  .sec h4 .add { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 600; color: var(--saffron); line-height: 17px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid3 { display: grid; grid-template-columns: 1.1fr 1fr 1.2fr; gap: 16px; }
+  .field label small { margin-left: 6px; font-weight: 400; font-size: 12px; color: var(--faint); }
+  .field .seg { height: 40px; align-items: center; }
+  .pcard { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-2); padding: 12px 16px 14px; display: grid; gap: 11px; }
+  .pc-hd { display: flex; align-items: center; gap: 9px; font-size: 13.5px; }
+  .pc-hd .muted { font-size: 12.5px; }
+  .pc-hd .rm { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--muted); }
+  .cfg-ft { margin-top: auto; display: flex; align-items: center; gap: 10px; padding: 12px 0 14px; border-top: 1px solid var(--line-soft); }
+  .cfgpane .field { gap: 6px; }
+  .cfgpane .input { height: 38px; }
+  .cfgpane .field .seg { height: 38px; }
+  .dirty { display: flex; align-items: center; gap: 6px; color: var(--saffron); font-size: 12.5px; }
+  .dirty::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--saffron); }
+  .after { padding: 4px 16px 14px; }
+  .after div { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; font-size: 13px; line-height: 1.55; color: var(--text-2); }
+  .after svg { color: var(--jade); margin-top: 2px; flex: none; }
+  .danger-card { border-color: color-mix(in srgb, var(--crimson) 35%, var(--line)); }
+  .danger-card p { margin: 0; padding: 0 16px 12px; font-size: 13px; line-height: 1.6; color: var(--text-2); }
+  .danger-card .btn { margin: 0 16px 16px; }
+  .btn.danger-o { color: var(--crimson); background: transparent; border-color: color-mix(in srgb, var(--crimson) 35%, transparent); }
+  .wspane { flex: 1; min-height: 0; margin-top: 18px; flex-direction: column; }
+  :root[data-tab="workspace"] .wspane { display: flex !important; }
+  .ws { flex: 1; min-height: 0; overflow: hidden; }
+  .tree { padding: 0 8px 8px; }
+  .fr { display: grid; grid-template-columns: 1fr 120px 140px; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 8px; font-size: 13.5px; }
+  .fr.h { font-size: 12px; font-weight: 600; letter-spacing: .04em; color: var(--faint); border-bottom: 1px solid var(--line-soft); border-radius: 0; margin-bottom: 4px; }
+  .fr:not(.h) { line-height: 20px; }
+  .fr .nm { display: flex; align-items: center; gap: 8px; color: var(--text-2); }
+  .fr.dir .nm { color: var(--text); font-weight: 600; }
+  .fr .nm svg.i { width: 15px; height: 15px; color: var(--muted); flex: none; }
+  .fr.dir .nm svg.i:not(.tw) { color: var(--saffron); }
+  .fr:not(.dir):not(.h) .nm { padding-left: 23px; }
+  .fr.d1 .nm { margin-left: 24px; }
+  .fr.d2 .nm { margin-left: 48px; }
+  .fr .sz, .fr .tm { font: 12.5px var(--font-mono); color: var(--muted); }
+  .fr.open:not(.h) { background: var(--surface-2); }
+  .fr.more .nm { padding-left: 23px; color: var(--saffron); font-weight: 600; }
+  .fr.more .nm small { margin-left: 8px; font-weight: 400; color: var(--muted); }
+  :root[data-file="md"] .fr[data-f="md"], :root[data-file="text"] .fr[data-f="text"] { background: color-mix(in srgb, var(--saffron) 14%, transparent); }
+  :root[data-file="md"] .fr[data-f="md"] .nm, :root[data-file="text"] .fr[data-f="text"] .nm { color: var(--text); }
+  /* ?file= opens a workspace file in a drawer: md rendered as Markdown, text as it is with line numbers */
+  :root[data-file] .backdrop { display: block; }
+  :root[data-file="md"] .drawer.file.md, :root[data-file="text"] .drawer.file.text { display: flex; }
+  .drawer.file { width: 680px; }
+  .drawer.file .d-hd { gap: 10px; }
+  .drawer.file .d-hd > svg.i { color: var(--muted); }
+  .drawer.file .d-hd .meta { font: 12.5px var(--font-mono); color: var(--muted); }
+  .drawer.file .fpath { display: flex; align-items: center; gap: 8px; padding: 10px 24px; border-bottom: 1px solid var(--line-soft); font-size: 12.5px; color: var(--muted); line-height: 19px; }
+  .drawer.file .fpath .mono { color: var(--text-2); }
+  .drawer.file .fpath > span { white-space: nowrap; }
+  .drawer.file .fpath .copy svg.i { position: relative; top: -1px; }
+  .drawer.file .fpath .copy { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; color: var(--text-2); }
+  .drawer.file .d-bd { overflow: hidden; }
+  .fview.md { font-size: 14.5px; line-height: 1.75; color: var(--text-2); }
+  .fview.md h1 { margin: 0 0 6px; font-family: var(--font-display); font-size: 24px; font-weight: 650; color: var(--text); }
+  .fview.md h2 { margin: 18px 0 6px; padding-bottom: 6px; border-bottom: 1px solid var(--line-soft); font-size: 15px; font-weight: 650; color: var(--text); }
+  .fview.md p { margin: 0 0 8px; }
+  .fview.md ul { margin: 0; padding-left: 20px; }
+  .fview.md li { margin: 3px 0; }
+  .fview.md a { color: var(--saffron); text-decoration: none; }
+  .fview.md code { padding: 1px 6px; border-radius: 5px; background: var(--surface-2); font: 12.5px var(--font-mono); color: var(--text); }
+  /* other text is recognised by its file name and drawn as a code block, coloured as code blocks in Markdown are */
+  .fview.text.code { font-size: 13px; font-variant-ligatures: none; padding: 14px 16px; counter-reset: ln; }
+  .fview.text .l { display: block; }
+  .fview.text .l::before { counter-increment: ln; content: counter(ln); display: inline-block; width: 26px; margin-right: 18px; text-align: right; color: var(--faint); }
+  .fview.text .k { color: var(--text); }
+  .skpane { grid-template-columns: 1fr 380px; gap: 20px; flex: 1; min-height: 0; margin-top: 18px; }
+  :root[data-tab="skills"] .skpane { display: grid !important; }
+  .skills { padding: 0 16px 10px; }
+  .skill { display: grid; grid-template-columns: 170px 1fr; gap: 14px; padding: 9px 0; font-size: 13px; }
+  .skill + .skill { border-top: 1px solid var(--line-soft); }
+  .skill b { font-weight: 600; font-size: 13px; }
+  .skill span { color: var(--text-2); }
+  .mcp { padding: 0 16px 14px; display: grid; gap: 12px; }
+  .srv { border: 1px solid var(--line); border-radius: var(--r-md); padding: 12px 14px; background: var(--surface-2); }
+  .srv-hd { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .srv-hd b { font: 600 13px var(--font-mono); }
+  .tools { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tools span { font: 12px var(--font-mono); padding: 3px 8px; border-radius: 6px; background: var(--sunken); border: 1px solid var(--line-soft); color: var(--text-2); }
+  .tools span.more { font-family: var(--font-sans); color: var(--muted); }
+  :root[data-tab="activity"] .pane[data-p="activity"], :root[data-tab="share"] .pane[data-p="activity"] { display: grid !important; }
+  :root[data-tab="config"] .cfgpane { display: grid !important; }
+  .backdrop, .drawer { display: none; }
+  :root[data-tab="share"] .backdrop { display: block; }
+  :root[data-tab="share"] .drawer.share { display: flex; }
+  .backdrop { position: absolute; inset: 68px 0 0 0; background: rgba(5, 7, 10, .62); backdrop-filter: blur(2px); z-index: 2; }
+  :root[data-theme="day"] .backdrop { background: rgba(60, 45, 20, .25); }
+  .drawer { position: absolute; top: 0; right: 0; bottom: 0; width: 500px; background: var(--surface); border-left: 1px solid var(--line); box-shadow: -30px 0 60px -20px rgba(0,0,0,.6); flex-direction: column; z-index: 3; }
+  .drawer .d-hd { height: 68px; display: flex; align-items: center; gap: 12px; padding: 1px 24px 0; border-bottom: 1px solid var(--line-soft); }
+  .drawer .d-hd h3 { margin: 0; font-family: var(--font-display); font-size: 20px; font-weight: 650; }
+  .drawer:not(.file) .d-hd h3 { line-height: 31px; }
+  .drawer .d-hd .icon-btn { margin-left: auto; }
+  .drawer .d-bd { padding: 22px 24px; display: flex; flex-direction: column; gap: 16px; flex: 1; min-height: 0; }
+  .drawer .hint { margin: 0; font-size: 13px; line-height: 1.6; color: var(--text-2); }
+  .d-ft { padding: 16px 24px; border-top: 1px solid var(--line-soft); display: flex; align-items: center; gap: 10px; }
+  .grants { border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+  .grants .gr { display: grid; grid-template-columns: 1fr 64px 64px 64px; align-items: center; gap: 8px; padding: 11px 16px; }
+  .grants .gr + .gr { border-top: 1px solid var(--line-soft); }
+  .grants .gr.h { padding: 9px 16px; background: var(--surface-2); font-size: 12px; font-weight: 600; letter-spacing: .04em; color: var(--faint); }
+  .grants .gr.h span:not(:first-child), .grants .gr .ck { justify-self: center; }
+  .grants .rn b { display: block; font-size: 13.5px; font-weight: 600; }
+  .grants .rn small { font-size: 12px; color: var(--muted); }
+  .grants .gr.changed { background: color-mix(in srgb, var(--saffron) 7%, transparent); }
+  .ck { width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid var(--line-strong); background: var(--surface); display: grid; place-items: center; color: var(--saffron-ink); }
+  .ck.on { background: var(--saffron); border-color: var(--saffron); }
+  .ck svg { width: 12px; height: 12px; stroke-width: 3; }
+  .fact .then { display: inline-grid; place-items: center; color: var(--faint); margin: 0 2px; }
+  .fact .then svg.i { width: 11px; height: 11px; }
+  .ord { width: 18px; height: 18px; flex: none; border-radius: 6px; display: inline-grid; place-items: center; font: 700 11px var(--font-mono); color: var(--muted); background: var(--surface-2); border: 1px solid var(--line); }
+  .ord.on { color: var(--saffron-ink); background: var(--saffron); border-color: var(--saffron); }
+  .badt { display: inline-flex; align-items: center; gap: 6px; color: var(--saffron); font-size: 13px; font-weight: 600; line-height: 20px; }
+  /* 状态 in stage 14: a group per channel, its connection state on the group's first line */
+  .chans { padding: 0 16px 12px; }
+  .chan + .chan { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
+  .chan-hd { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; line-height: 20px; }
+  .chan-dt { padding-left: 24px; font-size: 12.5px; line-height: 19px; color: var(--muted); }
+  .chan-dt.err { color: var(--crimson); }
+  .chan-hd b { font-weight: 600; }
+  .chan-hd .okt, .chan-hd .badt { margin-left: auto; }
+  .cols .stack .card + .card { margin-top: 0; }
+  .sec h4 small { margin-left: 8px; font-size: 12px; font-weight: 400; color: var(--faint); }
+  .plist { display: grid; gap: 8px; }
+  .prow { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-2); font-size: 13.5px; }
+  .prow b { font-weight: 650; }
+  .prow .muted { font-size: 12.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .prow .ed { margin-left: auto; font-size: 12.5px; font-weight: 600; color: var(--saffron); }
+  .prow .x { color: var(--muted); display: inline-grid; place-items: center; }
+  .prow .grip { display: inline-flex; flex-direction: column; gap: 0; color: var(--faint); cursor: grab; }
+  .prow .grip svg.i { width: 12px; height: 8px; }
+  :root[data-edit] .backdrop { display: block; }
+  :root[data-edit] .drawer.edit { display: flex; }
+  .drawer.edit .d-hd { gap: 10px; }
+  .drawer.edit .d-bd { gap: 18px; }
+  .drawer.edit .field .seg { height: 40px; align-items: center; }
+  .secret-note { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: var(--r-md); background: var(--jade-soft); color: var(--text-2); font-size: 12.5px; line-height: 19px; }
+  .secret-note svg { color: var(--jade); margin-top: 1px; flex: none; }
+  /* the header's chips wrap as whole chips; one too long for the row is cut short */
+  .profile > div { min-width: 0; }
+  .profile .facts .fact { max-width: 100%; min-width: 0; }
+  .profile .facts .fact b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* stage 14: ?tab=chats is the 会话 tab, drawn on Tifa, who has a first contact waiting; ?tab=activity-log is the full record behind 动态 */
+  :root[data-tab="chats"] .for-kana, :root:not([data-tab="chats"]) .for-tifa { display: none !important; }
+  :root[data-tab="chats"] .pane[data-p="chats"] { display: grid !important; }
+  .clist { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .sub-tabs { flex: none; display: flex; gap: 4px; padding: 4px 12px 0; border-bottom: 1px solid var(--line-soft); }
+  .sub-tabs .badge { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--saffron); color: var(--saffron-ink); font-size: 11px; font-weight: 700; display: inline-grid; place-items: center; }
+  .crows { padding: 4px 8px 8px; overflow: hidden; }
+  .crow { display: grid; grid-template-columns: 40px 190px minmax(0, 1fr) 76px 22px; gap: 14px; align-items: center; padding: 10px 12px; }
+  .crow + .crow { border-top: 1px solid var(--line-soft); }
+  .crow .cav { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; position: relative; }
+  .crow .cav.grp { background: var(--raised); border: 1px solid var(--line); color: var(--text-2); }
+  .crow .cav .g { position: absolute; right: -4px; bottom: -4px; width: 17px; height: 17px; border: 2px solid var(--surface); box-sizing: content-box; }
+  .crow .nm { min-width: 0; }
+  .crow .nm b { display: block; font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .crow .nm small { font-size: 12px; color: var(--muted); }
+  .crow .last { font-size: 13px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .crow .tm { font-size: 12px; color: var(--faint); text-align: right; white-space: nowrap; }
+  .crow .un { justify-self: end; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--saffron); color: var(--saffron-ink); font-size: 11.5px; font-weight: 700; display: grid; place-items: center; }
+  .count-pill { min-width: 22px; height: 22px; padding: 0 7px; border-radius: 999px; background: var(--saffron); color: var(--saffron-ink); font-size: 12px; font-weight: 700; display: grid; place-items: center; }
+  /* 自动回复: what the agent sends to contacts waiting for a decision */
+  .autoreply .card-hd { padding-bottom: 6px; }
+  .autoreply .more { color: var(--text-2); }
+  .autoreply .hint { margin: 0; padding: 0 16px; font-size: 12.5px; color: var(--muted); }
+  .autoreply .bubble { margin: 10px 16px 16px; padding: 10px 14px; width: fit-content; border-radius: 4px 14px 14px 14px; background: color-mix(in srgb, var(--saffron) 7%, var(--surface)); border: 1px solid var(--saffron-line); font-size: 13.5px; line-height: 1.6; }
+  /* 完整活动记录: every event, newest first, a day at a time */
+  .logpane { flex: 1; min-height: 0; margin-top: 18px; flex-direction: column; }
+  :root[data-tab="activity-log"] .logpane { display: flex !important; }
+  .log { flex: 1; min-height: 0; overflow: hidden; }
+  .log-hd { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line-soft); }
+  .log-hd h3 { margin: 0; font-size: 14.5px; font-weight: 650; }
+  .log-hd .sub { color: var(--muted); font-size: 12.5px; }
+  .log-hd .seg { margin-left: auto; }
+  .log-hd .seg span { padding: 5px 12px; }
+  .lday { display: flex; align-items: baseline; gap: 8px; padding: 6px 20px; background: var(--surface-2); border-bottom: 1px solid var(--line-soft); font-size: 12.5px; font-weight: 650; }
+  .lday small { font-size: 12px; font-weight: 500; color: var(--muted); }
+  .ev + .lday { border-top: 1px solid var(--line-soft); }
+  .ev { display: grid; grid-template-columns: 42px 54px minmax(0, 1fr) auto; gap: 12px; align-items: center; height: 32px; padding: 0 20px; font-size: 13px; color: var(--text-2); }
+  .ev + .ev { border-top: 1px solid var(--line-soft); }
+  .ev .tm { font: 12.5px var(--font-mono); color: var(--muted); }
+  .src { justify-self: start; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 5px; letter-spacing: .02em; white-space: nowrap; }
+  .src.ch { color: var(--indigo); background: var(--indigo-soft); }
+  .src.rt { color: var(--text-2); background: var(--sunken); box-shadow: inset 0 0 0 1px var(--line); }
+  .src.ag { color: var(--saffron); background: var(--saffron-soft); }
+  .src.rm { color: var(--plum); background: var(--plum-soft); }
+  .ev .tx { min-width: 0; display: flex; align-items: center; gap: 10px; white-space: nowrap; overflow: hidden; }
+  .ev .tx .w { flex: none; display: inline-flex; align-items: center; gap: 6px; color: var(--text); }
+  .ev .tx b { font-weight: 600; }
+  .ev .tx code { font: 12px var(--font-mono); color: var(--text); background: var(--sunken); border: 1px solid var(--line-soft); padding: 1px 6px; border-radius: 5px; }
+  .ev .tx .d { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+  .ev .tx .d.mono { font-size: 12px; }
+  .ev .mt { display: flex; align-items: center; gap: 12px; font: 12px var(--font-mono); color: var(--muted); white-space: nowrap; }
+  .ev .mt .tog { display: inline-flex; align-items: center; gap: 2px; font: 600 12px/17px var(--font-ui); color: var(--text-2); }
+  .ev.bad .tx .w { color: var(--crimson); }
+  .log-ft { display: flex; justify-content: center; padding: 10px; border-top: 1px solid var(--line-soft); }
+</style>
+<script>
+  {
+    const tab = new URLSearchParams(location.search).get('tab') || 'activity';
+    document.documentElement.dataset.tab = tab;
+    if (tab === 'chats') document.title = 'Bazaar · Tifa';
+    const edit = new URLSearchParams(location.search).get('edit');
+    if (new URLSearchParams(location.search).get('many')) addEventListener('DOMContentLoaded', () => {
+      const facts = document.querySelector('.profile .facts');
+      const runtime = [...facts.children][2];
+      runtime.insertAdjacentHTML('beforebegin', '<span class="fact"><span class="g wecom"><i data-l="wecom"></i></span><b>运维值班群</b></span><span class="fact"><span class="g tg"><i data-l="telegram"></i></span><b>@armslave_backup_notifications_bot</b></span>');
+      runtime.insertAdjacentHTML('beforeend', '<span class="then"><i data-i="right" class="xs"></i></span><span class="g codex"><i data-l="codex"></i></span><b>gpt-5.4-mini</b> · 备用');
+      facts.querySelectorAll('[data-l]').forEach(el => { el.outerHTML = logo(el.dataset.l, el.className || ''); });
+      facts.querySelectorAll('[data-i]').forEach(el => { el.outerHTML = icon(el.dataset.i, el.className || ''); });
+    }, { once: true });
+    if (edit) document.documentElement.dataset.edit = edit;
+    const file = new URLSearchParams(location.search).get('file');
+    if (file) document.documentElement.dataset.file = file;
+    addEventListener('DOMContentLoaded', () => {
+      const on = tab === 'share' ? 'share' : tab;
+      for (const t of document.querySelectorAll('.tab[data-t]')) if (t.dataset.t.split(' ').includes(on)) t.classList.add('on');
+    });
+  }
+</script>
+</head>
+<body>
+<div class="app">
+  <aside class="side" data-side="agents"></aside>
+  <main class="main">
+    <header class="top">
+      <div class="crumbs"><span>智能体</span><i data-i="right" class="xs"></i><b class="for-kana">有马佳奈</b><b class="for-tifa">Tifa</b></div>
+      <div class="actions">
+        <div class="btn ghost"><i data-i="share" class="sm"></i>共享</div>
+        <div class="btn"><i data-i="pencil" class="sm"></i>编辑配置</div>
+        <div class="icon-btn"><i data-i="more"></i></div>
+      </div>
+    </header>
+    <section class="content">
+      <div class="profile for-kana">
+        <div class="av lg h1">佳</div>
+        <div>
+          <h2>有马佳奈 <span class="status work"><span class="lantern work"></span>正在工作 · 3 分 12 秒</span></h2>
+          <div class="facts">
+            <span class="fact"><span class="g tg"><i data-l="telegram"></i></span><b>@armslave_bot</b></span>
+            <span class="fact"><span class="g lark"><i data-l="lark"></i></span><b>有马佳奈</b></span>
+            <span class="fact"><span class="g claudecode"><i data-l="claudecode"></i></span><b>claude-opus-5-5</b> · 思考强度 高<span class="then"><i data-i="right" class="xs"></i></span><span class="g codex"><i data-l="codex"></i></span><b>gpt-5.5-codex</b> · 备用</span>
+            <span class="fact"><i data-i="monitor"></i>运行在 <b>kana-vm</b></span>
+            <span class="fact"><i data-i="chats"></i>每个会话独立</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="profile for-tifa">
+        <div class="av lg h4">T</div>
+        <div>
+          <h2>Tifa <span class="status on"><span class="lantern on"></span>空闲</span></h2>
+          <div class="facts">
+            <span class="fact"><span class="g tg"><i data-l="telegram"></i></span><b>@tifa_front_bot</b></span>
+            <span class="fact"><span class="g codex"><i data-l="codex"></i></span><b>gpt-5.5-codex</b></span>
+            <span class="fact"><i data-i="monitor"></i>运行在 <b>kana-vm</b></span>
+            <span class="fact"><i data-i="chats"></i>每个会话独立</span>
+          </div>
+        </div>
+      </div>
+
+      <nav class="tabs">
+        <span class="tab" data-t="activity activity-log"><i data-i="activity" class="sm"></i>动态</span>
+        <span class="tab" data-t="chats"><i data-i="chats" class="sm"></i>会话 <span class="n">12</span></span>
+        <span class="tab" data-t="workspace"><i data-i="folder" class="sm"></i>工作区</span>
+        <span class="tab" data-t="skills"><i data-i="book" class="sm"></i>技能 <span class="n">8</span></span>
+        <span class="tab" data-t="config"><i data-i="settings" class="sm"></i>配置</span>
+        <span class="tab" data-t="share"><i data-i="share" class="sm"></i>共享</span>
+      </nav>
+
+      <!-- 配置: the agent as its computer holds it; the basics edited in place, each channel and runtime in a drawer drawn from its own schema -->
+      <div class="pane cfgpane" data-p="config">
+        <div class="card cfgform">
+          <div class="sec">
+            <h4>基本信息</h4>
+            <div class="grid2">
+              <div class="field"><label>名字</label><div class="input"><span>有马佳奈</span></div></div>
+              <div class="field"><label>空闲回收</label><div class="input"><span class="num">600</span><span class="suffix">秒，0 为不回收</span></div></div>
+            </div>
+            <div class="grid2">
+              <div class="field"><label>模式</label><div class="seg"><span class="on">每个会话独立</span><span>个人助理 · 完全访问</span></div></div>
+              <div class="field"><label>会话沙箱</label><div class="seg"><span class="on">工作区可写</span><span>完全访问</span></div></div>
+            </div>
+          </div>
+          <div class="sec">
+            <h4>渠道<small>同时在线</small><span class="add"><i data-i="plus" class="xs"></i>添加渠道</span></h4>
+            <div class="plist">
+              <div class="prow"><span class="g tg"><i data-l="telegram"></i></span><b>@armslave_bot</b><span class="muted">Bot Token 已保存</span><span class="ed">编辑</span><span class="x"><i data-i="trash" class="xs"></i></span></div>
+              <div class="prow"><span class="g lark"><i data-l="lark"></i></span><b>有马佳奈</b><span class="muted">cli_a7f3e29c81b4d00e · 飞书 open.feishu.cn · App Secret 已保存</span><span class="ed">编辑</span><span class="x"><i data-i="trash" class="xs"></i></span></div>
+            </div>
+          </div>
+          <div class="sec">
+            <h4>运行时<small>拖动排序：排第一的在用，出问题时按顺序换下一个</small><span class="add"><i data-i="plus" class="xs"></i>添加运行时</span></h4>
+            <div class="plist">
+              <div class="prow"><span class="grip"><i data-i="more" class="xs"></i><i data-i="more" class="xs"></i></span><span class="ord on">1</span><span class="g claudecode"><i data-l="claudecode"></i></span><b class="mono">claude-opus-5-5</b><span class="muted">思考强度 高 · 用电脑上已登录的账号</span><span class="ed">编辑</span><span class="x"><i data-i="trash" class="xs"></i></span></div>
+              <div class="prow"><span class="grip"><i data-i="more" class="xs"></i><i data-i="more" class="xs"></i></span><span class="ord">2</span><span class="g codex"><i data-l="codex"></i></span><b class="mono">gpt-5.5-codex</b><span class="muted">推理档位 中 · API Key 已保存</span><span class="ed">编辑</span><span class="x"><i data-i="trash" class="xs"></i></span></div>
+            </div>
+          </div>
+          <div class="cfg-ft"><span class="dirty">有未保存的修改</span><div class="btn" style="margin-left:auto">取消</div><div class="btn primary">保存</div></div>
+        </div>
+        <div class="stack cfgside">
+          <div class="card">
+            <div class="card-hd"><h3>保存之后</h3></div>
+            <div class="after">
+              <div><i data-i="okc" class="sm"></i><span>配置写回 kana-vm，有马佳奈按新配置重新启动；进行中的那一轮做完再切换。</span></div>
+              <div><i data-i="shield" class="sm"></i><span>凭据只写入 kana-vm，不保存在服务端；已保存的凭据不再显示，只能替换。</span></div>
+            </div>
+          </div>
+          <div class="card danger-card">
+            <div class="card-hd"><h3>删除智能体</h3></div>
+            <p>有马佳奈会停下，配置从 kana-vm 上移除。工作区里的文件和会话记录留在那台电脑上。</p>
+            <div class="btn danger-o"><i data-i="trash" class="xs"></i>删除有马佳奈</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- a channel or runtime edited in a drawer: the fields come from its configuration schema on that computer -->
+      <aside class="drawer edit">
+        <div class="d-hd"><span class="g lark"><i data-l="lark"></i></span><h3>有马佳奈</h3><div class="icon-btn"><i data-i="x" class="sm"></i></div></div>
+        <div class="d-bd">
+          <p class="hint">这些字段由 kana-vm 上的这个渠道插件给出。</p>
+          <div class="field"><label>App ID</label><div class="input"><span class="mono">cli_a7f3e29c81b4d00e</span></div><span class="hint">飞书开放平台里自建应用的 App ID。</span></div>
+          <div class="field"><label>App Secret</label><div class="input focus"><i data-i="key" class="sm" style="color:var(--saffron)"></i><span class="mono" style="letter-spacing:.06em">••••••••••••••••••••••Rq</span><span class="suffix">新值，保存后替换</span></div><span class="hint">已保存的不会显示；留空则保持不变。</span></div>
+          <div class="field"><label>区域</label><div class="seg"><span class="on">飞书 open.feishu.cn</span><span>Lark open.larksuite.com</span></div><span class="hint">海外版 Lark 选后者。</span></div>
+          <div class="secret-note"><i data-i="shield" class="sm"></i><div>凭据只写入 <b>kana-vm</b>，不保存在服务端。</div></div>
+        </div>
+        <div class="d-ft"><div class="btn" style="margin-left:auto">取消</div><div class="btn primary">完成</div></div>
+      </aside>
+
+      <!-- 工作区: what is in it, opened a directory at a time -->
+      <div class="pane wspane" data-p="workspace">
+        <div class="card ws">
+          <div class="card-hd"><h3>工作区</h3><span class="sub">kana-vm 上的 <span class="mono">/home/kana/.bcn/workspaces/arima</span> · 点开文件夹读下一层，点开文件看内容</span><span class="more" title="重新读取" aria-label="重新读取"><i data-i="refresh" class="sm"></i></span></div>
+          <div class="tree">
+            <div class="fr h"><span>名称</span><span>大小</span><span>修改时间</span></div>
+            <div class="fr dir open"><span class="nm"><i data-i="down" class="xs tw"></i><i data-i="folder" class="sm"></i>bazaar-compute-node</span><span class="sz">—</span><span class="tm">今天 15:18</span></div>
+            <div class="fr dir d1"><span class="nm"><i data-i="right" class="xs tw"></i><i data-i="folder" class="sm"></i>app</span><span class="sz">—</span><span class="tm">今天 15:02</span></div>
+            <div class="fr dir d1"><span class="nm"><i data-i="right" class="xs tw"></i><i data-i="folder" class="sm"></i>contrib</span><span class="sz">—</span><span class="tm">今天 14:56</span></div>
+            <div class="fr dir d1"><span class="nm"><i data-i="right" class="xs tw"></i><i data-i="folder" class="sm"></i>plans</span><span class="sz">—</span><span class="tm">今天 14:40</span></div>
+            <div class="fr d1"><span class="nm"><i data-i="file" class="sm"></i>AGENTS.md</span><span class="sz">4.8 KB</span><span class="tm">11 月 4 日</span></div>
+            <div class="fr d1" data-f="text"><span class="nm"><i data-i="file" class="sm"></i>pyproject.toml</span><span class="sz">1.6 KB</span><span class="tm">今天 15:02</span></div>
+            <div class="fr d1"><span class="nm"><i data-i="file" class="sm"></i>uv.lock</span><span class="sz">412 KB</span><span class="tm">今天 15:02</span></div>
+            <div class="fr dir"><span class="nm"><i data-i="right" class="xs tw"></i><i data-i="folder" class="sm"></i>design</span><span class="sz">—</span><span class="tm">11 月 6 日</span></div>
+            <div class="fr dir open"><span class="nm"><i data-i="down" class="xs tw"></i><i data-i="folder" class="sm"></i>notes</span><span class="sz">—</span><span class="tm">11 月 5 日</span></div>
+            <div class="fr d1"><span class="nm"><i data-i="file" class="sm"></i>2026-08-21.md</span><span class="sz">3.2 KB</span><span class="tm">8 月 21 日</span></div>
+            <div class="fr d1"><span class="nm"><i data-i="file" class="sm"></i>2026-08-22.md</span><span class="sz">5.7 KB</span><span class="tm">8 月 22 日</span></div>
+            <div class="fr more d1"><span class="nm">显示更多<small>已列出 50 项，还有 263 项</small></span><span></span><span></span></div>
+            <div class="fr" data-f="md"><span class="nm"><i data-i="file" class="sm"></i>MEMORY.md</span><span class="sz">38.2 KB</span><span class="tm">今天 15:20</span></div>
+            <div class="fr"><span class="nm"><i data-i="file" class="sm"></i>notes.md</span><span class="sz">6.4 KB</span><span class="tm">今天 11:30</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- a workspace file opened from the tree: Markdown rendered, other text as it is; read from the computer when opened -->
+      <aside class="drawer file md">
+        <div class="d-hd"><i data-i="file" class="sm"></i><h3>MEMORY.md</h3><span class="meta">38.2 KB · 今天 15:20</span><div class="icon-btn"><i data-i="x" class="sm"></i></div></div>
+        <div class="fpath"><span>kana-vm 上的</span><span class="mono">/home/kana/.bcn/workspaces/arima/MEMORY.md</span><span class="copy"><i data-i="copy" class="xs"></i>复制路径</span></div>
+        <div class="d-bd">
+          <div class="fview md">
+            <h1>记忆索引</h1>
+            <p>有马佳奈在 kana-vm 上的长期记忆，每条一行，细节在 <code>notes/</code> 里。</p>
+            <h2>用户</h2>
+            <ul>
+              <li>yuchanns 习惯先看效果图，定了再写计划。</li>
+              <li>中文里说「插件」，英文照旧说 contrib。</li>
+            </ul>
+            <h2>项目</h2>
+            <ul>
+              <li><a>第 13 阶段</a>：agent 模块，计划写在 server.md，等 review。</li>
+              <li><a>发版顺序</a>：access、computer、agent，最后 management。</li>
+            </ul>
+            <h2>规则</h2>
+            <ul>
+              <li>每次发 PyPI 都要等他点头。</li>
+              <li>一个 Task 一个提交，review 的修改 amend 进去。</li>
+              <li>浏览器标签用完就关。</li>
+            </ul>
+          </div>
+        </div>
+      </aside>
+      <aside class="drawer file text">
+        <div class="d-hd"><i data-i="file" class="sm"></i><h3>pyproject.toml</h3><span class="meta">TOML · 1.6 KB · 今天 15:02</span><div class="icon-btn"><i data-i="x" class="sm"></i></div></div>
+        <div class="fpath"><span>kana-vm 上的</span><span class="mono">/home/kana/.bcn/workspaces/arima/bazaar-compute-node/pyproject.toml</span><span class="copy"><i data-i="copy" class="xs"></i>复制路径</span></div>
+        <div class="d-bd">
+          <div class="fview text code"><span class="l"><span class="f">[project]</span></span><span class="l"><span class="k">name</span> = <span class="s">&quot;bazaar-compute&quot;</span></span><span class="l"><span class="k">version</span> = <span class="s">&quot;0.3.0rc18&quot;</span></span><span class="l"><span class="k">description</span> = <span class="s">&quot;Bazaar Compute Node&quot;</span></span><span class="l"><span class="k">readme</span> = <span class="s">&quot;README.md&quot;</span></span><span class="l"><span class="k">license</span> = <span class="s">&quot;Apache-2.0&quot;</span></span><span class="l"><span class="k">requires-python</span> = <span class="s">&quot;&gt;=3.15&quot;</span></span><span class="l"><span class="k">dependencies</span> = [</span><span class="l">    <span class="s">"bazaar-core~=0.3.0rc1"</span>,</span><span class="l">    <span class="s">"bazaar-contrib-config~=0.3.0rc1"</span>,</span><span class="l">    <span class="s">"click&gt;=8.1.0"</span>,</span><span class="l">]</span><span class="l"></span><span class="l"><span class="f">[project.scripts]</span></span><span class="l"><span class="k">bcn</span> = <span class="s">&quot;bazaar_compute_node.cli:main&quot;</span></span></div>
+        </div>
+      </aside>
+
+      <!-- 技能: what the runtime found for the agent in its workspace, by where it found it, and the MCP servers it sees -->
+      <div class="pane skpane" data-p="skills">
+        <div class="stack">
+          <div class="card">
+            <div class="card-hd"><h3>工作区</h3><span class="sub">2 个</span><span class="more"><span class="g claudecode"><i data-l="claudecode"></i></span>2.1.40 · 刚刚读取</span></div>
+            <div class="skills">
+              <div class="skill"><b class="mono">release-notes</b><span>按合并的 PR 整理发版说明，写进 CHANGELOG</span></div>
+              <div class="skill"><b class="mono">plan-review</b><span>对照 AGENTS.md 检查计划文档的写法与引用</span></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-hd"><h3>用户</h3><span class="sub">4 个</span></div>
+            <div class="skills">
+              <div class="skill"><b class="mono">brainstorming</b><span>动手之前先把想法问清楚、拆成设计</span></div>
+              <div class="skill"><b class="mono">cdp-browser</b><span>经 Chrome DevTools 协议操作已登录的浏览器标签</span></div>
+              <div class="skill"><b class="mono">pdf</b><span>读取、合并、拆分 PDF，抽出文字与表格</span></div>
+              <div class="skill"><b class="mono">xlsx</b><span>读写表格文件，保留公式与格式</span></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-hd"><h3>系统</h3><span class="sub">2 个</span></div>
+            <div class="skills">
+              <div class="skill"><b class="mono">update-config</b><span>修改运行时自己的设置</span></div>
+              <div class="skill"><b class="mono">code-review</b><span>审查当前改动中的缺陷</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="stack">
+          <div class="card">
+            <div class="card-hd"><h3>MCP 服务</h3><span class="sub">2 个</span></div>
+            <div class="mcp">
+              <div class="srv"><div class="srv-hd"><b>notes</b><span class="okt"><i data-i="okc" class="xs"></i>无需认证</span></div><div class="tools"><span>save_note</span><span>list_notes</span><span>search_notes</span></div></div>
+              <div class="srv"><div class="srv-hd"><b>github</b><span class="warnt"><i data-i="key" class="xs"></i>未登录</span></div><div class="tools"><span>search_issues</span><span>get_pull_request</span><span>list_commits</span><span class="more">还有 9 个</span></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 共享: each role a row, each point a column the account itself holds on this agent -->
+      <div class="backdrop"></div>
+      <aside class="drawer share">
+        <div class="d-hd"><h3>分享有马佳奈</h3><div class="icon-btn"><i data-i="x" class="sm"></i></div></div>
+        <div class="d-bd">
+          <p class="hint">选择分享给哪些角色、可以做什么。角色里的成员还要有对应的功能权限才用得上；你只能分享自己在这个智能体上有的操作。</p>
+          <div class="input"><i data-i="search" class="xs muted"></i><span class="ph">搜索角色</span></div>
+          <div class="grants">
+            <div class="gr h"><span>角色</span><span>查看</span><span>修改</span><span>删除</span></div>
+            <div class="gr"><div class="rn"><b>成员</b><small>全局默认角色</small></div><span class="ck on"><i data-i="check"></i></span><span class="ck"></span><span class="ck"></span></div>
+            <div class="gr changed"><div class="rn"><b>运维</b></div><span class="ck on"><i data-i="check"></i></span><span class="ck on"><i data-i="check"></i></span><span class="ck"></span></div>
+            <div class="gr"><div class="rn"><b>设计组</b></div><span class="ck"></span><span class="ck"></span><span class="ck"></span></div>
+            <div class="gr"><div class="rn"><b>访客</b></div><span class="ck"></span><span class="ck"></span><span class="ck"></span></div>
+          </div>
+        </div>
+        <div class="d-ft"><span class="dirty">有未保存的修改</span><div class="btn" style="margin-left:auto">取消</div><div class="btn primary">保存</div></div>
+      </aside>
+
+      <!-- 动态: the turn in progress, today's turns, each channel's connection, usage by the hour and reminders -->
+      <div class="cols pane" data-p="activity">
+        <div class="stack">
+          <div class="card live-turn">
+            <div class="turn-hd">
+              <span class="lantern work"></span>
+              <h3>正在处理 #bazaar-compute 开发</h3>
+              <span class="chip"><span class="g tg"><i data-l="telegram"></i></span>群聊</span>
+              <span class="clock"><i data-i="clock" class="xs"></i>03:12</span>
+            </div>
+            <div class="quote"><div class="av xs h1">Y</div><div><b>yuchanns</b>然后接下来是啥</div></div>
+            <div class="steps">
+              <div class="step"><span class="k"><i data-i="check"></i></span><span>运行命令 <code>git log --oneline -3 origin/0.3</code> <span style="color:var(--muted)">查看 0.3 分支最近的提交</span></span><span class="d">1.2s</span></div>
+              <div class="step"><span class="k"><i data-i="check"></i></span><span>调用 <code>notes / search_notes</code> <span style="color:var(--muted)">query="第 11 阶段"</span></span><span class="d">0.4s</span></div>
+              <div class="step now"><span class="k"><i data-i="sparkles"></i></span><span>正在写回复…</span><span class="d">00:41</span></div>
+            </div>
+            <div class="turn-ft"><span>本轮 <b>38.2k</b> 输入</span><span><b>2.1k</b> 输出</span><span>缓存命中 <b>71%</b></span><span style="margin-left:auto">已调用工具 <b>2</b> 次</span></div>
+          </div>
+
+          <div class="card" style="flex:1;min-height:0;overflow:hidden">
+            <div class="card-hd"><h3>今天</h3><span class="sub">14 轮 · 1 次失败</span><span class="more">完整活动记录<i data-i="right" class="xs"></i></span></div>
+            <div class="turns">
+              <div class="turn"><span class="tm">15:20</span><span class="where"><i data-i="alarm" class="xs"></i>提醒到期</span><span class="what">跟进 PR #145 的 CI 与 Codex 结果</span><span class="ok"><i data-i="okc" class="xs"></i>完成</span><span class="dur">22s</span><span class="tok">6.4k</span></div>
+              <div class="turn"><span class="tm">14:05</span><span class="where"><span class="g tg"><i data-l="telegram"></i></span>#bazaar-compute 开发</span><span class="what">看看 opendal 的 README 怎么写</span><span class="ok"><i data-i="okc" class="xs"></i>完成</span><span class="dur">3m10s</span><span class="tok">96k</span></div>
+              <div class="turn"><span class="tm">13:48</span><span class="where"><span class="g tg"><i data-l="telegram"></i></span>#bazaar-compute 开发</span><span class="what">README 太口语化，不像给普通用户看的</span><span class="bad"><i data-i="alert" class="xs"></i>失败</span><span class="dur">41s</span><span class="tok">12k</span></div>
+              <div class="turn"><span class="tm">11:30</span><span class="where"><span class="g tg"><i data-l="telegram"></i></span>与 yuchanns 的私聊</span><span class="what">帮我确认一下 rc17 的发布状态</span><span class="ok"><i data-i="okc" class="xs"></i>完成</span><span class="dur">1m02s</span><span class="tok">18k</span></div>
+              <div class="turn"><span class="tm">10:03</span><span class="where"><span class="g tg"><i data-l="telegram"></i></span>#bazaar-compute 开发</span><span class="what">待合并的你合一下，其他的都删了</span><span class="ok"><i data-i="okc" class="xs"></i>完成</span><span class="dur">2m14s</span><span class="tok">41k</span></div>
+              <div class="turn"><span class="tm">09:12</span><span class="where"><span class="g tg"><i data-l="telegram"></i></span>#bazaar-compute 开发</span><span class="what">我们还有什么分支需要合并吗</span><span class="ok"><i data-i="okc" class="xs"></i>完成</span><span class="dur">48s</span><span class="tok">12k</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="stack">
+          <div class="card">
+            <div class="card-hd"><h3>状态</h3><span class="more"><i data-i="refresh" class="xs"></i>刷新</span></div>
+            <div class="chans">
+              <div class="chan">
+                <div class="chan-hd"><span class="g tg"><i data-l="telegram"></i></span><b>@armslave_bot</b><span class="okt"><i data-i="okc" class="xs"></i>正常</span></div>
+                <div class="chan-dt">连接于今天 09:02 · 最后活动刚刚</div>
+              </div>
+              <div class="chan">
+                <div class="chan-hd"><span class="g lark"><i data-l="lark"></i></span><b>有马佳奈</b><span class="badt"><i data-i="alert" class="xs"></i>重新连接中 · 第 3 次</span></div>
+                <div class="chan-dt">连接于今天 09:02 · 最后活动 14 分钟前</div>
+                <div class="chan-dt err">最近错误：长连接被服务端关闭</div>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-hd"><h3>今日用量</h3><span class="more">按小时</span></div>
+            <div class="usage-big"><span class="val num">412k</span><span class="sub">tokens · $1.38 · 缓存命中 68%</span></div>
+            <div class="bars">
+              <i class="z" style="height:6%"></i><i class="z" style="height:6%"></i><i class="z" style="height:6%"></i><i class="z" style="height:6%"></i><i class="z" style="height:6%"></i><i class="z" style="height:6%"></i>
+              <i class="z" style="height:6%"></i><i class="z" style="height:6%"></i><i style="height:22%"></i><i style="height:48%"></i><i style="height:66%"></i><i style="height:40%"></i>
+              <i style="height:30%"></i><i style="height:58%"></i><i style="height:92%"></i><i style="height:74%"></i><i class="c" style="height:28%"></i><i class="z" style="height:6%"></i>
+              <i class="z" style="height:6%"></i><i class="z" style="height:6%"></i><i class="z" style="height:6%"></i><i class="z" style="height:6%"></i><i class="z" style="height:6%"></i><i class="z" style="height:6%"></i>
+            </div>
+            <div class="axis"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
+          </div>
+          <div class="card" style="flex:1;min-height:0;overflow:hidden">
+            <div class="card-hd"><h3>提醒</h3><span class="sub">2 个待触发</span></div>
+            <div class="rem"><div class="ic"><i data-i="alarm" class="sm"></i></div><div><div class="when">明天 09:00</div><div class="what">跟进 #145 的 review 结论 · #bazaar-compute 开发</div></div></div>
+            <div class="rem"><div class="ic"><i data-i="alarm" class="sm"></i></div><div><div class="when">每周一 10:00</div><div class="what">整理上周进展 · 与 yuchanns 的私聊</div></div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 会话 (stage 14): the agent's conversations, newest first; first contacts wait under 新联系人 until allowed -->
+      <div class="cols pane" data-p="chats">
+        <div class="card clist">
+          <div class="sub-tabs"><span class="tab on">会话 <span class="n">12</span></span><span class="tab">新联系人 <span class="badge">1</span></span></div>
+          <div class="crows">
+            <div class="crow">
+              <div class="cav grp"><i data-i="users" class="sm"></i><span class="g tg"><i data-l="telegram"></i></span></div>
+              <div class="nm"><b>#前端组</b><small>群聊 · 8 位成员</small></div>
+              <div class="last">Tifa：已经修好了，单测全部通过</div>
+              <span class="tm">14:50</span><span class="un">3</span>
+            </div>
+            <div class="crow">
+              <div class="cav grp"><i data-i="users" class="sm"></i><span class="g tg"><i data-l="telegram"></i></span></div>
+              <div class="nm"><b>#组件库</b><small>群聊 · 5 位成员</small></div>
+              <div class="last">陈晨：按钮的禁用态还要再调一下</div>
+              <span class="tm">昨天</span><span class="un">1</span>
+            </div>
+            <div class="crow">
+              <div class="cav av h1">Y<span class="g tg"><i data-l="telegram"></i></span></div>
+              <div class="nm"><b>yuchanns</b><small>私聊</small></div>
+              <div class="last">Tifa：晨市的配色在 Safari 上也正常</div>
+              <span class="tm">昨天</span><span></span>
+            </div>
+            <div class="crow">
+              <div class="cav grp"><i data-i="users" class="sm"></i><span class="g tg"><i data-l="telegram"></i></span></div>
+              <div class="nm"><b>#设计走查</b><small>群聊 · 4 位成员</small></div>
+              <div class="last">王磊：首页空状态的插画再看一下</div>
+              <span class="tm">11 月 6 日</span><span></span>
+            </div>
+            <div class="crow">
+              <div class="cav grp"><i data-i="users" class="sm"></i><span class="g tg"><i data-l="telegram"></i></span></div>
+              <div class="nm"><b>#bazaar-web 发布</b><small>群聊 · 6 位成员</small></div>
+              <div class="last">Tifa：rc18 的页面已经部署到预览环境</div>
+              <span class="tm">11 月 6 日</span><span></span>
+            </div>
+            <div class="crow">
+              <div class="cav av h6">陈<span class="g tg"><i data-l="telegram"></i></span></div>
+              <div class="nm"><b>陈晨</b><small>私聊</small></div>
+              <div class="last">陈晨：好的，谢谢</div>
+              <span class="tm">11 月 5 日</span><span></span>
+            </div>
+            <div class="crow">
+              <div class="cav grp"><i data-i="users" class="sm"></i><span class="g tg"><i data-l="telegram"></i></span></div>
+              <div class="nm"><b>#前端周报</b><small>群聊 · 12 位成员</small></div>
+              <div class="last">Tifa：本周周报已发，见置顶消息</div>
+              <span class="tm">11 月 4 日</span><span></span>
+            </div>
+            <div class="crow">
+              <div class="cav av h3">王<span class="g tg"><i data-l="telegram"></i></span></div>
+              <div class="nm"><b>王磊</b><small>私聊</small></div>
+              <div class="last">王磊：收到</div>
+              <span class="tm">11 月 2 日</span><span></span>
+            </div>
+            <div class="crow">
+              <div class="cav grp"><i data-i="users" class="sm"></i><span class="g tg"><i data-l="telegram"></i></span></div>
+              <div class="nm"><b>#新人引导</b><small>群聊 · 3 位成员</small></div>
+              <div class="last">Tifa：开发环境的文档更新了，按步骤来就行</div>
+              <span class="tm">10 月 30 日</span><span></span>
+            </div>
+          </div>
+        </div>
+        <div class="stack">
+          <div class="card">
+            <div class="card-hd"><h3>新联系人</h3><span class="count-pill">1</span></div>
+            <div class="attn">
+              <div class="attn-item">
+                <div class="ic req"><i data-i="userplus" class="sm"></i></div>
+                <div class="tx"><b>李雷</b> 想私聊 <b>Tifa</b> <span class="g tg" style="vertical-align:-1px"><i data-l="telegram"></i></span>
+                  <div class="q">“你好，我是新来的同事，想请你帮我搭一下开发环境…”</div>
+                  <div class="acts"><span class="btn sm ok"><i data-i="check" class="xs"></i>允许</span><span class="btn sm no"><i data-i="x" class="xs"></i>拒绝</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="card autoreply">
+            <div class="card-hd"><h3>自动回复</h3><span class="more" title="编辑" aria-label="编辑"><i data-i="pencil" class="sm"></i></span></div>
+            <p class="hint">发给等待审批的联系人</p>
+            <div class="bubble">你好，我先确认一下，稍后回复你。</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 完整活动记录 (stage 14): what the agent, its channels, its runtimes and its reminders did, newest first; tool calls as the runtimes report them -->
+      <div class="pane logpane" data-p="activity-log">
+        <div class="card log">
+          <div class="log-hd">
+            <span class="btn sm"><i data-i="left" class="xs"></i>动态</span>
+            <h3>完整活动记录</h3>
+            <div class="seg"><span class="on">全部</span><span>回合</span><span>渠道</span><span>运行时</span><span>提醒</span><span>失败</span></div>
+          </div>
+          <div class="lday">今天<small>11 月 8 日</small></div>
+          <div class="ev"><span class="tm">15:23</span><span class="src rt">运行时</span><span class="tx"><span class="w">调用 <code>notes / search_notes</code></span><span class="d mono">query="第 11 阶段"</span></span><span class="mt"></span></div>
+          <div class="ev"><span class="tm">15:22</span><span class="src rt">运行时</span><span class="tx"><span class="w">运行命令 <code>git log --oneline -3 origin/0.3</code></span><span class="d">查看 0.3 分支最近的提交</span></span><span class="mt"></span></div>
+          <div class="ev"><span class="tm">15:21</span><span class="src ag">智能体</span><span class="tx"><span class="w">开始处理 <b>#bazaar-compute 开发</b></span><span class="d">claude-opus-5-5</span></span><span class="mt"></span></div>
+          <div class="ev"><span class="tm">15:21</span><span class="src ch">渠道</span><span class="tx"><span class="w">收到 <b>yuchanns</b> 在 <b>#bazaar-compute 开发</b> 的消息</span><span class="d">“然后接下来是啥”</span></span><span class="mt"></span></div>
+          <div class="ev"><span class="tm">15:20</span><span class="src ag">智能体</span><span class="tx"><span class="w">本轮完成 · <b>#bazaar-compute 开发</b></span></span><span class="mt">22 秒 · 输入 6.1k · 输出 0.3k · 缓存命中 64% · 工具 1 次</span></div>
+          <div class="ev"><span class="tm">15:20</span><span class="src ch">渠道</span><span class="tx"><span class="w">回复了 <b>#bazaar-compute 开发</b></span><span class="d">“#145 的 CI 全部通过，Codex 没有新的意见。”</span></span><span class="mt"></span></div>
+          <div class="ev"><span class="tm">15:20</span><span class="src rt">运行时</span><span class="tx"><span class="w">运行命令 <code>gh pr checks 145</code></span><span class="d">查看 #145 的检查结果</span></span><span class="mt"></span></div>
+          <div class="ev"><span class="tm">15:20</span><span class="src ag">智能体</span><span class="tx"><span class="w">开始处理 <b>#bazaar-compute 开发</b></span><span class="d">claude-opus-5-5</span></span><span class="mt"></span></div>
+          <div class="ev"><span class="tm">15:20</span><span class="src rm">提醒</span><span class="tx"><span class="w">提醒到期 · 跟进 PR #145 的 CI 与 Codex 结果</span><span class="d">#bazaar-compute 开发</span></span><span class="mt"></span></div>
+          <div class="lday">昨天<small>11 月 7 日</small></div>
+          <div class="ev"><span class="tm">23:12</span><span class="src ch">渠道</span><span class="tx"><span class="w">Telegram 重新连上</span><span class="d">@armslave_bot</span></span><span class="mt"></span></div>
+          <div class="ev"><span class="tm">22:52</span><span class="src ag">智能体</span><span class="tx"><span class="w">本轮完成 · <b>与 yuchanns 的私聊</b></span></span><span class="mt">1 分 48 秒 · 输入 21k · 输出 1.2k · 缓存命中 52% · 工具 2 次</span></div>
+          <div class="ev"><span class="tm">22:52</span><span class="src ch">渠道</span><span class="tx"><span class="w">回复了 <b>与 yuchanns 的私聊</b></span><span class="d">“合并进 0.3 的分支都删了，现在只剩 0.3 和 main。”</span></span><span class="mt"></span></div>
+          <div class="ev"><span class="tm">22:51</span><span class="src rt">运行时</span><span class="tx"><span class="w">运行命令 <code>git branch --merged 0.3</code></span><span class="d mono">bazaar-compute-node</span></span><span class="mt">退出码 0 · 0.2 秒<span class="tog">输出<i data-i="right" class="xs"></i></span></span></div>
+          <div class="ev bad"><span class="tm">22:50</span><span class="src rt">运行时</span><span class="tx"><span class="w"><i data-i="alert" class="xs"></i>claude-opus-5-5 被限流，改用 gpt-5.5-codex</span><span class="d">与 yuchanns 的私聊</span></span><span class="mt"></span></div>
+          <div class="log-ft"><span class="btn sm">加载更早的记录</span></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+</body>
+</html>

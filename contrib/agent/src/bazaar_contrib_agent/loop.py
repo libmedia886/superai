@@ -46,6 +46,7 @@ from bazaar_contrib_messages import (
     Messages,
     MessageService,
     Mode,
+    RuntimeSession,
     SessionBindingError,
     Thread,
 )
@@ -80,6 +81,7 @@ class Runtime:
     harness: Harness
     provider: ProviderConfig
     priority: int
+    key: str
     state: states.Lifecycle = states.Lifecycle.RUNNING
     pending: int = 0
     banned_until_ms: int = 0
@@ -115,6 +117,8 @@ class ActorLoop:
     idle_remaining_ms: int = 0
     active: ActiveTurn | None = None
     upgrade_announced: str | None = None
+    working_since_ms: int | None = None
+    working_on: str | None = None
 
     def drain(self) -> list[Wakeup]:
         pending: list[Wakeup] = []
@@ -141,8 +145,11 @@ class AgentLoop:
         tool_config: Path,
         instance_id: UUID,
         channel_order: dict[str, int],
+        harness_order: dict[str, int],
     ):
         self.instance_id = instance_id
+        self.started_at_ms = time_ns() // 1_000_000
+        self.harness_order = harness_order
         self.agent = agent
         self.idle_timeout_ms = int(config.idle_timeout * 1000)
         self.command = command
@@ -201,7 +208,7 @@ class AgentLoop:
 
     async def validate_binding(
         self, actor: Actor, request: Mapping[str, object]
-    ) -> None:
+    ) -> RuntimeSession:
         if request.get("agent_id") != self.actors.agent_id:
             raise SessionBindingError("Agent binding is invalid")
         if (
@@ -225,6 +232,10 @@ class AgentLoop:
             capability.encode(), binding.capability.encode()
         ):
             raise SessionBindingError("session capability is invalid")
+        active = None if loop is None else loop.active
+        return RuntimeSession(
+            binding.session.id, None if active is None else active.turn.id
+        )
 
     async def receive(self, connection: Connection) -> None:
         await connection.ready.wait()
@@ -455,6 +466,7 @@ class AgentLoop:
             context=AuditContext(
                 agent_id=self.agent.id,
                 channel=connection.kind,
+                connection=connection.key,
                 target_kind=inbound.target.kind,
                 thread_id=inbound.thread_id,
                 message_id=inbound.id,
@@ -517,6 +529,7 @@ class AgentLoop:
                 ),
             },
         )
+        connection.received_at_ms = message.received_at_ms
         try:
             async with self.for_thread(Thread(message.thread_id)):
                 recorded = await self.contacts.record_inbound(message)
@@ -1026,6 +1039,11 @@ class AgentLoop:
                 joined: list[Wakeup] = []
                 turn = asyncio.create_task(self.turn(loop, batch))
                 loop.task = turn
+                loop.working_since_ms = time_ns() // 1_000_000
+                presentation = batch[0].message.target_presentation
+                loop.working_on = (
+                    None if presentation is None else presentation.display_name
+                )
                 receive = asyncio.create_task(loop.queue.get())
                 received = False
                 quiet = None
@@ -1093,6 +1111,8 @@ class AgentLoop:
                         loop.queue.task_done()
                         item.runtime.pending -= 1
                     loop.task = None
+                    loop.working_since_ms = None
+                    loop.working_on = None
                     loop.idle_remaining_ms = self.idle_timeout_ms
                 state = loop.state
                 binding = None if isinstance(state, states.Dormant) else state.binding
@@ -1291,6 +1311,7 @@ class AgentLoop:
                 context = AuditContext(
                     agent_id=self.agent.id,
                     channel=connection.kind,
+                    connection=runtime.key,
                     harness=runtime.name,
                     target_kind=anchor.target_kind.value,
                     thread_id=message.thread_id,
@@ -1530,15 +1551,18 @@ class AgentLoop:
                         if not isinstance(loop.state, states.Idle):
                             await self.close_session(loop)
                         runtime.banned_until_ms = self.timer.now_ms + 3_600_000
+                        alternative = self.select(exclude=attempted)
                         await self.audit.publish(
                             "harness.pool.banned",
                             context=context,
                             payload={
                                 "ban_until_ms": runtime.banned_until_ms,
                                 "terminal_state": outcome.payload.type,
+                                "fallback": None
+                                if alternative is None
+                                else alternative.key,
                             },
                         )
-                        alternative = self.select(exclude=attempted)
                         if alternative is not None:
                             await self.close_session(loop)
                             runtime = alternative

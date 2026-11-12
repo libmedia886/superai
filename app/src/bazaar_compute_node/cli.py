@@ -10,11 +10,9 @@ import click
 from bazaar_contrib_config import CONFIGURATION, ConfigDocument, Configuration
 from bazaar_contrib_invoke import (
     COMMANDS,
-    RUN,
     CommandCatalog,
     CommandEntry,
     Commands,
-    Run,
     contribs,
     table,
 )
@@ -23,10 +21,12 @@ from bazaar_core import Composition, Context, Contrib, ContribEntry
 lazy from .boot import build, node
 
 
-async def serve(ctx: Context, configuration: Configuration, run: Run) -> None:
+async def serve(ctx: Context, configuration: Configuration) -> None:
+    """Serve until Ctrl+C cancels the run, or SIGTERM ends it where there is one."""
     loop = asyncio.get_running_loop()
+    stopped = asyncio.Event()
     if sys.platform != "win32":
-        loop.add_signal_handler(signal.SIGTERM, run.stopped.set)
+        loop.add_signal_handler(signal.SIGTERM, stopped.set)
     try:
         await configuration.activate()
         await asyncio.to_thread(
@@ -34,7 +34,7 @@ async def serve(ctx: Context, configuration: Configuration, run: Run) -> None:
             table(contribs(ctx.snapshots), ("Contrib", "State", "Result")),
         )
         await asyncio.to_thread(click.echo, "bcn ready")
-        await run.stopped.wait()
+        await stopped.wait()
     finally:
         if sys.platform != "win32":
             loop.remove_signal_handler(signal.SIGTERM)
@@ -44,11 +44,10 @@ async def serve(ctx: Context, configuration: Configuration, run: Run) -> None:
 async def lifespan(ctx: Context):
     commands = ctx.accept(COMMANDS)
     configuration = ctx.accept(CONFIGURATION)
-    serving = ctx.accept(RUN)
 
     @click.command("run", help=command_entry.help, short_help=command_entry.help)
     def run():
-        return serve(ctx, configuration, serving)
+        return serve(ctx, configuration)
 
     with commands.register(run):
         yield
@@ -59,7 +58,7 @@ command_entry = CommandEntry(
 )
 running = ContribEntry(
     name=command_entry.contrib,
-    definition=Contrib(accepts=[COMMANDS, CONFIGURATION, RUN], lifespan=lifespan),
+    definition=Contrib(accepts=[COMMANDS, CONFIGURATION], lifespan=lifespan),
 )
 
 

@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="night">
+<head>
+<meta charset="utf-8">
+<title>Bazaar · 智能体</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,500..700,0..100;1,9..144,500..700,0..100&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@600;700&display=block" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="flat.css">
+<script src="logos.js"></script>
+<script src="ui.js"></script>
+<script src="awning.js"></script>
+<style>
+  .main { position: relative; }
+  .tbl { overflow: visible; }
+  .tbl .tr.h { border-radius: var(--r-lg) var(--r-lg) 0 0; }
+  .tr { display: grid; grid-template-columns: 1.35fr 1.45fr 1.3fr 1.4fr 1fr .8fr 40px; gap: 14px; align-items: center; padding: 11px 20px; }
+  .tr + .tr { border-top: 1px solid var(--line-soft); }
+  .tr.h { padding-top: 12px; padding-bottom: 12px; font-size: 12px; color: var(--faint); font-weight: 600; letter-spacing: .04em; background: var(--surface-2); }
+  .ag { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .ag .av { border-radius: 10px; }
+  .ag b { display: block; font-size: 14px; }
+  .ag span { font-size: 12px; color: var(--muted); }
+  /* where it talks and what it runs on, a line each: an agent may have several channels, and
+     several runtimes in the order it tries them, the first in use and the rest standing by */
+  .prov { display: grid; gap: 5px; min-width: 0; }
+  .prov .p { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 13px; color: var(--text-2); white-space: nowrap; }
+  .prov .p b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+  .prov .p.alt b { color: var(--muted); }
+  .prov .p em { flex: none; font-style: normal; font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 5px; color: var(--muted); background: var(--surface-2); border: 1px solid var(--line-soft); }
+  .prov .p.alt { color: var(--muted); }
+  .pcname { font-size: 13px; }
+  .pcname .online, .pcname .online.off { font-size: 13px; font-weight: 500; color: var(--text-2); }
+  .use b { display: block; font: 600 12.5px var(--font-mono); color: var(--text); }
+  .use small { font: 11.5px var(--font-mono); color: var(--muted); }
+  .use.none { font-size: 13px; color: var(--faint); }
+  .tr.away { opacity: .72; }
+  .status.work { font-family: var(--font-mono); }
+  .status.st-e { height: auto; min-height: 26px; padding: 4px 10px 4px 8px; line-height: 1.4; white-space: normal; }
+  .filters { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+  .filters .input { height: 36px; width: 240px; }
+  .filters .seg span { padding: 5px 12px; }
+  .filters .seg span .lantern { margin-right: 6px; vertical-align: -2px; }
+  .filters .sel { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; border-radius: var(--r-sm); border: 1px solid var(--line-strong); background: var(--sunken); font-size: 13px; color: var(--text-2); line-height: 20px; }
+  /* ?view= shows one of: list (the default), menu, delete */
+  .backdrop, .pop, .confirm { display: none; }
+  :root[data-view="menu"] .pop { display: block; }
+  :root[data-view="delete"] .backdrop { display: block; }
+  :root[data-view="delete"] .confirm { display: flex; }
+  .backdrop { position: absolute; inset: 68px 0 0 0; background: rgba(5, 7, 10, .62); backdrop-filter: blur(2px); }
+  :root[data-theme="day"] .backdrop { background: rgba(60, 45, 20, .25); }
+  .acts { position: relative; display: grid; place-items: center; }
+  .acts .more { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: var(--muted); }
+  :root[data-view="menu"] .tr.picked .acts .more { background: var(--surface-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--line); }
+  .pop { position: absolute; top: 36px; right: 0; z-index: 3; min-width: 168px; padding: 6px; border-radius: var(--r-md); background: var(--raised); border: 1px solid var(--line); box-shadow: var(--shadow); }
+  .pop .it { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; font-size: 13.5px; color: var(--text-2); white-space: nowrap; line-height: 20px; }
+  .pop .it.hover { background: var(--surface-2); color: var(--text); }
+  .pop .it.share svg { position: relative; top: -1px; }
+  .pop .it.danger { color: var(--crimson); }
+  .pop .sep { height: 1px; margin: 4px 6px; background: var(--line-soft); }
+  .confirm { position: absolute; z-index: 3; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 460px; flex-direction: column; gap: 14px; padding: 24px; border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); }
+  .confirm .ic { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: var(--crimson-soft); color: var(--crimson); }
+  .confirm h3 { margin: 0; font-family: var(--font-display); font-size: 19px; font-weight: 650; line-height: 28px; }
+  .confirm p { margin: 0; font-size: 13.5px; line-height: 22px; color: var(--text-2); }
+  .confirm .row { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
+  .btn.danger { background: var(--crimson); color: #fff; border-color: transparent; }
+</style>
+<script>
+  document.documentElement.dataset.view = new URLSearchParams(location.search).get('view') || 'list';
+</script>
+</head>
+<body>
+<div class="app">
+  <aside class="side" data-side="agents"></aside>
+  <main class="main">
+    <header class="top">
+      <h1>智能体</h1>
+      <span class="muted" style="font-size:13px">9 位 · 3 位正在工作</span>
+      <div class="actions"><div class="btn primary"><i data-i="plus" class="sm"></i>新建智能体</div></div>
+    </header>
+    <section class="content">
+      <div class="filters">
+        <div class="input"><i data-i="search" class="xs muted"></i><span class="ph">搜索名字</span></div>
+        <div class="seg"><span class="on">全部</span><span><i class="lantern work"></i>正在工作</span><span><i class="lantern fail"></i>出错</span><span><i class="lantern off"></i>离线</span></div>
+        <div class="sel"><i data-i="monitor" class="xs"></i>所有电脑<i data-i="down" class="xs"></i></div>
+      </div>
+      <div class="card tbl">
+        <div class="tr h"><span>智能体</span><span>状态</span><span>渠道</span><span>运行时</span><span>电脑</span><span>今日用量</span><span></span></div>
+        <div class="tr">
+          <div class="ag"><div class="av sm h1">佳</div><div><b>有马佳奈</b><span>每个会话独立</span></div></div>
+          <span><span class="status work"><span class="lantern work"></span>3:12</span></span>
+          <div class="prov"><span class="p"><span class="g tg"><i data-l="telegram"></i></span><b>@armslave_bot</b></span><span class="p"><span class="g lark"><i data-l="lark"></i></span><b>有马佳奈</b></span></div>
+          <div class="prov"><span class="p"><span class="g claudecode"><i data-l="claudecode"></i></span><b>claude-opus-5-5</b></span><span class="p alt"><span class="g codex"><i data-l="codex"></i></span><b>gpt-5.5-codex</b><em>备用</em></span></div>
+          <span class="pcname"><span class="online">kana-vm</span></span>
+          <div class="use"><b>412k</b><small>$1.38</small></div>
+          <div class="acts"><span class="more"><i data-i="more" class="sm"></i></span></div>
+        </div>
+        <div class="tr picked">
+          <div class="ag"><div class="av sm h2">夸</div><div><b>啊夸</b><span>每个会话独立</span></div></div>
+          <span><span class="status work"><span class="lantern work"></span>0:48</span></span>
+          <div class="prov"><span class="p"><span class="g lark"><i data-l="lark"></i></span><b>啊夸</b></span></div>
+          <div class="prov"><span class="p"><span class="g codex"><i data-l="codex"></i></span><b>gpt-5.5-codex</b></span></div>
+          <span class="pcname"><span class="online">aqua-mbp</span></span>
+          <div class="use"><b>96k</b><small>$0.21</small></div>
+          <div class="acts"><span class="more"><i data-i="more" class="sm"></i></span>
+            <div class="pop"><div class="it hover"><i data-i="settings" class="sm"></i>配置</div><div class="it share"><i data-i="share" class="sm"></i>分享</div><div class="sep"></div><div class="it danger"><i data-i="trash" class="sm"></i>删除</div></div>
+          </div>
+        </div>
+        <div class="tr">
+          <div class="ag"><div class="av sm h3">V</div><div><b>Vincent</b><span>个人助理 · 完全访问</span></div></div>
+          <span><span class="status work"><span class="lantern work"></span>6:04</span></span>
+          <div class="prov"><span class="p"><span class="g lark"><i data-l="lark"></i></span><b>Vincent</b></span><span class="p"><span class="g tg"><i data-l="telegram"></i></span><b>@vincent_dev_bot</b></span></div>
+          <div class="prov"><span class="p"><span class="g claudecode"><i data-l="claudecode"></i></span><b>claude-sonnet-5-5</b></span></div>
+          <span class="pcname"><span class="online">win-desk</span></span>
+          <div class="use"><b>298k</b><small>$0.92</small></div>
+          <div class="acts"><span class="more"><i data-i="more" class="sm"></i></span></div>
+        </div>
+        <div class="tr">
+          <div class="ag"><div class="av sm h4">T</div><div><b>Tifa</b><span>每个会话独立</span></div></div>
+          <span><span class="status on"><span class="lantern on"></span>空闲</span></span>
+          <div class="prov"><span class="p"><span class="g tg"><i data-l="telegram"></i></span><b>@tifa_front_bot</b></span></div>
+          <div class="prov"><span class="p"><span class="g codex"><i data-l="codex"></i></span><b>gpt-5.5-codex</b></span></div>
+          <span class="pcname"><span class="online">kana-vm</span></span>
+          <div class="use"><b>54k</b><small>$0.17</small></div>
+          <div class="acts"><span class="more"><i data-i="more" class="sm"></i></span></div>
+        </div>
+        <div class="tr">
+          <div class="ag"><div class="av sm h5">A</div><div><b>Aerith</b><span>每个会话独立</span></div></div>
+          <span><span class="status on"><span class="lantern on"></span>空闲</span></span>
+          <div class="prov"><span class="p"><span class="g wecom"><i data-l="wecom"></i></span><b>设计组</b></span></div>
+          <div class="prov"><span class="p"><span class="g claudecode"><i data-l="claudecode"></i></span><b>claude-haiku-5-5</b></span></div>
+          <span class="pcname"><span class="online">aqua-mbp</span></span>
+          <div class="use"><b>12k</b><small>$0.02</small></div>
+          <div class="acts"><span class="more"><i data-i="more" class="sm"></i></span></div>
+        </div>
+        <div class="tr">
+          <div class="ag"><div class="av sm h2">C</div><div><b>Cid</b><span>每个会话独立</span></div></div>
+          <span><span class="status on"><span class="lantern on"></span>空闲</span></span>
+          <div class="prov"><span class="p"><span class="g tg"><i data-l="telegram"></i></span><b>@cid_ops_bot</b></span></div>
+          <div class="prov"><span class="p"><span class="g codex"><i data-l="codex"></i></span><b>gpt-5.4-mini</b></span></div>
+          <span class="pcname"><span class="online">win-desk</span></span>
+          <div class="use"><b>31k</b><small>$0.06</small></div>
+          <div class="acts"><span class="more"><i data-i="more" class="sm"></i></span></div>
+        </div>
+        <div class="tr">
+          <div class="ag"><div class="av sm h4">B</div><div><b>Barret</b><span>每个会话独立</span></div></div>
+          <span><span class="status fail st-e"><span class="lantern fail"></span>启动失败 · codex 尚未登录</span></span>
+          <div class="prov"><span class="p"><span class="g wecom"><i data-l="wecom"></i></span><b>值班群</b></span></div>
+          <div class="prov"><span class="p"><span class="g codex"><i data-l="codex"></i></span><b>gpt-5.5-codex</b></span></div>
+          <span class="pcname"><span class="online">kana-vm</span></span>
+          <div class="use none">—</div>
+          <div class="acts"><span class="more"><i data-i="more" class="sm"></i></span></div>
+        </div>
+        <div class="tr away">
+          <div class="ag"><div class="av sm h1">Y</div><div><b>Yuffie</b><span>每个会话独立</span></div></div>
+          <span><span class="status off"><span class="lantern off"></span></span></span>
+          <div class="prov"><span class="p"><span class="g tg"><i data-l="telegram"></i></span><b>@yuffie_ci_bot</b></span></div>
+          <div class="prov"><span class="p"><span class="g codex"><i data-l="codex"></i></span><b>gpt-5.5-codex</b></span></div>
+          <span class="pcname"><span class="online off">ci-runner-01</span></span>
+          <div class="use none">—</div>
+          <div class="acts"><span class="more"><i data-i="more" class="sm"></i></span></div>
+        </div>
+        <div class="tr away">
+          <div class="ag"><div class="av sm h3">R</div><div><b>Red XIII</b><span>每个会话独立</span></div></div>
+          <span><span class="status off"><span class="lantern off"></span></span></span>
+          <div class="prov"><span class="p"><span class="g lark"><i data-l="lark"></i></span><b>测试通知</b></span></div>
+          <div class="prov"><span class="p"><span class="g codex"><i data-l="codex"></i></span><b>gpt-5.5-codex</b></span></div>
+          <span class="pcname"><span class="online off">ci-runner-01</span></span>
+          <div class="use none">—</div>
+          <div class="acts"><span class="more"><i data-i="more" class="sm"></i></span></div>
+        </div>
+      </div>
+    </section>
+
+    <div class="backdrop"></div>
+    <div class="confirm">
+      <div class="ic"><i data-i="trash"></i></div>
+      <h3>删除智能体啊夸？</h3>
+      <p>啊夸会在 aqua-mbp 上停下，配置从那台电脑上移除，飞书里的机器人不再回复。工作区里的文件和会话记录留在 aqua-mbp 上；分享给各角色的设置一并删除。</p>
+      <div class="row"><div class="btn">取消</div><div class="btn danger"><i data-i="trash" class="xs"></i>删除</div></div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

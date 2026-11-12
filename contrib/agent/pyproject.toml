@@ -1,7 +1,7 @@
 [project]
 name = "bazaar-contrib-agent"
-version = "0.3.0rc17"
-description = "Agent configuration, instances and local composition"
+version = "0.3.0rc28"
+description = "Agent configuration, instances, local composition and management commands"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
@@ -33,9 +33,14 @@ Repository = "https://github.com/yuchanns/bazaar-compute-node"
 agent = "bazaar_contrib_agent:agent"
 agent-execution = "bazaar_contrib_agent:execution"
 agent-activity = "bazaar_contrib_agent.activity:activity"
+agent-command = "bazaar_contrib_agent.command:commands"
+
+[project.entry-points."bazaar_compute_node.commands"]
+agent = "bazaar_contrib_agent.command:command_entry"
 
 [project.entry-points."bazaar_compute_node.remotes"]
 agent-activity = "bazaar_contrib_agent.activity:remote"
+agent-configuration = "bazaar_contrib_agent.command:remote"
 
 [build-system]
 requires = ["uv_build>=0.13.0,<0.14.0"]

@@ -19,6 +19,7 @@ from typing import Any, ClassVar, Literal, cast
 from uuid import NAMESPACE_URL, uuid5, uuid7
 
 import tomli_w
+from bazaar_contrib_audit import AUDIT, Audit, AuditContext, AuditError
 from bazaar_contrib_channel import (
     CHANNEL,
     CHANNEL_BUILDERS,
@@ -26,7 +27,9 @@ from bazaar_contrib_channel import (
     CHANNEL_TURN,
     ChannelApprovalRequest,
     ChannelBuilderConfig,
+    ChannelConnected,
     ChannelConnectionError,
+    ChannelConnectionFailed,
     ChannelDeliveryReceipt,
     ChannelError,
     ChannelErrorDetail,
@@ -69,6 +72,7 @@ from bazaar_contrib_harness import (
     HarnessSessionUnavailable,
     HarnessSkill,
     HarnessTurn,
+    ModelUpdated,
     ProviderCallResult,
     ProviderCallStatus,
     SessionInput,
@@ -178,6 +182,7 @@ class ChannelConfig(BaseModel):
     kind: ClassVar[str] = "test-channel"
     model_config = ConfigDict(extra="forbid", frozen=True)
     endpoint_file: str = "channel.json"
+    token: str | None = Field(default=None, json_schema_extra={"writeOnly": True})
 
 
 class Attachment(BaseModel):
@@ -240,10 +245,15 @@ class ChannelMessage(BaseModel):
 class TestChannel:
     """A connected TCP channel controlled by a peer that observes and approves."""
 
-    def __init__(self, input: ChannelInput, group: asyncio.TaskGroup, kind: str):
+    def __init__(
+        self, input: ChannelInput, group: asyncio.TaskGroup, kind: str, audit: Audit
+    ):
         self.input = input
         self.group = group
         self.kind = kind
+        self.audit = audit
+        self.closing = False
+        self.retry_in_ms: int | None = 0
         self.writer: asyncio.StreamWriter | None = None
         self.connected = asyncio.Event()
         self.inbound: asyncio.Queue[InboundMessage] = asyncio.Queue()
@@ -267,7 +277,17 @@ class TestChannel:
 
     def connect(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         self.writer = writer
+        self.retry_in_ms = 0
         self.connected.set()
+        self.group.create_task(
+            self.audit.publish(
+                ChannelConnected.event_name,
+                context=AuditContext(agent_id=self.input.agent_id, channel=self.kind),
+                payload=ChannelConnected(identity=self.get_identity()).model_dump(
+                    mode="json"
+                ),
+            )
+        )
         self.group.create_task(self.connection(reader, writer))
 
     async def connection(
@@ -315,6 +335,9 @@ class TestChannel:
                     )
                 elif "release_attachment" in packet:
                     self.downloads.pop(packet["release_attachment"]).set()
+                elif "give_up" in packet:
+                    # the peer asks the channel to report it will not reconnect
+                    self.retry_in_ms = None
                 else:
                     pending = self.pending.pop(packet["id"], None)
                     if pending is not None and not pending.done():
@@ -323,6 +346,23 @@ class TestChannel:
             if self.writer is writer:
                 self.writer = None
                 self.connected.clear()
+                # the peer went away while the channel still serves
+                if not self.closing:
+                    self.group.create_task(
+                        self.audit.publish(
+                            ChannelConnectionFailed.event_name,
+                            context=AuditContext(
+                                agent_id=self.input.agent_id, channel=self.kind
+                            ),
+                            payload=ChannelConnectionFailed(
+                                retry_in_ms=self.retry_in_ms
+                            ).model_dump(mode="json"),
+                            error=AuditError(
+                                kind="disconnected",
+                                message="channel peer disconnected",
+                            ),
+                        )
+                    )
                 for pending in self.pending.values():
                     if not pending.done():
                         pending.set_exception(
@@ -441,7 +481,7 @@ class TestChannel:
 async def channel_lifespan(ctx: Context, config: ChannelConfig):
     input = ctx.accept(CHANNEL_INPUT)
     async with asyncio.TaskGroup() as group:
-        channel = TestChannel(input, group, config.kind)
+        channel = TestChannel(input, group, config.kind, ctx.accept(AUDIT))
         server = await asyncio.start_server(channel.connect, "127.0.0.1", 0)
         pump = group.create_task(channel.pump())
         endpoint = input.workspace / config.endpoint_file
@@ -460,6 +500,7 @@ async def channel_lifespan(ctx: Context, config: ChannelConfig):
         try:
             yield
         finally:
+            channel.closing = True
             server.close()
             if channel.writer is not None:
                 channel.writer.close()
@@ -482,7 +523,7 @@ def turn(ctx: Context, value: ChannelTurn) -> None:
 
 channel = Contrib(
     config=ChannelConfig,
-    accepts=[CHANNEL_INPUT],
+    accepts=[CHANNEL_INPUT, AUDIT],
     offers=[CHANNEL],
     lifespan=channel_lifespan,
     listen={CHANNEL_TURN: turn},
@@ -516,6 +557,7 @@ class HarnessConfig(BaseModel):
     input_mode: Literal["interactive", "batch"] = "interactive"
     publication_delay: float = Field(default=0, ge=0)
     env: dict[str, str] = Field(default_factory=dict)
+    api_key: str | None = Field(default=None, json_schema_extra={"writeOnly": True})
 
 
 class DocumentStream:
@@ -567,6 +609,8 @@ class DocumentStream:
                     match event["kind"]:
                         case "started":
                             payload = TurnStarted(event_name="document.started")
+                        case "model":
+                            payload = ModelUpdated(model=event["model"])
                         case "completed":
                             payload = TurnCompleted(event_name="document.completed")
                         case "text":
@@ -578,7 +622,7 @@ class DocumentStream:
                                 call=ToolCall(
                                     call_id=metadata["id"],
                                     name=metadata["name"],
-                                    input=metadata,
+                                    detail=metadata["detail"],
                                 )
                             )
                         case "tool.completed":
@@ -586,8 +630,8 @@ class DocumentStream:
                                 call=ToolCall(
                                     call_id=metadata["id"],
                                     name=metadata["name"],
-                                    input=metadata,
-                                    output=metadata["result"],
+                                    duration_ms=metadata["duration_ms"],
+                                    detail=metadata["detail"],
                                 )
                             )
                         case "inbox.checked":
@@ -595,7 +639,7 @@ class DocumentStream:
                                 call=ToolCall(
                                     call_id=str(uuid7()),
                                     name="inbox.checked",
-                                    output=metadata["messages"],
+                                    detail=metadata["detail"],
                                 )
                             )
                         case kind:
@@ -922,7 +966,7 @@ class HarnessBuilderParameters(HarnessBuilderConfig):
             skills=(
                 HarnessSkill(
                     name="document-report",
-                    description="Count a document and save its report",
+                    description=f"Count a document in {workspace} and save its report",
                     source=__name__,
                 ),
             ),
@@ -950,7 +994,7 @@ class SecondaryChannelConfig(ChannelConfig):
 
 secondary_channel = Contrib(
     config=SecondaryChannelConfig,
-    accepts=[CHANNEL_INPUT],
+    accepts=[CHANNEL_INPUT, AUDIT],
     offers=[CHANNEL],
     lifespan=channel_lifespan,
     listen={CHANNEL_TURN: turn},
@@ -968,4 +1012,16 @@ secondary_channel_builder = Contrib(
     accepts=[CHANNEL_BUILDERS],
     offers=[channel_builder_key("test-channel-secondary")],
     lifespan=channel_builder_lifespan,
+)
+
+
+class SecondaryHarnessParameters(HarnessBuilderParameters):
+    kind: ClassVar[str] = "document-secondary"
+
+
+secondary_harness_builder = Contrib(
+    config=SecondaryHarnessParameters,
+    accepts=[HARNESS_BUILDERS],
+    offers=[harness_builder_key("document-secondary")],
+    lifespan=harness_builder_lifespan,
 )

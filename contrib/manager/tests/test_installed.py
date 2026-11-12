@@ -44,7 +44,6 @@ def wheels(tmp_path_factory):
             f"contrib/{name}"
             for name in (
                 "agent",
-                "agent-command",
                 "audit",
                 "channel",
                 "timer",
@@ -57,7 +56,6 @@ def wheels(tmp_path_factory):
                 "storage",
                 "schema",
                 "messages",
-                "messages-node",
                 "collaboration",
                 "reminder",
                 "node-management",
@@ -187,6 +185,8 @@ def wheels(tmp_path_factory):
             for deployment in ("venv", "tool")
             for workflow in ("installed_smoke.py", "live_smoke.py")
         ),
+        ("tool", "remote_smoke.py"),
+        ("venv", "index_smoke.py"),
         ("alias", "extras_smoke.py"),
         ("extra", "extras_smoke.py"),
     ],

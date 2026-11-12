@@ -1,6 +1,6 @@
 [project]
 name = "bazaar-contrib-manager"
-version = "0.3.0rc17"
+version = "0.3.0rc28"
 description = "The Bazaar Compute Node Manager Contrib"
 readme = "README.md"
 license = "Apache-2.0"
@@ -10,6 +10,7 @@ dependencies = [
     "bazaar-contrib-config~=0.3.0rc1",
     "bazaar-contrib-invoke~=0.3.0rc1",
     "bazaar-contrib-sidecar~=0.3.0rc1",
+    "bazaar-contrib-timer~=0.3.0rc7",
     "filelock>=3.16.0",
     "jinja2>=3.1.6",
     "packaging>=25.0",
@@ -18,9 +19,13 @@ dependencies = [
 
 [project.entry-points."bazaar_compute_node.contribs"]
 contrib-manager = "bazaar_contrib_manager:manager"
+contrib-indexes = "bazaar_contrib_manager:indexes"
 
 [project.entry-points."bazaar_compute_node.commands"]
 contrib = "bazaar_contrib_manager:command_entry"
+
+[project.entry-points."bazaar_compute_node.remotes"]
+contrib-manager = "bazaar_contrib_manager:remote"
 
 [project.urls]
 Repository = "https://github.com/yuchanns/bazaar-compute-node"

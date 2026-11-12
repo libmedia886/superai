@@ -33,10 +33,10 @@ def sessions(database: Path, agent_id: str, *, forget: bool = False):
 async def exercise(path: Path):
     await asyncio.to_thread(path.mkdir)
     config = path / "node.json"
+    workspace = Path(os.environ["BCN_HOME"]) / ".bcn" / "workspaces" / "Recovery"
     agent = {
         "id": "Recovery",
         "name": "Recovery",
-        "workspace": str(path),
         "channel": [{"kind": "test-channel"}],
         # The first node cannot start a session, so the request stays unread.
         "harness": [{"kind": "document", "env": {"MISSING": "BCN_RECOVERY_MISSING"}}],
@@ -63,7 +63,9 @@ async def exercise(path: Path):
             assert process.stderr is not None
             raise RuntimeError((await process.stderr.read()).decode())
         assert json.loads(data)["ready"]
-        address = json.loads(await asyncio.to_thread((path / "channel.json").read_text))
+        address = json.loads(
+            await asyncio.to_thread((workspace / "channel.json").read_text)
+        )
         reader, writer = await asyncio.open_connection("127.0.0.1", address["port"])
         return process, Peer(reader, writer)
 

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Literal
+lazy import os
 lazy import sys
+lazy import tomllib
 lazy from collections.abc import Mapping
 lazy from copy import deepcopy
 lazy from hashlib import sha256
@@ -99,11 +101,12 @@ def migrate_v5(payload: Mapping[str, object]) -> ConfigCandidate:
         add("channel-builders", "channel")
         add("harness-builders", "harness")
         add("legacy-node-migrations", "legacy-node-migrations")
-        add("messages-node", "messages-node")
+        add("messages-node", "messages")
         add("collaboration", "collaboration")
         add("reminder", "reminder")
-    add("timer-wheel", "timer-wheel")
+    add("timer-wheel", "timer")
     add("contrib-manager", "manager")
+    add("contrib-indexes", "manager")
     add("audit", "audit")
     changes.extend(
         [
@@ -117,9 +120,10 @@ def migrate_v5(payload: Mapping[str, object]) -> ConfigCandidate:
             ),
         ]
     )
+    # 0.2 wrote the audit to one sink; logging hears it beside starlink now.
+    # 0.2's logging sink took no settings from [node.logging].
+    add("logging", "logging")
     if node.audit == "logging":
-        # 0.2's logging sink took no settings from [node.logging].
-        add("logging", "logging")
         changes.append(
             FieldChange(
                 source="node.audit",
@@ -138,6 +142,71 @@ def migrate_v5(payload: Mapping[str, object]) -> ConfigCandidate:
     add(transport, transport, endpoint)
     add("node-health", "node-management")
     add("node-upgrade", "node-management")
+    bcs = Path(os.environ.get("BCN_HOME") or Path.home()) / ".bcs" / "config.toml"
+    if bcs.is_file():
+        server = tomllib.loads(bcs.read_text(encoding="utf-8"))
+        storage = server.get("storage", "sqlite")
+        add(
+            "http", "http", {"listen": server["listen"]} if "listen" in server else None
+        )
+        # 0.2 read a storage's own settings from a table named after it
+        add(
+            "server-database",
+            "server-database",
+            {"storage": storage, "storage_options": server.get(storage, {})},
+        )
+        add("server-migrations", "server-migrations")
+        add("server", "server")
+        add("server-theme-night", "server")
+        add("server-theme-day", "server")
+        add("server-overview", "server-overview")
+        add(
+            "server-access",
+            "server-access",
+            {"session_minutes": server["session_minutes"]}
+            if "session_minutes" in server
+            else None,
+        )
+        add("server-relay-memory", "server-computer")
+        add("server-computer", "server-computer")
+        add("server-agent", "server-agent")
+        add(
+            "server-activity",
+            "server-activity",
+            {"retention_days": server["retention_days"]}
+            if "retention_days" in server
+            else None,
+        )
+        add("server-conversation", "server-conversation")
+        add("server-usage", "server-usage")
+    if node.server.get("url") and "server" in (node.audit, node.control):
+        # 0.2 reached its server with one address and token for the audit it
+        # reported and the requests it took; starlink does both
+        fields = {
+            key: name
+            for key, name in (("url", "server"), ("token_env", "token_env"))
+            if key in node.server
+        }
+        add(
+            "starlink",
+            "starlink",
+            {name: node.server[key] for key, name in fields.items()},
+        )
+        changes.extend(
+            FieldChange(
+                source=f"node.{key}",
+                target="contribs[bazaar-contrib-starlink].enabled[starlink]",
+            )
+            for key in ("audit", "control")
+            if getattr(node, key) == "server"
+        )
+        changes.extend(
+            FieldChange(
+                source=f"node.server.{key}",
+                target=f"contribs[bazaar-contrib-starlink].enabled[starlink].config.{name}",
+            )
+            for key, name in fields.items()
+        )
     changes.extend(
         [
             FieldChange(
@@ -177,8 +246,13 @@ def migrate_v5(payload: Mapping[str, object]) -> ConfigCandidate:
         add("agent", "agent", {"agents": agents})
         add("agent-execution", "agent")
         add("agent-activity", "agent")
-        add("agent-command", "agent-command")
+        add("agent-command", "agent")
     document = ConfigDocument(
+        contrib_indexes=(
+            "resource://bazaar_contrib_manager/catalog.json",
+            "resource://bazaar_contrib_manager/open_bazaar_index.json",
+            "https://raw.githubusercontent.com/open-bazaar/contrib-index/main/index.json",
+        ),
         contribs=tuple(
             ContribPackage(
                 package=package + packages[package].version,

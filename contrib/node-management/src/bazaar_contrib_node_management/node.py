@@ -1,22 +1,74 @@
-"""The running node's host release and its upgrade to a newer one."""
+"""The running node's host release, the machine it runs on, and its upgrade to a newer one."""
 
 from __future__ import annotations
 
 lazy import asyncio
 lazy import os
+lazy import platform
 lazy import sys
 lazy import tomllib
 lazy from pathlib import Path
 
 from bazaar_core import ServiceKey
+lazy import psutil
 lazy from bazaar_contrib_audit import Audit, AuditContext, AuditError
-lazy from bazaar_contrib_invoke import Run
 lazy from bazaar_contrib_manager import ContribManager, ManagementError, Operation
 lazy from pydantic import JsonValue
 
 
 class UnsupportedUpgrade(ManagementError):
     """A node that cannot replace its own installation while it runs."""
+
+
+def host() -> dict[str, JsonValue]:
+    """The machine this process runs on and how much of its processor, memory and disks is in use."""
+    match sys.platform:
+        case "win32":
+            name = f"Windows {platform.release()}"
+        case "darwin":
+            name = f"macOS {platform.mac_ver()[0]}"
+        case _:
+            try:
+                release = platform.freedesktop_os_release()
+            except OSError:
+                name = platform.system()
+            else:
+                name = " ".join(
+                    filter(None, (release["NAME"], release.get("VERSION_ID")))
+                )
+    memory = psutil.virtual_memory()
+    # One filesystem mounted in several places, such as btrfs subvolumes or the
+    # volumes of one APFS container, has the same size and free space at each.
+    disks: dict[tuple[int, int], dict[str, JsonValue]] = {}
+    for partition in psutil.disk_partitions():
+        # Disc and snap images are always full and never written.
+        if partition.fstype.lower() in ("squashfs", "iso9660", "udf", "cdfs"):
+            continue
+        try:
+            usage = psutil.disk_usage(partition.mountpoint)
+        except OSError:
+            # A drive without a disc, or a mount this account cannot read.
+            continue
+        disks.setdefault(
+            (usage.total, usage.free),
+            {
+                "mount": partition.mountpoint,
+                "total": usage.total,
+                "used": usage.total - usage.free,
+            },
+        )
+    return {
+        "system": platform.system(),
+        "name": name,
+        "release": platform.version()
+        if sys.platform == "win32"
+        else platform.release(),
+        "machine": platform.machine(),
+        "started_ms": round(psutil.Process().create_time() * 1000),
+        "cpu": {"cores": psutil.cpu_count(), "percent": psutil.cpu_percent(interval=1)},
+        "memory": {"total": memory.total, "used": memory.total - memory.available},
+        "disks": list(disks.values()),
+    }
 
 
 def foreground() -> bool:
@@ -33,14 +85,11 @@ def foreground() -> bool:
 
 
 class Node:
-    """Report the host release, find a newer installable one and hand over to it."""
+    """Report the host release and its machine, and find and install a newer release."""
 
-    def __init__(
-        self, manager: ContribManager, audit: Audit, run: Run, running: str
-    ) -> None:
+    def __init__(self, manager: ContribManager, audit: Audit, running: str) -> None:
         self.manager = manager
         self.audit = audit
-        self.run = run
         self.running = running
         self.latest: str | None = None
         self.installing: asyncio.Task[Operation] | None = None
@@ -51,6 +100,10 @@ class Node:
 
     async def available(self) -> str | None:
         return self.latest
+
+    async def info(self) -> dict[str, JsonValue]:
+        """The release this process runs and the machine it runs on."""
+        return {"version": self.running} | await asyncio.to_thread(host)
 
     async def check(self) -> None:
         self.latest = await self.manager.latest_host()
@@ -82,10 +135,6 @@ class Node:
         else:
             await self.publish("installed", version)
         return operation
-
-    async def restart(self) -> None:
-        """Stop serving so the process exits and whatever runs it starts it again."""
-        self.run.stopped.set()
 
     async def publish(
         self, phase: str, version: str, *, error: str | None = None

@@ -12,13 +12,13 @@ lazy from importlib.metadata import version
 lazy from importlib.resources import files
 lazy from typing import Any
 
-from bazaar_contrib_audit import AUDIT, AuditContext
-from bazaar_contrib_invoke import RUN, contribs
-from bazaar_contrib_manager import CONTRIB_MANAGER
+from bazaar_contrib_audit import AUDIT, AuditContext, AuditError
+from bazaar_contrib_invoke import contribs
+from bazaar_contrib_manager import CONTRIB_INDEX_FAILED, CONTRIB_MANAGER
 from bazaar_contrib_sidecar import RemoteEntry
 from bazaar_contrib_timer import TIMER
 from bazaar_core import Contrib
-lazy from bazaar_contrib_manager import ManagementError
+lazy from bazaar_contrib_manager import IndexStatus, ManagementError
 lazy from bazaar_core import Context
 
 from .node import NODE, Node, UnsupportedUpgrade
@@ -81,7 +81,6 @@ async def upgrade(ctx: Context):
     node = Node(
         ctx.accept(CONTRIB_MANAGER),
         ctx.accept(AUDIT),
-        ctx.accept(RUN),
         await asyncio.to_thread(version, "bazaar-compute"),
     )
 
@@ -105,8 +104,21 @@ async def upgrade(ctx: Context):
             task.cancel()
 
 
-node_health = Contrib(accepts=[AUDIT, TIMER], lifespan=health)
-node_upgrade = Contrib(
-    offers=[NODE], accepts=[RUN, CONTRIB_MANAGER, TIMER, AUDIT], lifespan=upgrade
+async def refresh_failed(ctx: Context, index: IndexStatus) -> None:
+    await ctx.accept(AUDIT).publish(
+        "contrib.index.refresh_failed",
+        context=AuditContext(agent_id=""),
+        payload={"location": index.location},
+        error=AuditError(kind="refresh_failed", message=index.error),
+    )
+
+
+node_health = Contrib(
+    accepts=[AUDIT, TIMER],
+    lifespan=health,
+    listen={CONTRIB_INDEX_FAILED: refresh_failed},
 )
-remote = RemoteEntry(NODE, ("version", "available", "install", "restart"))
+node_upgrade = Contrib(
+    offers=[NODE], accepts=[CONTRIB_MANAGER, TIMER, AUDIT], lifespan=upgrade
+)
+remote = RemoteEntry(NODE, ("version", "available", "info", "install"))

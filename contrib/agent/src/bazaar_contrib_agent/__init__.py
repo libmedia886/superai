@@ -6,10 +6,9 @@ import asyncio
 import os
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any
 
-from bazaar_contrib_audit import AUDIT
+from bazaar_contrib_audit import AUDIT, Audit, AuditContext, AuditError
 from bazaar_contrib_channel import (
     CHANNEL,
     CHANNEL_BUILDERS,
@@ -51,7 +50,7 @@ from bazaar_core import (
     ServiceKey,
     Stopping,
 )
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, JsonValue
 
 from . import states
 from .loop import AgentLoop, Runtime
@@ -87,24 +86,56 @@ class _ChannelConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     provider: ProviderConfig
     builder: ChannelBuilder
+    connection: str
 
 
 class _HarnessConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     provider: ProviderConfig
     builder: HarnessBuilder
-    priority: int
+    connection: str
+
+
+class _ConnectionAudit:
+    def __init__(self, audit: Audit, connection: str):
+        self.audit = audit
+        self.connection = connection
+
+    async def publish(
+        self,
+        event_name: str,
+        *,
+        context: AuditContext,
+        payload: JsonValue,
+        occurred_at_ms: int | None = None,
+        error: AuditError | None = None,
+    ) -> None:
+        await self.audit.publish(
+            event_name,
+            context=context.model_copy(
+                update={"connection": context.connection or self.connection}
+            ),
+            payload=payload,
+            occurred_at_ms=occurred_at_ms,
+            error=error,
+        )
+
+
+def _audit_entry(name: str, audit: Audit, connection: str) -> ContribEntry:
+    @asynccontextmanager
+    async def lifespan(ctx: Context):
+        ctx.offer(AUDIT, _ConnectionAudit(audit, connection))
+        yield
+
+    return ContribEntry(
+        name=f"{name}/audit", definition=Contrib(offers=[AUDIT], lifespan=lifespan)
+    )
 
 
 @asynccontextmanager
 async def instance_lifespan(ctx: Context, config: _InstanceConfig):
     item = config.agent
-    workspace = item.workspace
-    if workspace is None:
-        root = Path(os.environ.get("BCN_HOME") or await asyncio.to_thread(Path.home))
-        workspace = root / ".bcn" / "workspaces" / item.id
-    workspace = await asyncio.to_thread(workspace.expanduser)
-    workspace = await asyncio.to_thread(workspace.resolve)
+    workspace = await asyncio.to_thread(item.directory)
     await asyncio.to_thread(workspace.mkdir, parents=True, exist_ok=True, mode=0o700)
     if os.name != "nt":
         await asyncio.to_thread(workspace.chmod, 0o700)
@@ -139,6 +170,7 @@ async def loop_lifespan(ctx: Context, config: _InstanceConfig):
             tool.path,
             ctx.id,
             registry.channel_order,
+            registry.harness_order,
         )
         identity._loop = loop
         registry.running[identity.id] = identity
@@ -165,6 +197,7 @@ async def channel_lifespan(ctx: Context, config: _ChannelConfig):
             config.provider,
             loop.channels.order[ctx.name],
             ctx,
+            config.connection,
         )
         identity = connection.channel.get_identity()
         for member in loop.channels.connections.values():
@@ -215,6 +248,7 @@ async def channel_lifespan(ctx: Context, config: _ChannelConfig):
         update={
             "entries": (
                 *composition.entries,
+                _audit_entry(ctx.name, ctx.accept(AUDIT), config.connection),
                 ContribEntry(
                     name=ctx.name,
                     definition=Contrib(accepts=[CHANNEL], lifespan=connect),
@@ -224,7 +258,7 @@ async def channel_lifespan(ctx: Context, config: _ChannelConfig):
     )
     async with (
         asyncio.TaskGroup() as group,
-        ctx.enable(composition, local=(CHANNEL_INPUT, CHANNEL, CHANNEL_TURN)),
+        ctx.enable(composition, local=(CHANNEL_INPUT, CHANNEL, CHANNEL_TURN, AUDIT)),
     ):
         yield
 
@@ -237,7 +271,11 @@ async def harness_lifespan(ctx: Context, config: _HarnessConfig):
     @asynccontextmanager
     async def connect(ctx: Context):
         runtime = Runtime(
-            config.provider.kind, ctx.accept(HARNESS), config.provider, config.priority
+            config.provider.kind,
+            ctx.accept(HARNESS),
+            config.provider,
+            loop.harness_order[ctx.name],
+            config.connection,
         )
         loop.runtimes[ctx.name] = runtime
         task = asyncio.create_task(
@@ -302,6 +340,7 @@ async def harness_lifespan(ctx: Context, config: _HarnessConfig):
         update={
             "entries": (
                 *composition.entries,
+                _audit_entry(ctx.name, ctx.accept(AUDIT), config.connection),
                 ContribEntry(
                     name=ctx.name,
                     definition=Contrib(accepts=[HARNESS], lifespan=connect),
@@ -309,7 +348,7 @@ async def harness_lifespan(ctx: Context, config: _HarnessConfig):
             )
         }
     )
-    async with ctx.enable(composition, local=(HARNESS_INPUT, HARNESS)):
+    async with ctx.enable(composition, local=(HARNESS_INPUT, HARNESS, AUDIT)):
         yield
 
 
@@ -335,10 +374,10 @@ _loop = Contrib(
     listen={CONTACT_REVIEWED: contact_reviewed, CONTRIB_CHANGED: stopping},
 )
 _channel = Contrib(
-    config=_ChannelConfig, accepts=[AGENT, _LOOP], lifespan=channel_lifespan
+    config=_ChannelConfig, accepts=[AGENT, _LOOP, AUDIT], lifespan=channel_lifespan
 )
 _harness = Contrib(
-    config=_HarnessConfig, accepts=[AGENT, _LOOP], lifespan=harness_lifespan
+    config=_HarnessConfig, accepts=[AGENT, _LOOP, AUDIT], lifespan=harness_lifespan
 )
 
 
@@ -375,7 +414,7 @@ def compose(
         ("harness", config.harness, harness_builders, _harness),
     ):
         positions: dict[str, int] = {}
-        for index, provider in enumerate(providers):
+        for provider in providers:
             position = positions.get(provider.kind, 0)
             positions[provider.kind] = position + 1
             entries.append(
@@ -385,7 +424,7 @@ def compose(
                     config={
                         "provider": provider,
                         "builder": builders[provider.kind],
-                        **({"priority": index} if label == "harness" else {}),
+                        "connection": f"{provider.kind}:{position}",
                     },
                     bindings={
                         AGENT: identity.ref(AGENT),

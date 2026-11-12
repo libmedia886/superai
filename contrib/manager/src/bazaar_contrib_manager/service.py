@@ -21,7 +21,7 @@ from bazaar_contrib_config import (
     EnabledContrib,
 )
 from bazaar_contrib_invoke import COMMANDS
-from bazaar_contrib_sidecar import CLIENT
+from bazaar_contrib_sidecar import CLIENT, RemoteEntry
 from bazaar_core import CURRENT_CONTEXT, Contrib, ServiceKey
 from filelock import AsyncFileLock
 lazy from bazaar_contrib_config import (
@@ -47,7 +47,6 @@ from .contracts import (
     ManagementError,
     ManagerConfig,
     Operation,
-    Package,
     Positions,
 )
 lazy from .cli import create_commands
@@ -89,6 +88,7 @@ class ContribManager:
         self.ctx = ctx
         self.remote: Client | None = None
         self.operations: dict[UUID, Operation] = {}
+        self.executions: dict[UUID, asyncio.Task[Operation]] = {}
         self.closed = False
 
     async def operation(self, id: UUID) -> Operation:
@@ -113,7 +113,6 @@ class ContribManager:
         *,
         remote: bool,
     ) -> Operation:
-        self.operations[operation.id] = operation
         await self._record(operation.id)
         await asyncio.to_thread(self.packages.path.mkdir, parents=True, exist_ok=True)
         token = CURRENT_CONTEXT.set(self.ctx)
@@ -216,7 +215,7 @@ class ContribManager:
             CURRENT_CONTEXT.reset(token)
         return self.operations[operation.id]
 
-    async def _submit(
+    def _start(
         self,
         kind: str,
         action: Callable[[UUID], Awaitable[None]],
@@ -229,8 +228,26 @@ class ContribManager:
         operation = Operation(
             kind=kind, target=str(self.packages.prefix), package=package
         )
-        task = self.tasks.create_task(self._execute(operation, action, remote=remote))
-        return await asyncio.shield(task)
+        self.operations[operation.id] = operation
+        self.executions[operation.id] = self.tasks.create_task(
+            self._execute(operation, action, remote=remote)
+        )
+        return operation
+
+    async def _submit(
+        self,
+        kind: str,
+        action: Callable[[UUID], Awaitable[None]],
+        *,
+        package: str | None = None,
+        remote: bool = True,
+    ) -> Operation:
+        operation = self._start(kind, action, package=package, remote=remote)
+        return await self.wait(operation.id)
+
+    async def wait(self, id: UUID) -> Operation:
+        """An operation started here once it finishes; it goes on if the wait is cancelled."""
+        return await asyncio.shield(self.executions[id])
 
     async def installed(self) -> tuple[InstalledPackage, ...]:
         info = await self.packages.inspect()
@@ -466,6 +483,8 @@ class ContribManager:
                 ).model_dump(mode="json"),
                 snapshot.revision if snapshot is not None else None,
             )
+            if not remove:
+                await self.catalog.refresh()
 
         return await self._submit("index-remove" if remove else "index-add", action)
 
@@ -602,12 +621,18 @@ class ContribManager:
 
     async def add(
         self,
-        package: Package,
-        *,
-        enable: bool = False,
-        contrib: str | None = None,
+        name: str,
+        source: str | None = None,
+        version: str = "",
+        enable: str | None = None,
         config: dict[str, Any] | None = None,
     ) -> Operation:
+        """Install the package the catalog selects, then enable the entry `enable`
+        names, or every entry when it is empty, as `bcn contrib add` does.
+
+        The operation is returned while it runs; `operation` reports how it goes."""
+        package = await self.catalog.select(name, source=source, version=version)
+
         async def action(id: UUID) -> None:
             await self.packages.initialize()
             candidate, _ = await self.configuration.read()
@@ -644,12 +669,12 @@ class ContribManager:
                 document,
                 pin=package.package if not package.version else None,
             )
-            if enable:
+            if enable is not None:
                 await self._enable(
-                    id, await self.detail(package.package), contrib, config
+                    id, await self.detail(package.package), enable or None, config
                 )
 
-        return await self._submit("add", action, package=package.package)
+        return self._start("add", action, package=package.package)
 
     async def remove(self, package: str) -> Operation:
         package = str(canonicalize_name(package))
@@ -772,6 +797,7 @@ class ContribManager:
 
 
 CONTRIB_MANAGER = ServiceKey[ContribManager]("contrib.manager")
+remote = RemoteEntry(CONTRIB_MANAGER, ("add", "operation"))
 
 
 @asynccontextmanager
@@ -786,7 +812,7 @@ async def lifespan(ctx: Context, config: ManagerConfig):
         config.host_source,
     )
     configuration = ctx.accept(CONFIGURATION)
-    catalog = ContribCatalog(configuration, path / "indexes")
+    catalog = ContribCatalog(configuration, path / "indexes", ctx)
     async with asyncio.TaskGroup() as tasks:
         service = ContribManager(configuration, catalog, packages, tasks, ctx)
         ctx.offer(CONTRIB_CATALOG, catalog)
