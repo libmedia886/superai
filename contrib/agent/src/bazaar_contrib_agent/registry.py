@@ -59,8 +59,6 @@ class AgentInstances:
         self.entries: dict[str, dict[str, ContribEntry]] = {}
         self.desired: dict[str, dict[str, ContribEntry]] = {}
         self.settling: dict[str, asyncio.Task[None]] = {}
-        # the channels stopped to wait for their agent, by entry name
-        self.retiring: set[str] = set()
         self.lock = asyncio.Lock()
 
     async def configure(
@@ -116,14 +114,25 @@ class AgentInstances:
             # previous configuration still waited for can be dropped
             await self.cancel()
             self.desired = desired
-            retiring: set[str] = set()
             for agent_id in {*self.entries, *desired}:
                 current = self.entries.get(agent_id, {})
                 target = desired.get(agent_id, {})
-                if current == target:
-                    continue
                 identity = self.running.get(agent_id)
                 loop = None if identity is None else identity._loop
+                # a channel stopped to wait for its agent is started over even
+                # when its change is taken back
+                held = (
+                    []
+                    if loop is None
+                    else [
+                        name
+                        for name, connection in loop.channels.connections.items()
+                        if name in current
+                        and connection.state is states.ConnectionState.STOPPING
+                    ]
+                )
+                if current == target and not held:
+                    continue
                 if loop is None:
                     self.adopt(agent_id, None)
                     continue
@@ -153,12 +162,12 @@ class AgentInstances:
                         for name in replaced
                         if name in current and current[name].definition == _channel
                     ]
+                    stopping += [name for name in held if name not in stopping]
                     for name in stopping:
                         if name in loop.channels.connections:
                             loop.channels.connections[
                                 name
                             ].state = states.ConnectionState.STOPPING
-                    retiring.update(stopping)
                     task = asyncio.create_task(
                         self.settle(
                             agent_id,
@@ -174,19 +183,6 @@ class AgentInstances:
                     )
                 task.add_done_callback(_settled)
                 self.settling[agent_id] = task
-            # a channel whose change was taken back goes on receiving
-            for identity in self.running.values():
-                loop = identity._loop
-                if loop is None:
-                    continue
-                for name in self.retiring - retiring:
-                    connection = loop.channels.connections.get(name)
-                    if (
-                        connection is not None
-                        and connection.state is states.ConnectionState.STOPPING
-                    ):
-                        connection.state = states.ConnectionState.RUNNING
-            self.retiring = retiring
             await self.apply()
         self.name = ctx.name
 
@@ -286,7 +282,14 @@ class AgentInstances:
                 await loop.timer.create(max(100, loop.timer.tick_ms)).wait()
             for connection in connections:
                 connection.state = states.ConnectionState.DRAINED
-            await self.replace(agent_id, channels)
+            # stopped before they are enabled again, so that one whose change
+            # was taken back starts over too
+            async with self.lock:
+                for name in channels:
+                    self.entries[agent_id].pop(name, None)
+                await self.apply()
+                self.adopt(agent_id, channels)
+                await self.apply()
 
         async def renew(name: str) -> None:
             runtime = loop.runtimes.get(name)
@@ -313,6 +316,10 @@ class AgentInstances:
                     and actor_loop.task is None
                     and actor_loop.queue.empty()
                     and not await loop.background(actor_loop)
+                    # a turn may have started while its jobs were asked about
+                    and actor_loop.state is state
+                    and actor_loop.task is None
+                    and actor_loop.queue.empty()
                 ):
                     await loop.close_session(actor_loop)
             if not runtime.pending and not any(

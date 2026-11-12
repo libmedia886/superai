@@ -236,10 +236,11 @@ async def exercise(path: Path, source: str, tests: Path):
 
     sys.path.insert(0, str(tests))
     provider = await asyncio.to_thread(importlib.import_module, "provider_smoke")
-    Peer, finish, ChannelMessage = (
+    Peer, finish, ChannelMessage, Attachment = (
         provider.Peer,
         provider.finish,
         provider.InboundMessage,
+        provider.Attachment,
     )
 
     endpoint = str(path / ".bcn" / "sidecar.sock")
@@ -686,6 +687,68 @@ async def exercise(path: Path, source: str, tests: Path):
         report = json.loads(await asyncio.to_thread(saved.read_text))
         assert report["title"] == "Updated live report"
         assert message.body in report["inbox"]
+
+        # a channel change that waits for the desk's work starts the channel
+        # over once the work is done, even when the change is taken back; the
+        # setting is written out first so that taking the change back returns
+        # to exactly what runs
+        before = (await asyncio.to_thread(endpoint.stat)).st_mtime_ns
+        await cli(
+            "agent", "edit", live["id"], "--set", "channel.endpoint_file=channel.json"
+        )
+        async with asyncio.timeout(60):
+            await restarted(live["id"], before)
+        peer = await connect(live["id"])
+        peer.automatic = True
+        stack.push_async_callback(peer.aclose)
+        draft = workspaces / live["id"] / "held-draft.txt"
+        await asyncio.to_thread(draft.write_text, "The held draft.")
+        held = message.model_copy(
+            update={
+                "id": "live-held",
+                "body": "Here is the held draft for the live desk. Could you report on it?",
+                "attachments": (
+                    Attachment(name=draft.name, path=draft, gate="held-draft"),
+                ),
+            }
+        )
+        await peer.write({"inbound": held.model_dump(mode="json")})
+        while True:
+            if await notifies_runtime("live-held") is not None:
+                break
+            await asyncio.sleep(0.01)
+        before = (await asyncio.to_thread(endpoint.stat)).st_mtime_ns
+        await cli(
+            "agent", "edit", live["id"], "--set", "channel.endpoint_file=moved.json"
+        )
+        meanwhile = message.model_copy(
+            update={
+                "id": "live-meanwhile",
+                "body": "The desk's channel is being moved; is the held draft still on its way?",
+            }
+        )
+        await peer.write({"inbound": meanwhile.model_dump(mode="json")})
+        await cli(
+            "agent", "edit", live["id"], "--set", "channel.endpoint_file=channel.json"
+        )
+        await peer.write({"release_attachment": "held-draft"})
+        await finish(peer)
+        async with asyncio.timeout(60):
+            await restarted(live["id"], before)
+        peer = await connect(live["id"])
+        peer.automatic = True
+        stack.push_async_callback(peer.aclose)
+        later = message.model_copy(
+            update={
+                "id": "live-later",
+                "body": "The live desk has one more revision. Could you report on it too?",
+            }
+        )
+        await peer.write({"inbound": later.model_dump(mode="json")})
+        async with asyncio.timeout(60):
+            saved = await finish(peer)
+        report = json.loads(await asyncio.to_thread(saved.read_text))
+        assert later.body in report["inbox"]
         await cli("agent", "remove", live["id"])
         assert all(item["id"] != live["id"] for item in await agents())
         assert await asyncio.to_thread((workspaces / live["id"]).is_dir)
