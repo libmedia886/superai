@@ -57,6 +57,9 @@ async def bind(ctx: Context, config: Config) -> AsyncIterator[None]:
             provider_timeout=10,
         ) as service,
     ):
+        # a group is named by its first message alone, as a provider learns a
+        # topic's name only when the topic is made
+        named: set[str] = set()
 
         async def receive():
             async for inbound in channel.receive():
@@ -83,7 +86,9 @@ async def bind(ctx: Context, config: Config) -> AsyncIterator[None]:
                         display_name=inbound.sender.display_name,
                     ),
                     target_kind=ChannelTargetKind(inbound.target.kind),
-                    target_presentation=ChannelTargetPresentation(
+                    target_presentation=None
+                    if inbound.target.kind == "group" and identity in named
+                    else ChannelTargetPresentation(
                         handle=inbound.sender.name
                         if inbound.target.kind == "dm"
                         else None,
@@ -112,6 +117,7 @@ async def bind(ctx: Context, config: Config) -> AsyncIterator[None]:
                     },
                 )
                 recorded = await service.record_inbound(message)
+                named.add(identity)
                 if (
                     recorded is not None
                     and recorded.message_created

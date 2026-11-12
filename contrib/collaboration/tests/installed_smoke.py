@@ -306,7 +306,19 @@ async def exercise(directory: Path):
         allowed = await peers["Cloud"].inbound(
             "@Cloud 可以先看看讲师的时间安排。", target="team", kind="group"
         )
-        assert (await received(directory, allowed))["notifies_runtime"]
+        allowed_row = await received(directory, allowed)
+        assert allowed_row["notifies_runtime"]
+        # a message that does not name its group still goes by the group's name
+        while True:
+            named = [
+                event
+                for event in await events(directory, "channel.inbound.persisted")
+                if event["context"]["message_id"] == allowed_row["message_id"]
+            ]
+            if named:
+                break
+            await asyncio.sleep(0.01)
+        assert named[0]["payload"]["metadata"]["target_name"] == "Design room"
         trusted = await peers["Cloud"].inbound(
             "沿用已确认的项目联系通道。",
             target="trusted",

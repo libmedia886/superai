@@ -237,11 +237,7 @@ class CollaborationService:
                     "text": message.body,
                     "target": message.target,
                     "target_kind": message.target_kind.value,
-                    "target_name": (
-                        None
-                        if message.target_presentation is None
-                        else message.target_presentation.display_name
-                    ),
+                    "target_name": recorded.channel_session.target_display_name,
                     "message_type": message.message_type,
                     "sender": (
                         None
