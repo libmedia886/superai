@@ -115,7 +115,8 @@ class AgentInstances:
             await self.cancel()
             self.desired = desired
             for agent_id in {*self.entries, *desired}:
-                current = self.entries.get(agent_id, {})
+                # what ran before, apart from what is adopted below
+                current = dict(self.entries.get(agent_id, {}))
                 target = desired.get(agent_id, {})
                 identity = self.running.get(agent_id)
                 loop = None if identity is None else identity._loop
@@ -131,14 +132,20 @@ class AgentInstances:
                         and connection.state is states.ConnectionState.STOPPING
                     ]
                 )
-                if current == target and not held:
+                # an agent whose stop was broken off is made again, whatever its
+                # configuration says now
+                stopped = (
+                    loop is not None
+                    and loop.channels.state is not states.Lifecycle.RUNNING
+                )
+                if current == target and not held and not stopped:
                     continue
                 if loop is None:
                     self.adopt(agent_id, None)
                     continue
                 if not target:
                     task = asyncio.create_task(self.retire(agent_id, loop))
-                elif {
+                elif stopped or {
                     name: entry
                     for name, entry in current.items()
                     if entry.definition not in (_channel, _harness)
@@ -256,11 +263,19 @@ class AgentInstances:
         await self.replace(agent_id, None)
 
     async def restart(self, agent_id: str, loop: AgentLoop) -> None:
-        """Replace the whole agent once it has no work."""
-        while loop.channels.pending or await loop.busy():
+        """Replace the whole agent once it has no work, its entries stopped
+        before they are enabled again so that it starts over even with its
+        configuration unchanged."""
+        while loop.channels.state is states.Lifecycle.RUNNING and (
+            loop.channels.pending or await loop.busy()
+        ):
             await loop.timer.create(max(100, loop.timer.tick_ms)).wait()
         await loop.stop()
-        await self.replace(agent_id, None)
+        async with self.lock:
+            self.entries.pop(agent_id, None)
+            await self.apply()
+            self.adopt(agent_id, None)
+            await self.apply()
 
     async def settle(
         self,
