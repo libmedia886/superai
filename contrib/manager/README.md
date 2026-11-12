@@ -52,3 +52,11 @@ choices. Display fields are preserved in the index cache and catalog results.
 
 Use `bcn contrib index add <location>` to append an index and
 `bcn contrib index refresh` to refresh online indexes.
+
+## Remote catalog and management
+
+Sidecar exposes `contrib-catalog.indexes`, `entries` and `refresh`, and
+`contrib-manager.add`, `operation`, `installed`, `detail` and `index`.
+The server market calls these through its selected computer. Local paths and
+resource indexes resolve in that computer's environment; index changes and
+operation records use its configuration and storage.
