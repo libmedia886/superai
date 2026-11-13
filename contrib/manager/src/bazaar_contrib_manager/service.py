@@ -56,7 +56,7 @@ lazy from .packages import HOST, Packages
 
 
 def merge(current: Any, changes: Any) -> Any:
-    """Apply field updates while retaining other nested plugin parameters."""
+    """Apply field updates while retaining other nested Contrib parameters."""
     if isinstance(changes, dict):
         result = dict(current) if isinstance(current, dict) else {}
         for name, value in changes.items():

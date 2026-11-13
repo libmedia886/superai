@@ -18,7 +18,7 @@ type Sessions = Callable[[], AbstractAsyncContextManager[Handler]]
 
 
 class Server(Protocol):
-    """Bind session handlers for the duration of their owning plugin lifespan."""
+    """Bind session handlers for the duration of their owning Contrib lifespan."""
 
     def serve(self, sessions: Sessions) -> AbstractAsyncContextManager[None]: ...
 

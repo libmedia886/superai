@@ -142,9 +142,9 @@ def migrate_v5(payload: Mapping[str, object]) -> ConfigCandidate:
     add(transport, transport, endpoint)
     add("node-health", "node-management")
     add("node-upgrade", "node-management")
-    bcs = Path(os.environ.get("BCN_HOME") or Path.home()) / ".bcs" / "config.toml"
-    if bcs.is_file():
-        server = tomllib.loads(bcs.read_text(encoding="utf-8"))
+    path = Path(os.environ.get("BCN_HOME") or Path.home()) / ".bcs" / "config.toml"
+    if path.is_file():
+        server = tomllib.loads(path.read_text(encoding="utf-8"))
         storage = server.get("storage", "sqlite")
         add(
             "http", "http", {"listen": server["listen"]} if "listen" in server else None

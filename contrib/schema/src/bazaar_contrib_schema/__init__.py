@@ -1,4 +1,4 @@
-"""Transactional, version-based migrations registered by business plugins."""
+"""Transactional, version-based migrations registered by business Contribs."""
 
 from __future__ import annotations
 

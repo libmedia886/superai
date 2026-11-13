@@ -2,6 +2,7 @@
 
 依据消息 `063a69a7-4466-5989-987d-72340ff87d15`、`4a3df703-d8ba-52fd-8386-a80636c7ebd3`、`4a1410e9-fdd9-5e6d-9258-2b6524c85030`、`54a06153-2c7a-50d8-be38-d83215bb119f`、`a71294e0-d7b2-55ad-b070-0d39c6615bfc`、`361bd816-6861-5387-9de3-db06a0221bff`、`4a61b278-dbba-5110-b22a-1a48be84ee85`、`35a6f778-8313-5345-b815-dd56aadb82f4`、`5b10044f-5d13-593f-bdc1-f702f38d28c1`、`61a8fb0b-6faf-5b41-9845-5ce2b6255f50`、`0152f366-79a3-58a2-a4b8-097b74292762`、`048927d2-bcdb-5149-b3cd-74ba46652bd6`、`46bf2276-bd23-5186-a0e7-2e7fe36c32f6`、`6c355ba6-0bad-5525-92d7-0763f87ba60b`、`1f12a86a-5b7a-5cd1-8ab0-ab30cd64cbd4`、`75056a17-d242-53e0-b3d3-5541c3f8c2d0`、`c51fe75f-080c-5bbb-a5d4-73ebf2b05257`、`680370b8-e577-5ff8-86f0-8e7711ff16a2`、`34dd6558-b928-5db1-8744-dc150f1bcb1c`、`9fbda575-6578-574f-a885-eca2e6781f14`、`9b4c789d-27b9-52c0-a480-da6f675b957f`、`7392d984-82ef-5b71-a2dd-0f82fc8404bd`、`ae4a2fb3-637c-51f1-8661-9b00d43896c0`、`74cca34d-90c1-550a-ac3b-a75da7596efa`、`dec88203-3335-53ad-8f32-f599838099b5`、`732ad76b-eb60-5441-8c98-3c101345f20d`、`2377ea79-daee-5aff-8af4-efd3335a0a63`、`1ca34615-3618-57f4-a74c-a5de417fce7d`、`a00b3959-3fb4-5bd1-b080-ad718285cf71`、`96787fb9-cffc-545b-9637-cb35c238d7fc`、`72759245-29a2-5f1c-8420-f586190ac434`、`227a718a-65ce-55b2-bd6b-718bc585370f`、`9c4b2829-5eab-51e6-be65-ffacd7230ac2`、`8fe23c62-55a0-5ad2-9c8f-486f3459136d`、`60b4a535-b2cc-5ee2-954d-42cdd48ada8b`、`0848f322-562e-52d0-be22-8b2a5dbcc317`、`6d7ef808-9bbb-54d2-ba03-ab2ecfba8b79`、`11e6a63e-2572-5129-8f62-42c46e3844ca`、`4a309095-83e0-505e-be68-c6a0f6fe1c2b`、`c78439a5-8fcb-5c72-99b5-3fb718c03e55`、`ee83ba8e-da47-5385-b23a-bc34e7a6f58f`、`a088f3ea-c6c2-5f14-8831-3f1844592172`、`62072b45-7a4e-5a3a-b33b-ada5f46fa02a`、`2128b685-1165-5ffc-ae59-1bf377c0d729`、`a9707a85-61c1-5b2f-8212-6501f4a27597`、`89409f44-6c7f-5559-98dd-3c92e023980c`、`9a8a560e-ea1a-5b92-af21-27c315705f4f`、`04ebe6bb-3fde-5699-9478-cd4f92b06d0f`、`069a6203-552c-58c5-b57c-53b3dd5f055f`、`fe92f9bd-d2a3-5ee9-98ac-d05dfb4de85b`、`c829259a-d24e-5658-8862-8340fa564e6a`、`d929e3b7-1560-5a59-9d89-bb9bb0638eab`、`df181db4-2fb1-5bf6-9f35-13804366c141`、`fe7e2369-5a98-5338-b704-cc100dee30c9`、`145bdfe5-a2ba-5d54-98ee-b5a4c7fcf064`、`ea154f6b-e6ab-5e37-b761-21b8d3ba417d`、`0f163715-de78-5dda-ae47-86f1122c45d8`、`cca4a947-a5ad-51d8-8a61-8e890c84e2f8`、`c343e7fe-6a21-58a4-ba78-e4e9b031145d`、`2777ee0e-7dc2-5078-b8c8-26b36785fa88`、`c4993a58-dad1-5fb5-91a0-49252e01399c`、`2e906727-a570-51b8-b30d-dc5badd3b7b0`、`713d4cb5-ce3d-57a5-b325-ed96cc9d9b48`、`3cae9028-3f2d-552b-b954-adde6281dc51`、`e3d0a24f-d713-56f8-ad56-54af4e76f72f`、`eb67ecd4-cfc7-539b-8e4b-53608b0f134f`、`f9b97a53-3853-52dc-819c-9e669fdfeba1`、`617a0fd1-b2a3-50e9-86a0-edaacc3d31bd`、`0f086c35-1137-5163-81fc-8b175395b42e`、`ad1081e6-5140-5fe4-a0f6-0ec0cb58afb4`、`ccc3383f-6d1f-578e-a87f-36fd93a35d58`、`9dd2dc7d-666f-5ce3-9d64-d17cc57f2987`、`09872486-2607-5d05-bee4-a6a1387b1bd4`、`4ad7059a-2d64-5d5e-ae0d-5a3deb9a9366`、`2a8906da-4f07-5bb5-9bfd-1baab7146b33`、`13ecfc45-fbf6-583f-90ca-883d5aac1b6a`、`e1be9e30-31be-593a-afc4-056a711625f5`、`e0f47cec-5443-514b-b6d2-0a1c645071c7`、`18bee733-8431-54f9-945c-51158293a018`、`cbcdf14c-ef83-5766-b74b-17b8184f723b`、`1c8d85e7-863f-56d5-8664-2a2fb75270fa`、`7d53ab4b-35f8-56d7-8fa1-b60303bfa780`、`8212bc19-143e-5d78-97e5-70c3c74a43fc`、`3863d98c-c549-54eb-8edf-8ee607015e18`、`1f1f3c09-9828-51b3-8841-6e66f0645a09`、`cd0d485e-e55d-55c4-8ecf-e8b99a10b355`、`b85f0b10-310b-5770-8568-fecb79b3d4cf`、`4e0c6800-19d0-55de-927b-c8fc865c5cc7`、`1c2fc42d-da82-50b7-8c80-532008f78dd8`、`d7bd5618-3bfb-5721-9b2b-076b5657d172`、`b4fe9a9a-edd1-545d-a99d-c1fd30535d81`、`e2c30e82-dfea-5ac9-963f-581b093bfe12`、`be8a0129-a813-545d-861a-caf9e65171e7`、`3635b11e-1ada-5ae2-a6aa-4e5831a67d24`、`329cbbe6-0081-56f5-a671-d55992044274`、`5e52ede8-6af3-5c97-87a7-893aee7ae924`、`5e16fc9a-dd9d-54a4-8c5e-268f5b27dd36`、`078e3fe1-9b1c-50ef-93db-ec15faef03fa`、`e7f4fc3e-9052-5fbc-9dd9-133b398c89a2`、`df3c0868-77bf-52fe-8c70-0cdd81388ab5`、`dfd204ee-c750-5286-9b61-1e6101260e74`、`e87141a6-52f0-5170-9e2b-7f3fc394956a`、`bf63081c-17a8-5756-b418-7ce8ad07cdf8`、`b6e85bac-d38c-53fc-a8fc-3a5011f2a668`、`4ed365e2-198e-5816-bc16-05d2db22a5cf`、`3c6c1309-9a04-5665-9af3-dc4794c82b86`、`94db16e3-38c8-526a-b333-a0f7380b4ba3`、`7ff6f598-b4e6-5482-8adf-df771cf6dac2`、`1c7fc7a7-1fd5-575a-bf28-336acbf4bc5b`、`6d421b15-70d6-5fd4-96cf-acd279f90d2d`、`5e80679b-4a7e-51e7-9a7a-62e9d96aac36`、`c5a00df4-3e69-55d2-b0a4-159ed4260436`、`0a7b25d8-336e-5423-ab32-e780b72a9568`、`405e66f2-141c-51b4-a6d3-5a97a5b64a72` 与 `1529f668-8abe-5aab-816d-76a2dfe08990`：
 
+- 服务端产品名称统一为 Bazaar Server；界面和说明文案中的扩展模块统一称为 Contrib。
 - 节点协议不兼容 0.2；server 的功能与数据结构保持一致，实现可以重新设计。
 - server 按功能模块拆成 contrib：每个模块提供自己的页面，accept 所依赖的模块；server 本体提供页面框架与基础 API 服务。
 - server 的 contrib 与节点的 contrib 是同一种插件，机制相同：都在配置顶层启用，由 contrib manager 安装、启用与停用，需要哪些服务就 accept 哪些；任何插件都可以 accept 它需要的服务。
@@ -35,7 +36,7 @@ BCN 仓库的改动在 `0.3-server` 上进行，该分支从 `0.3` 的 cd8470d �
 | --- | --- | --- | --- |
 | bazaar-contrib-http | open-bazaar/contrib-http | http | HTTP 契约（路由、中间件与 ASGI 应用的登记、监听地址、请求生命周期）及 Starlette／uvicorn 实现 |
 | bazaar-contrib-server-database | open-bazaar/contrib-server-database | server-database | 以私有绑定装配 server 的数据库（storage、所选后端、database 与 schema），以 SERVER_DB 与 SERVER_SCHEMA 提供；打开数据库前从 ~/.bcs 复制数据库与 session.key |
-| bazaar-contrib-server-migrations | open-bazaar/contrib-server-migrations | server-migrations | 以原 v01–v07 为历史接续 0.2 的 BCS 表结构，以 upgrade_only 登记，完成后提供 SERVER_MIGRATIONS |
+| bazaar-contrib-server-migrations | open-bazaar/contrib-server-migrations | server-migrations | 以原 v01–v07 为历史接续 0.2 的 Bazaar Server 表结构，以 upgrade_only 登记，完成后提供 SERVER_MIGRATIONS |
 | bazaar-contrib-server | open-bazaar/contrib-server | server、server-theme-night、server-theme-day | server 是 server 本体，提供外壳、嵌入工具、侧边栏、设置页、统一总线、权限点登记、主题接口、语言、refs 与 API 挂载；server-theme-night 与 server-theme-day 是默认带上的两个主题插件 |
 | bazaar-contrib-server-overview | open-bazaar/contrib-server-overview | server-overview | 概览页与问候、概览内容的登记与每个账户的排序 |
 | bazaar-contrib-server-access | open-bazaar/contrib-server-access | server-access | 会话、登录页、账户、角色、分享与权限检查，并定义第三方登录方式的接口 |
@@ -64,13 +65,13 @@ BCN 仓库的改动在 `0.3-server` 上进行，该分支从 `0.3` 的 cd8470d �
 - server 的数据都在 ~/.bcn 下，登录签名密钥为 ~/.bcn/session.key。
 - server 的条目在配置顶层启用，与节点的条目共享 TIMER 等服务。第 11 阶段的默认配置启用 http、server-database、server-migrations、server、server-theme-night、server-theme-day、server-overview 与 server-access；第 12 阶段加入 server-computer 与 server-relay-memory；第 13 阶段加入 server-agent；第 14 阶段加入 server-activity、server-conversation 与 server-usage。需要 GitHub 登录时，经 contrib manager 加入 bazaar-contrib-server-github 并启用 server-github。
 - server-database 按自己条目里的存储选择，在私有绑定中启用 storage、所选后端、database 与 schema，再以 SERVER_DB 与 SERVER_SCHEMA 把这份数据库提供到顶层；节点照旧使用 DB 与 SCHEMA。
-  - 存储选择与参数沿用原 BCS 的 storage 及同名参数表，缺省为通用 sqlite，以现有的 name 参数打开 ~/.bcn/bcs.sqlite3，与节点的 bcn.sqlite3 分开。两边旧的 schema_migrations 账本列与版本各不相同，不合并。
+  - 存储选择与参数沿用原 Bazaar Server 的 storage 及同名参数表，缺省为通用 sqlite，以现有的 name 参数打开 ~/.bcn/bcs.sqlite3，与节点的 bcn.sqlite3 分开。两边旧的 schema_migrations 账本列与版本各不相同，不合并。
   - SERVER_DB 与 SERVER_SCHEMA 由 bazaar-contrib-server-database 导出；用到 server 数据库的模块 accept 它们并依赖该包，例如 server-migrations accept SERVER_SCHEMA。server-management 不依赖任何 server 的包，发版顺序为 server-database、server-migrations、server-management。
-- 设置写在各自所属条目的 config 里，缺省值沿用原 BCS 模型：
+- 设置写在各自所属条目的 config 里，缺省值沿用原 Bazaar Server 模型：
   - listen 在 http 条目；
   - 存储选择与参数在 server-database 条目；
   - session_minutes 在 server-access 条目，retention_days 在活动模块的条目，随各自的 Task 交付。
-- 从 0.2 BCS 升级：
+- 从 0.2 Bazaar Server 升级：
   - 还没有 ~/.bcn/config.toml 时，server-management 的默认配置按 0.2 的规则读取 ~/.bcs/config.toml，把设置写进对应条目；
   - 已有 0.2 节点配置时，config-versions 的 V4→V5 转换在 ~/.bcs 存在时声明 server 的包、启用其条目并写入 0.2 的设置，缺少的包由 contrib manager 补装；
   - session_minutes 与 retention_days 在 server-access 与活动模块交付时加入上面两处；
@@ -698,7 +699,7 @@ claudecode 依据 stream-json 中 tool_use 的 name 与 input：
 
 - 两端验收沿用第 12 与 13 阶段的做法：server 与节点经真实 HTTP 连接，节点的 agent 以 TestChannel 收发消息，运行时为测试目录中按 harness 契约实现的运行时；codex 与 claudecode 的字段由各自的 e2e 以真实 CLI 验证。
 - 页面以真实浏览器在 1440px 与 390px 宽度、夜市与晨市下截图，与 design 中第 14 阶段的效果图对照：会话页的四种视图、智能体的会话 tab、动态与完整活动记录、手机的九个画面，以及概览。
-- 原 BCS 的历史、refs 与升级后的新事件在同一个数据源中查询：0.2 的回合、用量与消息出现在动态、完整活动记录与概览中。
+- 原 Bazaar Server 的历史、refs 与升级后的新事件在同一个数据源中查询：0.2 的回合、用量与消息出现在动态、完整活动记录与概览中。
 
 ## Tasks
 
@@ -709,7 +710,7 @@ claudecode 依据 stream-json 中 tool_use 的 name 与 input：
   - 验证：真实监听，路由、中间件与 ASGI 应用的登记，请求生命周期，退出时关闭监听并结束在途请求，Windows／Linux／macOS CI。
 - Task 45：server 的基础。包括 contrib-server-migrations（由 contrib-server 改名，改为 upgrade_only 并 accept SERVER_SCHEMA）的 server-migrations；新仓库 contrib-server-database 的 server-database（私有绑定的数据库，SERVER_DB 与 SERVER_SCHEMA，打开数据库前从 ~/.bcs 复制数据库与 session.key）；新仓库 contrib-server-management 的默认配置与 0.2 设置的读取；以及 config-versions 的 V4→V5 转换中 server 的包、条目与 0.2 设置。server-management 的安装测试从 PyPI 安装已发布的 bazaar-compute 与 `bazaar-compute[node]`，再加入本地构建的包。
   - 验证：空库时 server-migrations 不建表；0.2 的 v3 与 v7 数据库接续到 v07 并保留原账本，再次启动不重复执行。
-  - 验证：用 v0.2.3 BCS 生成的真实 ~/.bcs 启动，首次启动后 server 数据库的表结构与行数、session.key、http 条目的 listen 与 server-database 条目的存储选择与原值一致，~/.bcs 不变。
+  - 验证：用 v0.2.3 Bazaar Server 生成的真实 ~/.bcs 启动，首次启动后 server 数据库的表结构与行数、session.key、http 条目的 listen 与 server-database 条目的存储选择与原值一致，~/.bcs 不变。
   - 验证：再次启动不重复导入；没有 ~/.bcs 时生成原默认设置与当前基线。
   - 验证：只装 bazaar-compute 与 server-management 的 host 首次运行成为 server；同时装有 node 的包时，节点的配置与数据库不受影响，server 的条目都在顶层，contrib manager 可以管理。
   - 验证：已有 0.2 节点配置与 ~/.bcs 时，V4→V5 转换声明 server 的包并启用其条目，写入的设置与 0.2 一致。

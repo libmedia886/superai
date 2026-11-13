@@ -1,14 +1,14 @@
-# BCS OIDC 登录与角色管理
+# Bazaar Server OIDC 登录与角色管理
 
 ## 目标
 
-为 BCS 增加 OIDC 登录、多角色权限和按角色分享资源，沿用现有设置导航、详情页、移动端切换方式及 Lucide 图标。
+为 Bazaar Server 增加 OIDC 登录、多角色权限和按角色分享资源，沿用现有设置导航、详情页、移动端切换方式及 Lucide 图标。
 
 - 一个账号关联多个角色，功能权限取角色授权的并集。
 - 电脑和智能体分享给角色，分享时分别指定可执行的动作。
 - OIDC 首次登录创建账号并分配当前默认角色；后续登录保留已有角色关联。
 - 角色页管理名称、权限和默认状态；账号页统一分配角色。
-- BCS 会话默认固定有效期 10 分钟，到期自动尝试一次免交互 OIDC 认证。
+- Bazaar Server 会话默认固定有效期 10 分钟，到期自动尝试一次免交互 OIDC 认证。
 - 登录方式支持名称、图片上传和可编辑回调地址。
 
 ## 技术方案
@@ -17,7 +17,7 @@
 
 采用 Authlib 1.8.0 和 httpx2 2.13.1，通过 uv 锁定依赖。依赖选用实施时最新稳定版。
 
-[Authlib Starlette 客户端文档](https://docs.authlib.org/en/latest/client/starlette.html)提供 discovery、授权 URL、换取 token 和 ID token 校验接口。使用 `StarletteOAuth2App` 的协议方法，登录事务和应用会话由 BCS 管理。
+[Authlib Starlette 客户端文档](https://docs.authlib.org/en/latest/client/starlette.html)提供 discovery、授权 URL、换取 token 和 ID token 校验接口。使用 `StarletteOAuth2App` 的协议方法，登录事务和应用会话由 Bazaar Server 管理。
 
 按 [OIDC Core](https://openid.net/specs/openid-connect-core-1_0.html) 使用 Authorization Code、`openid profile email` 和 S256 PKCE；协议库校验签名、issuer、audience、有效期及 nonce。外部身份以 issuer 和 subject 唯一定位，显示名及 email 仅用于展示。
 
@@ -29,7 +29,7 @@ OIDC 登录成功后另设最长 30 天的签名恢复提示，记录账号、�
 
 ### 数据与存储
 
-新增 v03 迁移，保留已发布 v01、v02。存储接口定义于 BCS `IStorage`，SQL 实现留在 SQLite 层。
+新增 v03 迁移，保留已发布 v01、v02。存储接口定义于 Bazaar Server `IStorage`，SQL 实现留在 SQLite 层。
 
 | 数据 | 字段与约束 |
 | --- | --- |
@@ -74,7 +74,7 @@ Logo 通过 multipart 上传，Pydantic 在输入边界校验 MIME 和 256 KiB �
 - `/login/oidc/{provider_id}/callback`：消费事务、验证身份、读取或创建账号、签发会话，跳转 `/agents`。
 - 电脑详情：概览后的分享 tab。智能体详情：活动后的分享 tab。两处共用多选权限和角色穿梭框，支持批量分享、修改和撤回。
 
-复用现有按钮、边框、颜色变量、空状态图标及移动端导航。桌面表单保持标签与内容列对齐，手机端标签置于输入上方。表单输入使用 Pydantic 校验，OAuth 失败提供简明登录提示。默认关闭 BCS 访问日志，避免回调授权码和 state 进入日志；secret 和 token 不回填页面。
+复用现有按钮、边框、颜色变量、空状态图标及移动端导航。桌面表单保持标签与内容列对齐，手机端标签置于输入上方。表单输入使用 Pydantic 校验，OAuth 失败提供简明登录提示。默认关闭 Bazaar Server 访问日志，避免回调授权码和 state 进入日志；secret 和 token 不回填页面。
 
 ## 串行任务与验收
 
@@ -107,7 +107,7 @@ Logo 通过 multipart 上传，Pydantic 在输入边界校验 MIME 和 256 KiB �
 ### Task 5：自动免交互认证
 
 - [x] 实现签名恢复提示、一次 `prompt=none`、回调身份绑定和退出清理。
-- [x] 使用真实 Keycloak 和浏览器等待会话实际到期，重启 BCS 后验证普通请求和 HTMX 的 SSO 恢复。
+- [x] 使用真实 Keycloak 和浏览器等待会话实际到期，重启 Bazaar Server 后验证普通请求和 HTMX 的 SSO 恢复。
 - [x] 验证身份提供方会话失效时返回登录页、停止自动重试，以及主动退出后正常登录。
 
 ### Task 6：Logo 上传

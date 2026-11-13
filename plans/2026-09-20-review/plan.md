@@ -11,7 +11,7 @@
 
 ## 目标
 
-- 会话有审核状态。接了 bcs 的节点上，名单外的新会话——私聊也好、群也好——从待审核开始，由 bcs 审；没接 bcs 的
+- 会话有审核状态。接了 Bazaar Server 的节点上，名单外的新会话——私聊也好、群也好——从待审核开始，由 Bazaar Server 审；没接 Bazaar Server 的
   节点没人审，名单为空就谁来都是已允许，名单不空就名单内已允许、名单外待审核。升级前已有的会话视为已允许，升级后
   老群不会变哑。
 - 待审核与已拒绝的会话里的消息只落库：不通知运行时，无论有没有提到智能体，不产生 turn 也不产生 steer。
@@ -20,7 +20,7 @@
   列出的会话一建立就是已允许。配置版本不变，`allowed_sender_ids` 就地换名：Telegram 私聊的 chat id 就是对方的
   user id，原来的名单改个键名原样可用。
 - 节点有一张配置表，按智能体存键值，这一支只有一个键：待审核与已拒绝的会话的自动回复；空就是黑洞。
-- bcs 看得见待审核的会话，能允许、拒绝、移除；节点上行报告审核状态的变化，下行接受审核决定与配置的改动。
+- Bazaar Server 看得见待审核的会话，能允许、拒绝、移除；节点上行报告审核状态的变化，下行接受审核决定与配置的改动。
 
 ## 设计
 
@@ -33,7 +33,7 @@
 状态怎么变：
 
 - 新建：会话在 provider 那边的 chat id（消息带的 `provider_chat_id`）在所属 channel 实例的 `allowed_chats` 里 → `approved`；否则，节点有人审
-  （配了 control，也就是接了 bcs）→ `pending`；没人审时名单为空 → `approved`，名单不空 → `pending`。
+  （配了 control，也就是接了 Bazaar Server）→ `pending`；没人审时名单为空 → `approved`，名单不空 → `pending`。
 - 允许：任何状态 → `approved`。
 - 拒绝：任何状态 → `denied`。线框图的「移除」就是拒绝：已允许的会话拒绝后从列表里消失。
 - 已拒绝的会话再收到一条入站消息 → 回到 `pending`：这就是「他下次再联系就重新进待审核」。已允许的收到消息状态不变。
@@ -48,12 +48,12 @@
 
 - `record_inbound` 里，会话不是 `approved` 时消息写成 `notifies_runtime = 0`。编排器的 ingress 已经按这个标志决定
   通不通知运行时，不用再判一次；未读游标、`notifying_only` 的查询也都跟着这个标志走。审计事件
-  `channel.inbound.persisted` 的 `metadata` 多一个 `review`，bcs 由此知道来了一个待审核的联系人。
+  `channel.inbound.persisted` 的 `metadata` 多一个 `review`，Bazaar Server 由此知道来了一个待审核的联系人。
 - 智能体看会话的所有读取——`list_inbox_targets`、`check_messages`、`read_unread_summary`、`list_thread_ids`
   （`threads_in_reach` 用它）、`read_message_history`、`send_message`、`unfollow_thread`——只认 `approved` 的会话。会话被允许后，它在
   待审核期间落下的消息在 `bcc message read` 里读得到，但不算未读、不补发通知；下一条新消息照常触发。
 
-`read_inbox_catalog` 多一个 `review` 参数：默认只列已允许的（bcc 的用法），bcs 的读取按 tab 传 `approved` 或
+`read_inbox_catalog` 多一个 `review` 参数：默认只列已允许的（bcc 的用法），Bazaar Server 的读取按 tab 传 `approved` 或
 `pending`，`InboxListResult` 附 `pending_review` 计数，`InboxTargetSummary` 带上 `review`，序列化随之。这是同一个
 服务方法多一个参数，与 `pending_only` 一样。
 
@@ -61,11 +61,11 @@
 
 `allowed_chats` 是每个 channel 都认的选项（`[[agent.channel]] allowed_chats = ["…"]`），值是该 channel 里会话的
 provider id 的文本形式——Telegram 的 chat id、飞书的 chat id、企业微信的 chat id；私聊在 Telegram 上就是对方的
-user id。名单里的会话一建立就是已允许。名单外的看节点有没有人审：配了 control（接了 bcs）就进待审核，由 bcs 定；
+user id。名单里的会话一建立就是已允许。名单外的看节点有没有人审：配了 control（接了 Bazaar Server）就进待审核，由 Bazaar Server 定；
 没配的节点没人审，名单为空就谁来都允许——不然操作者连自己的 id 都不知道，就再也联系不上智能体了；名单不空才把
 名单外的挡在待审核。名单按 channel 实例算：配置里的第 N 个 channel 就是第 N 个实例，消息带着是哪个 bot 收的
 （`channel_identity`）和 provider 那边的 chat id（`provider_chat_id`，各 channel 从自己的消息里取），新会话建立时
-按此定状态；同 kind 的两个 bot 各有各的名单。`NodeApplication` 把有没有 control 也交给它。接了 bcs 的节点用名单省掉常客的一次审核。
+按此定状态；同 kind 的两个 bot 各有各的名单。`NodeApplication` 把有没有 control 也交给它。接了 Bazaar Server 的节点用名单省掉常客的一次审核。
 
 `plugin.py` 不再要求也不再读取 `allowed_sender_ids`；channel 里私聊的名单检查连同 `unauthorized_sender` 的审计事件
 一起删掉。配置版本不变（不是结构改动，不值一次升级）：`allowed_sender_ids` 从 telegram 的选项里消失，
@@ -93,10 +93,10 @@ scheduled 的提醒——后者是命令服务现有的 `list_reminders`。命�
 `contacts` 读取多 `review` 参数并在应答里附 `pending_review` 计数。响应都是 `{"ok": true, "result": {...}}`。
 
 上行没有新方法：`channel.inbound.persisted` 带 `review`，`channel.session.reviewed` 是新事件；事件文案 catalog 各补
-一条（「来了一个待审核的联系人」用不着单独的事件，文案按 `review` 分）。bcs 的联系人栏刷新看的消息事件集合加上
+一条（「来了一个待审核的联系人」用不着单独的事件，文案按 `review` 分）。Bazaar Server 的联系人栏刷新看的消息事件集合加上
 `channel.session.reviewed`，审核完列表跟着变。
 
-### bcs 界面
+### Bazaar Server 界面
 
 功能权限点 `agents.approve`。
 
@@ -117,8 +117,8 @@ scheduled 的提醒——后者是命令服务现有的 `list_reminders`。命�
   图标——循环的 `repeat`、一次的 `calendar`——标题一行，下面一行是下一次的时间，循环的前面带周期：
   「每天 · 明天 09:00」，一次的就「明天 14:00」；底部整行
   `--danger` 的「移除群聊 / 移除私聊」，点了先问一句再发 `denied`，成功后关闭资料卡、右栏清空。任务一节这一支不做。
-  成员由 bcs 自己从已加载的聊天记录里得来：每条 turn 带着 sender id 与名字，资料卡打开时从当前列出的消息里去重，
-  向上翻页或尾巴接上新消息后再算一遍——节点不为 bcs 加 `bcc` 用不到的方法；定时器来自 `{"read": "reminders", "agent_id", "actor_id"}`：
+  成员由 Bazaar Server 自己从已加载的聊天记录里得来：每条 turn 带着 sender id 与名字，资料卡打开时从当前列出的消息里去重，
+  向上翻页或尾巴接上新消息后再算一遍——节点不为 Bazaar Server 加 `bcc` 用不到的方法；定时器来自 `{"read": "reminders", "agent_id", "actor_id"}`：
   命令服务的 `list_reminders`，只列 scheduled 的：触发过的和取消的都不列。
 - 自动回复的编辑：联系人栏标题右侧一个图标按钮（`message-square-text`），hover 文案「自动回复」，点开一张小卡：
   一个多行输入框、保存；打开时下发 `setting` 读取回显，保存下发 `setting` 写。智能体资料页做出来后挪过去。
@@ -136,14 +136,14 @@ inbox/message 命令看不见未允许的会话。
 
 `allowed_chats` 进 `ChannelContext` 与新会话的建立；telegram 插件与 channel 去掉 `allowed_sender_ids`，
 `bcn agent add`、README 跟着改；`settings` 表、`get_setting` / `set_setting`、待审核会话的自动回复。
-测试：名单内的会话一建立就是已允许；接了 bcs 的节点名单外待审核；没接
-bcs 的节点名单为空时谁来都允许、不空时名单外待审核；设了回复语的节点对陌生人的每条消息各回一句，没设的一句不回。
+测试：名单内的会话一建立就是已允许；接了 Bazaar Server 的节点名单外待审核；没接
+Bazaar Server 的节点名单为空时谁来都允许、不空时名单外待审核；设了回复语的节点对陌生人的每条消息各回一句，没设的一句不回。
 
 ### Task 3：下行审核
 
 `_ReviewWrite`、`_SettingWrite`、`_SettingRead`、`_RemindersRead`、`_Request`，`contacts` 的 `review`
-与 `pending_review`，命令服务合一（`commands/` 包），bcs 的 `channel.session.reviewed` 与 `setting.changed` 文案、联系人栏刷新
-的事件集合。测试用真实 bcs 与真实节点：下发允许后节点上的会话变为已允许，下发的回复语读得回来，定时器读得出。
+与 `pending_review`，命令服务合一（`commands/` 包），Bazaar Server 的 `channel.session.reviewed` 与 `setting.changed` 文案、联系人栏刷新
+的事件集合。测试用真实 Bazaar Server 与真实节点：下发允许后节点上的会话变为已允许，下发的回复语读得回来，定时器读得出。
 
 ### Task 4：审核卡与资料卡
 
@@ -153,7 +153,7 @@ bcs 的节点名单为空时谁来都允许、不空时名单外待审核；设�
 
 ### Task 5：真实运行验证
 
-用一个新的 Telegram 账号私聊智能体：不回复；bcs 里出现待审核，允许后再发一条，智能体回复；拒绝后再发一条，
+用一个新的 Telegram 账号私聊智能体：不回复；Bazaar Server 里出现待审核，允许后再发一条，智能体回复；拒绝后再发一条，
 重新出现在待审核。
 
 ## 验收标准
@@ -162,4 +162,4 @@ bcs 的节点名单为空时谁来都允许、不空时名单外待审核；设�
 - 智能体经 bcc 看不见任何未允许的会话。
 - 升级后已有会话与群都是已允许，行为与升级前一致；名单改成 `allowed_chats` 后继续放行同一批人。
 - 设了自动回复的节点，陌生人每发一条都收到那一句，仅此而已；没设的一句也没有。
-- bcs 上一次允许或拒绝，节点上立刻生效，审计里有 `channel.session.reviewed`。
+- Bazaar Server 上一次允许或拒绝，节点上立刻生效，审计里有 `channel.session.reviewed`。

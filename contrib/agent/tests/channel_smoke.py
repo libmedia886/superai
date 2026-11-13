@@ -155,5 +155,5 @@ async def exercise(directory: Path):
 
 
 if __name__ == "__main__":
-    with TemporaryDirectory(prefix="bcs-") as directory:
+    with TemporaryDirectory(prefix="server-") as directory:
         asyncio.run(exercise(Path(directory)))

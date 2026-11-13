@@ -4,7 +4,7 @@ Task 6–10 的 Alpine 迁移已完成。Task 11 的代码审计、隔离浏览�
 
 ## 验证结果
 
-使用测试专用 BCS、真实 NodeApplication、临时数据库、TestChannel/TestRuntime 和独立 Edge。节点离线通过正常停止测试节点并等待实际心跳过期验证。测试实例已退出。
+使用测试专用 Bazaar Server、真实 NodeApplication、临时数据库、TestChannel/TestRuntime 和独立 Edge。节点离线通过正常停止测试节点并等待实际心跳过期验证。测试实例已退出。
 
 | 检查 | 结果 |
 | --- | --- |

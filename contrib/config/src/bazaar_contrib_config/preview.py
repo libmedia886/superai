@@ -63,7 +63,7 @@ async def preview(request: dict[str, Any]) -> ConfigurationPreview:
             )
             service.check(composition, current=baseline)
             error = None
-        except Exception as cause:  # noqa: BLE001 - Return target plugin diagnostics without saving the candidate.
+        except Exception as cause:  # noqa: BLE001 - Return target Contrib diagnostics without saving the candidate.
             error = str(cause)
         result = ConfigurationPreview(
             candidate=candidate, revision=request["revision"], error=error

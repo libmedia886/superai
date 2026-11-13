@@ -3,18 +3,18 @@
 ## 背景
 
 `bcc message read` 适合在已知会话和消息位置后读取上下文。用户问「之前怎么决定的」时，智能体还需要先从自己
-拥有的会话中找出相关消息。BCS 的联系人与聊天记录也需要同一能力：搜索选中智能体的全部会话，点开结果后定位到原消息。
+拥有的会话中找出相关消息。Bazaar Server 的联系人与聊天记录也需要同一能力：搜索选中智能体的全部会话，点开结果后定位到原消息。
 
 消息正文已经保存在节点 SQLite 的 `messages.body` 中；存储 scope 固定绑定一个 agent，下行通道可以按选中的
-agent 调用它的命令服务。搜索在这个结构内增加一项读取能力，CLI 与 BCS 共用节点查询。
+agent 调用它的命令服务。搜索在这个结构内增加一项读取能力，CLI 与 Bazaar Server 共用节点查询。
 
 ## 目标
 
 - `bcc message search` 支持关键词、会话、发送者、时间、排序和分页，返回能直接用于历史读取的消息位置。
 - `session` 模式的搜索与历史读取固定在当前会话，命令和 runtime 输出沿用公共 target 格式。
-- `dangerous_individual` 模式与 BCS 支持搜索选中 agent 自己拥有的全部会话，目标过滤落到一个独立会话。
+- `dangerous_individual` 模式与 Bazaar Server 支持搜索选中 agent 自己拥有的全部会话，目标过滤落到一个独立会话。
 - 智能体通过搜索找到历史线索，再用 `message read --around` 读取原讨论，引用原消息作答。
-- BCS 在聊天标题栏右侧提供搜索图标与 Ctrl+F 入口，打开 Raycast 式悬浮搜索；输入后展示可滚动的结果，点开后定位原消息。
+- Bazaar Server 在聊天标题栏右侧提供搜索图标与 Ctrl+F 入口，打开 Raycast 式悬浮搜索；输入后展示可滚动的结果，点开后定位原消息。
 - 搜索、筛选与自绘日历沿用网站现有样式和 i18n；定位原消息后短暂亮起，再恢复普通消息样式。
 - 页面订阅刷新保留搜索条件、已加载结果与滚动位置；定位历史消息后持续保留正在阅读的上下文。
 - 手机支持触摸搜索、筛选、日历与原消息定位，软键盘、横竖屏及安全区变化后仍可操作并保留状态。
@@ -31,7 +31,7 @@ agent 调用它的命令服务。搜索在这个结构内增加一项读取能�
 agent 的存储中，也只返回当前 agent 的记录。
 
 - CLI 的搜索与历史读取只读 `approved` 会话。已 unfollow 的会话仍可搜索已保存的历史；follow 控制通知，review 控制可读性。
-- BCS 按已有 `agents.view`、computer/agent 可见性检查选择一个 agent。节点 control 在该 agent scope 内查询，
+- Bazaar Server 按已有 `agents.view`、computer/agent 可见性检查选择一个 agent。节点 control 在该 agent scope 内查询，
   操作者按现有历史读取规则可查看各 review 状态的会话；搜索请求中的 review 过滤由 control 边界提供。
 - target 过滤使用现有 `resolve_inbox_target`，返回一个已保存、属于该 agent 的会话。
   使用结果里的精确 target；不根据群名展开其他会话，每个 thread 独立查询。
@@ -75,7 +75,7 @@ bcc message search [--query <text>] [--target <exact-target>]
 这个筛选直接作用于该 agent 的消息行，不通过「找到最后一个同名发送者」把范围固定到某个 channel。
 
 时间接受 ISO 8601 日期、日期时间和带时区的日期时间。没有时区时使用 CLI 所在电脑的本地时区；日期作为 after
-取当天开始，作为 before 取当天结束。CLI 转成 epoch 毫秒传给节点；BCS 使用当前页面时区做相同转换。
+取当天开始，作为 before 取当天结束。CLI 转成 epoch 毫秒传给节点；Bazaar Server 使用当前页面时区做相同转换。
 节点边界校验 `after_ms <= before_ms`，查询和排序统一使用
 `COALESCE(provider_time_ms, received_at_ms, created_at_ms)`，以 `seq DESC` 作为稳定的次级顺序。
 
@@ -177,7 +177,7 @@ SQLite repository 承担条件、FTS、排序与分页；命令服务组合 targ
 `_MessageSearchRequest` 的 target 为可选，read/send/unfollow 请求沿用现有必填参数。服务端根据已验证 actor 处理目标：session
 按现有规则解析 target 并检查当前会话边界，dangerous_individual 按各命令的目标规则解析。control 仍以选中 agent 的读取入口查询。
 
-两种模式的命令与 BCS control 使用相同返回形状：
+两种模式的命令与 Bazaar Server control 使用相同返回形状：
 
 ```json
 {
@@ -206,10 +206,10 @@ SQLite repository 承担条件、FTS、排序与分页；命令服务组合 targ
 ```
 
 搜索序列化复用 `core/serialize.py` 的 sender、target 与消息身份语义，节点统一返回最多 240 个 Unicode
-字符的纯文本 `snippet` 和普通文字／命中片段 `parts`，CLI 与 BCS 直接渲染同一份视图。
+字符的纯文本 `snippet` 和普通文字／命中片段 `parts`，CLI 与 Bazaar Server 直接渲染同一份视图。
 snippet 围绕最早出现的查询片段截取，空白折叠，前后截断时显示省略号；只有结构过滤时取开头。
 命中片段在节点按查询片段大小写不敏感地划分。命令与 control 的 Pydantic 请求边界只取前 5 个空白分隔的
-查询片段，超出的忽略；BCS 页面查询采用相同规则。目标名称来自已有 target projection，actor 由
+查询片段，超出的忽略；Bazaar Server 页面查询采用相同规则。目标名称来自已有 target projection，actor 由
 `Actors.for_thread(thread_id)` 取得。历史读取使用 `bcc message read --target '<target>' --around '<message_id>'`。
 
 CLI 采用既有 agent 搜索展示结构，由 `cmd/bcc/_format.py` 与 `resources/bcc/search.tpl` 实现：
@@ -314,7 +314,7 @@ When you cite a retrieved discussion, include the original message ID from the s
 
 搜索范围和 target 的会话边界由命令服务实施；其余消息操作说明、命令示例和 runtime 消息格式沿用现有内容。
 
-### BCS 搜索与跳转
+### Bazaar Server 搜索与跳转
 
 界面依据为原讨论最终采纳的五张图：`v2-bold-keywords/01-悬浮搜索.png`、
 `v2-bold-keywords/02-定位原消息.png`、`04-会话筛选.png`、`05-发送者筛选.png`、
@@ -350,7 +350,7 @@ When you cite a retrieved discussion, include the original message ID from the s
 每项结果显示来源会话、发送者、时间和正文片段。来源行左侧为会话头像和名称，右侧为日期、时间与当前选中项的
 跳转箭头；正文和下方发送者名称与来源文字对齐。正文使用节点返回的纯文本 snippet，列表最多显示两行，
 截断处保留省略号；关键词按查询片段加粗并使用网站深色正文色，片段其余文字使用 `--muted`。
-BCS 直接渲染节点返回的 `parts`，由 Jinja 自动转义并在命中片段上使用 `<strong>`；关键词背景保持透明。
+Bazaar Server 直接渲染节点返回的 `parts`，由 Jinja 自动转义并在命中片段上使用 `<strong>`；关键词背景保持透明。
 搜索输入框内的上下方向键选择结果，Enter 打开当前结果；其他控件的键盘事件由对应控件处理。
 弹层底部显示方向键选择、Enter 打开记录和 Esc 关闭提示；桌面聊天标题栏显示 Ctrl+F 提示。
 Esc 依次关闭日历、筛选面板、搜索弹层；点击弹层外侧也可关闭。
@@ -440,8 +440,8 @@ Esc 依次关闭日历、筛选面板、搜索弹层；点击弹层外侧也可�
 
 `contrib/server/control.py` 新增 `_SearchRead(read="search", agent_id, query, target, sender, after_ms,
 before_ms, sort, limit, offset, review)`，沿用 `commands_of(agent_id)` 调同一个 search 服务；默认 review 为 None，
-与操作者历史读取一致。沿用 `getUpdates/control.result` 信封，BCS 读取结果后直接渲染，正文与全文索引由节点持有。
-BCS 搜索路由经现有 `agents.view` 与 `@sees("computer")/@sees("agent")` 后才排队。
+与操作者历史读取一致。沿用 `getUpdates/control.result` 信封，Bazaar Server 读取结果后直接渲染，正文与全文索引由节点持有。
+Bazaar Server 搜索路由经现有 `agents.view` 与 `@sees("computer")/@sees("agent")` 后才排队。
 control 在 `commands_of(agent_id)` 的 storage scope 内以 `Agent(agent_id)` 调用搜索服务，使用完整来源投影。
 节点配置为 session 模式时，操作者仍可搜索选中 agent 的全会话；runtime 命令使用绑定 actor 的范围与投影。
 
@@ -508,9 +508,9 @@ session 的独立历史问答和 dangerous_individual 跨会话问答，均自�
 9 种示例与既有源码 formatter 对照通过，覆盖长文截断、Markdown、组件标签与引用字面量；plan 的完整预期输出
 与实际渲染结果一致。现有消息头、notice、回执、提醒和 read/send/unfollow 用法保持公共格式。
 
-### Task 3：control 与 BCS 搜索入口
+### Task 3：control 与 Bazaar Server 搜索入口
 
-- [x] 增加 search 下行读取与 BCS 页面查询，会话选项复用现有 contacts 分页。
+- [x] 增加 search 下行读取与 Bazaar Server 页面查询，会话选项复用现有 contacts 分页。
 - [x] 在会话列表标签栏和聊天标题栏右侧接入搜索图标、Ctrl+F 与悬浮弹层，输入 debounce 查询、请求版本匹配、结果独立滚动加载。
 - [x] 将搜索状态保存到按 computer/agent 区分的 Alpine store，搜索容器独立于联系人与历史刷新区域；
   保留展开状态、筛选草稿、结果分页与滚动位置，并在渲染前核对响应的 agent 与查询版本。
@@ -520,14 +520,14 @@ session 的独立历史问答和 dangerous_individual 跨会话问答，均自�
   根据 visualViewport 更新软键盘和横竖屏下的弹层边界，并在关闭/销毁时清理监听。
 - [x] 验收筛选展开及应用后的结果变化、日期包含边界、月份切换、五/六周布局、键盘焦点与关闭顺序；
   中英文、浅色/深色主题及手机弹层均使用现有网站样式。
-- [x] 使用真实隔离 BCS 与节点验收相同筛选的 CLI/control 结果一致，操作者通过现有可见性检查选中 agent 后查询。
+- [x] 使用真实隔离 Bazaar Server 与节点验收相同筛选的 CLI/control 结果一致，操作者通过现有可见性检查选中 agent 后查询。
 - [x] 搜索加载多页并滚动后，保持弹层、筛选或日历打开，用真实节点产生消息并经历至少三轮 5 秒订阅检查；
   核对刷新实际发生，搜索条件、草稿、结果、焦点、当前选择与滚动位置保持，再关闭并重新打开核对恢复。
 - [x] 隔离浏览器覆盖 320/390/430/768/959/960px、中英文、浅深色与短视口，验收触摸展开筛选、日期选择、
   关闭与结果滚动；覆盖 composition 组词事件、视口缩放和日期键盘选择。
 - [ ] 在 iOS Safari、Android Chrome 实机验收输入法组词、软键盘、地址栏、安全区及横竖屏变化，记录设备与结论。
 
-2026-10-01 验收：真实隔离 BCS、SQLite 节点与 TestChannel 的两项浏览器 e2e 通过（65.56 秒），
+2026-10-01 验收：真实隔离 Bazaar Server、SQLite 节点与 TestChannel 的两项浏览器 e2e 通过（65.56 秒），
 其中自然历史问答使用真实 Codex provider 建立 session binding。相同 query/target/sender 下，真实 bcc
 与 control 的 43 条来源一致；操作者在 session 节点搜索两个自有会话。日期过滤包含本地起始日 00:00:00.000
 和结束日 23:59:59.999 的实际消息。切换两个 agent 后恢复原筛选与结果。
@@ -545,7 +545,7 @@ Pyright LSP 检查通过（347 个文件、0 条诊断）。
 
 2026-10-01 视觉 review 修正：按最终五张设计图恢复搜索输入首行、agent 与筛选同行、带头像的来源行、
 两行加粗片段、独立发送者行和底部快捷键提示。筛选与日历覆盖结果，展开前后结果区域位置保持。
-使用原图同一组六条示例消息，在真实隔离节点与 BCS 验证会话筛选 2 条、发送者筛选 3 条、日期筛选 3 条，
+使用原图同一组六条示例消息，在真实隔离节点与 Bazaar Server 验证会话筛选 2 条、发送者筛选 3 条、日期筛选 3 条，
 中文浅色桌面和 390px 触摸视口截图已对照。原有两项搜索浏览器流程复测通过，覆盖中英文、浅深色、
 窄屏与短视口、多页结果、日期和订阅刷新；相关页面 10 项检查通过。
 
@@ -564,7 +564,7 @@ Pyright LSP 检查通过（347 个文件、0 条诊断）。
 - [x] 在手机完成搜索 → 触摸命中 → 单栏原消息定位 → 查看前后文 → 重新打开搜索，并覆盖联系人返回与前进后退；
   搜索、日历打开和历史定位期间均经历真实消息刷新，核对状态恢复与阅读位置稳定。
 
-2026-10-01 验收：真实隔离节点、BCS 与 Linux Edge 浏览器覆盖 1280px 英文浅色和 390px 中文深色，
+2026-10-01 验收：真实隔离节点、Bazaar Server 与 Linux Edge 浏览器覆盖 1280px 英文浅色和 390px 中文深色，
 手机视口启用触摸与 reduced-motion。搜索旧消息加载附近历史窗，已加载命中直接定位并保留原 history DOM；
 高亮结束后正文保持原样，上滚补载、三轮实际消息订阅追加及整体历史重建均保留可见消息的视口偏移。
 延后一个真实 HTTP 历史响应后连续定位，旧响应未覆盖新位置；命中窗口底部后追加消息仍保留阅读位置，
@@ -576,7 +576,7 @@ Pyright LSP 检查通过（347 个文件、0 条诊断）。
 最终相关页面检查 13 项通过，Ruff、409 个文件的格式检查、JavaScript 语法及根目录 Pyright LSP 检查通过
 （347 个文件、0 条诊断）。iOS/Android 实机验收继续保留 Task 3 的待验收状态。
 
-所有 BCN/provider/BCS e2e 使用测试专用配置、临时数据库和隔离进程；provider e2e 使用 TestChannel 控制面。
+所有 BCN/provider/Bazaar Server e2e 使用测试专用配置、临时数据库和隔离进程；provider e2e 使用 TestChannel 控制面。
 验收产物记录查询、结果来源、页面效果和检查结论。
 
 2026-10-01 视觉 review 修正后验收：新增桌面“已定位原消息”提示，与短暂高亮同时消失；手机标题保持原有高度。
@@ -598,11 +598,11 @@ Ruff、409 个文件的格式检查、JavaScript 语法和根目录 Pyright LSP 
 
 - 自然历史问题可以在对应模式的会话范围内找到原消息、读取上下文并引用结论。
 - session 的搜索、读取与回复均限定当前会话，target 沿用现有会话边界检查；所有模式提供相同参数和公共输出格式。
-- dangerous_individual 与 BCS 可以搜索所选 agent 的全部可读会话，并用完整来源坐标读取上下文和跳转。
-- 在相同范围与筛选下，关键词、结构过滤、分页和实际排序在 CLI 与 BCS 之间一致；“部署”这样的短中文词可用。
+- dangerous_individual 与 Bazaar Server 可以搜索所选 agent 的全部可读会话，并用完整来源坐标读取上下文和跳转。
+- 在相同范围与筛选下，关键词、结构过滤、分页和实际排序在 CLI 与 Bazaar Server 之间一致；“部署”这样的短中文词可用。
 - 查询结果的所有来源均属于所选 agent，review 与历史可见状态按各入口现有规则生效。
 - 搜索是只读检索；未读消费与发送 freshness 按各自命令规则工作。
-- BCS 点击命中后显示对应会话并定位原消息，桌面和手机都能继续查看上下文。
+- Bazaar Server 点击命中后显示对应会话并定位原消息，桌面和手机都能继续查看上下文。
 - 聊天标题栏右侧图标和 Ctrl+F 都打开悬浮搜索，输入后自动出结果，列表独立滚动并继续加载；重新打开保留搜索状态。
 - 连续至少三轮 5 秒订阅检查及实际消息刷新后，搜索弹层、筛选草稿、已加载结果、分页、焦点和滚动位置保持；
   过期响应按 agent 与请求版本隔离，同一 agent 内会话导航及重新打开搜索都能恢复该状态。

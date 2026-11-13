@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * feat: look at who wants to talk to an agent before it hears them by @yuchanns in https://github.com/yuchanns/bazaar-compute-node/pull/85
 * Manage agents from the server by @yuchanns in https://github.com/yuchanns/bazaar-compute-node/pull/86
 * Harden a node and its link to the server by @yuchanns in https://github.com/yuchanns/bazaar-compute-node/pull/87
-* feat(bcs): add OIDC sign-in, role management, and resource sharing by @yuchanns in https://github.com/yuchanns/bazaar-compute-node/pull/91
+* feat(server): add OIDC sign-in, role management, and resource sharing by @yuchanns in https://github.com/yuchanns/bazaar-compute-node/pull/91
 * fix: unify computer sharing and scope resource permissions by @yuchanns in https://github.com/yuchanns/bazaar-compute-node/pull/92
 * 修复 OIDC 登录恢复并改善聊天阅读体验 by @yuchanns in https://github.com/yuchanns/bazaar-compute-node/pull/93
 * fix: align agent card icons and show installed runtime versions by @yuchanns in https://github.com/yuchanns/bazaar-compute-node/pull/94

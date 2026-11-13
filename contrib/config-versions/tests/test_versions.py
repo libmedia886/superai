@@ -64,7 +64,10 @@ async def test_installed_chain_preserves_legacy_identity_and_provider_settings(
                 "channel": "wecom",
                 "runtime": "codex",
                 "lang": "en-US",
-                "server": {"url": "https://bcs.example.test", "token_env": "BCS_TOKEN"},
+                "server": {
+                    "url": "https://server.example.test",
+                    "token_env": "SERVER_TOKEN",
+                },
             },
             "channel": {"wecom": {"secret_env": "WECOM_SECRET"}},
             "runtime": {
@@ -158,7 +161,7 @@ async def test_v3_and_v4_keep_multiple_entities_data_and_provider_settings(
     v4.payload["node"].update(
         audit="server",
         control="server",
-        server={"url": "https://bcs.example.test", "token_env": "BCS_TOKEN"},
+        server={"url": "https://server.example.test", "token_env": "SERVER_TOKEN"},
         logging={"level": "INFO"},
     )
     v4.payload["agent"][0]["channel"].append({"kind": "lark", "app_id": "lark-work"})
@@ -232,7 +235,10 @@ def test_v4_node_connected_to_a_server_keeps_its_link(tmp_path: Path, monkeypatc
             "node": {
                 "audit": "server",
                 "control": "server",
-                "server": {"url": "https://bcs.example.test", "token_env": "BCS_TOKEN"},
+                "server": {
+                    "url": "https://server.example.test",
+                    "token_env": "SERVER_TOKEN",
+                },
             },
             "agent": [],
         }
@@ -244,9 +250,9 @@ def test_v4_node_connected_to_a_server_keeps_its_link(tmp_path: Path, monkeypatc
         for entry in package.enabled
         if entry.entry == "starlink"
     )
-    assert starlink["server"] == "https://bcs.example.test"
+    assert starlink["server"] == "https://server.example.test"
     # the token stays where 0.2 kept it, in the environment variable it named
-    assert starlink["token_env"] == "BCS_TOKEN"
+    assert starlink["token_env"] == "SERVER_TOKEN"
     assert any(
         requirement.package == "bazaar-contrib-starlink"
         for requirement in candidate.required_packages
@@ -259,7 +265,7 @@ def test_v4_node_connected_to_a_server_keeps_its_link(tmp_path: Path, monkeypatc
     )
 
 
-def test_v4_brings_the_server_along_when_bcs_has_its_settings(
+def test_v4_brings_the_server_along_when_legacy_server_has_its_settings(
     tmp_path: Path, monkeypatch
 ):
     from bazaar_contrib_config import ConfigDocument

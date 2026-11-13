@@ -1,12 +1,12 @@
-# 节点与 bcs 连接的健壮性
+# 节点与 Bazaar Server 连接的健壮性
 
 ## 背景
 
-对照 raft 的实现，节点与 bcs 之间、节点自身的进程管理有五处薄弱：
+对照 raft 的实现，节点与 Bazaar Server 之间、节点自身的进程管理有五处薄弱：
 
-- bcs 收 `reportEvents` 时把整批事件当一个请求校验，任何一条不合法（例如 `correlation.node_id` 不符合格式），整批
+- Bazaar Server 收 `reportEvents` 时把整批事件当一个请求校验，任何一条不合法（例如 `correlation.node_id` 不符合格式），整批
   以 400 拒收。同批里其它事件，包括下行请求的 `control.result` 答复，一起丢失；页面等满 `ANSWER_SECONDS` 才报超时。
-- 节点长轮询 `getUpdates` 失败后固定等 `startup_seconds`（60 秒）再试。bcs 重启后，节点最长一分钟才重新连上。
+- 节点长轮询 `getUpdates` 失败后固定等 `startup_seconds`（60 秒）再试。Bazaar Server 重启后，节点最长一分钟才重新连上。
 - 本地命令端点 `~/.bcn/bcn.sock` 在进程被杀或崩溃后留在原处；下次启动 `LocalCommandServer` 见文件存在即抛
   `FileExistsError`，节点起不来，system service 反复重启失败。
 - 关停只有一个上限：`asyncio.timeout(shutdown_seconds)` 包住 `node.stop()`，到点即退出。未停下的 runtime 子进程
@@ -29,7 +29,7 @@
   （JSON 坏、缺 `run_id`）仍回 400。
 - `report_events` 逐条 `Event.model_validate`。通过的照旧 `record_events`、`consumers.consume`；不通过的丢弃，
   以 `logger.warning` 记下 `seq`（取得到时）与原因。
-- 回复增加 `rejected`：被丢弃事件的条数（哪几条见 bcs 日志；列表会撑破节点读回复的上限）。`accepted` 语义不变。
+- 回复增加 `rejected`：被丢弃事件的条数（哪几条见 Bazaar Server 日志；列表会撑破节点读回复的上限）。`accepted` 语义不变。
 - 节点 `ServerAudit` 读回复里的 `rejected`，计入健康里新增的 `rejected` 计数，不重发。
 
 ### 2. 轮询退避
@@ -72,7 +72,7 @@
 
 ## 任务
 
-1. 事件逐条校验（bcs `report_events`、协议模型、节点 `ServerAudit` 健康计数）。
+1. 事件逐条校验（Bazaar Server `report_events`、协议模型、节点 `ServerAudit` 健康计数）。
 2. 轮询退避（`ServerControl`）。
 3. 残留 socket（`LocalCommandServer`）。
 4. 关停兜底（进程组、登记处、`_run_node` 收尾）。
@@ -84,7 +84,7 @@
 
 - 事件：一批里夹一条 `correlation.node_id="../.."` 的事件，其余事件入库、`control.result` 答复送达，回复的
   `rejected` 列出坏的那条。
-- 退避：节点指向一个未启动的 bcs 地址，数出前几次重试的间隔依次翻倍；bcs 起来后下一次轮询成功，退避复位。
+- 退避：节点指向一个未启动的 Bazaar Server 地址，数出前几次重试的间隔依次翻倍；Bazaar Server 起来后下一次轮询成功，退避复位。
 - socket：在端点路径放一个残留文件（绑定后关闭、不删），节点照常启动；另起一个节点指向同一路径，启动被拒。
 - 关停：测试插件起一个真实子进程（`sleep`），把关停上限调小并让 `stop()` 卡住，断言退出后该 pid 不存在。
 - steer：测试 runtime 记录 steer。1 秒内连发三条，只 steer 一次且三条都在；间隔超过 3 秒的两条 steer 两次；turn 在

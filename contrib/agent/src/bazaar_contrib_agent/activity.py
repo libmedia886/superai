@@ -1,5 +1,5 @@
 """Each agent's state, today's usage, latest event, and how its channels and
-runtimes are, kept in memory as bcs reads them."""
+runtimes are, kept in memory as Bazaar Server reads them."""
 
 from __future__ import annotations
 
