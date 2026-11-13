@@ -258,6 +258,26 @@ async def exercise(path: Path, source: str, other_source: str, releases: Path) -
         flush=True,
     )
     core = await checked(lambda manager: manager.detail("bazaar-core"))
+
+    async def upgrading(manager: ContribManager) -> Operation:
+        operation = await manager.upgrade("bazaar-contrib-example", wait=False)
+        while operation.phase not in {"installing", "complete", "failed", "cancelled"}:
+            await asyncio.sleep(0.01)
+            operation = await manager.operation(operation.id)
+        installed, detail, updates = await asyncio.gather(
+            manager.installed(), manager.detail("example"), manager.updates()
+        )
+        operation = await manager.wait(operation.id)
+        assert operation.phase == "complete", operation.model_dump_json(indent=2)
+        assert Version(detail.version) > version
+        assert any(
+            package.package == detail.package and package.version == detail.version
+            for package in installed
+        )
+        assert detail.package not in updates
+        return operation
+
+    await checked(upgrading)
     await cli("upgrade", "example")
     detail = await checked(lambda manager: manager.detail("example"))
     assert Version(detail.version) > version

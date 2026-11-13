@@ -123,6 +123,10 @@ async def test_entry_point_service_snapshots_real_task_failure_and_dependency_st
         assert failed.state.error and "ExceptionGroup" in failed.state.error
         assert isinstance(blocked.state, Blocked)
         assert blocked.state.blocked_by == failed.id
+        reported = {item.name: item for item in service.states()}
+        assert reported["reader"].state == "failed"
+        assert reported["reader"].error and "ExceptionGroup" in reported["reader"].error
+        assert reported["consumer"].state == "blocked"
         assert isinstance(before.state, Running)
         assert any(
             item.name == "reader" and isinstance(item.state, Failed)

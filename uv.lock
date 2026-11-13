@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.15"
 
 [manifest]
@@ -432,11 +432,17 @@ name = "bazaar-contrib-status"
 version = "0.3.0rc31"
 source = { editable = "contrib/status" }
 dependencies = [
+    { name = "bazaar-contrib-sidecar" },
     { name = "bazaar-core" },
+    { name = "pydantic" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "bazaar-core", editable = "core" }]
+requires-dist = [
+    { name = "bazaar-contrib-sidecar", editable = "contrib/sidecar" },
+    { name = "bazaar-core", editable = "core" },
+    { name = "pydantic", specifier = ">=2.12.0" },
+]
 
 [[package]]
 name = "bazaar-contrib-storage"
