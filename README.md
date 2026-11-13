@@ -4,14 +4,21 @@ Bring Your Own Agents to the bazaar, and build with your teams in the open.
 
 不必独自建造——带上你的智能体，来集市。
 
+> **This is a derivative project / 本项目为派生项目**
+>
+> This repository (`libmedia886/superai`) is derived from
+> [yuchanns/bazaar-compute-node](https://github.com/yuchanns/bazaar-compute-node).
+> It is **not** the upstream project, and issues or pull requests filed here do
+> not affect upstream. Upstream maintains the original, authoritative source.
+>
+> 本仓库（`libmedia886/superai`）派生自
+> [yuchanns/bazaar-compute-node](https://github.com/yuchanns/bazaar-compute-node)，
+> 并非上游项目本身。此处的 issue 与 PR 与上游无关，上游仍是原始权威来源。
+
 <p align="left">
-  <a href="https://github.com/yuchanns/bazaar-compute-node/actions"><img
-    src="https://github.com/yuchanns/bazaar-compute-node/actions/workflows/release.yml/badge.svg"
+  <a href="https://github.com/libmedia886/superai/actions"><img
+    src="https://github.com/libmedia886/superai/actions/workflows/release.yml/badge.svg"
     alt="Release"
-  /></a>
-  <a href="https://pypi.org/project/bazaar-compute-node"><img
-    src="https://img.shields.io/pypi/v/bazaar-compute-node.svg"
-    alt="Python Package Index"
   /></a>
 </p>
 
@@ -21,7 +28,15 @@ Bring Your Own Agents to the bazaar, and build with your teams in the open.
 
 Python 3.14+ is required.
 
-需要 Python 3.14 或更高版本：
+需要 Python 3.14 或更高版本。
+
+> **Note / 注意**: the commands below install
+> [`bazaar-compute-node`](https://pypi.org/project/bazaar-compute-node) from PyPI,
+> which is **upstream** code, not this fork. To run the code in this repository,
+> install it from a checkout instead.
+>
+> 下方命令从 PyPI 安装的 `bazaar-compute-node` 是**上游**代码，不是本仓库的代码。
+> 要运行本仓库的代码，请从本地检出的副本安装。
 
 ```sh
 # Install / 安装
@@ -117,7 +132,26 @@ Windows: Get-Content "$env:USERPROFILE\.bcn\system-service.log" -Wait
 This project is licensed under the [AGPLv3](./LICENSE).
 本项目采用 [AGPLv3](./LICENSE) 许可证。
 
+As a derivative work, this repository is distributed under the same AGPLv3 terms
+as upstream; the upstream copyright notices are retained in full. Modifications
+made in this repository are documented in the commit history and, where they
+touch individual files, noted in those files.
+
+本仓库作为派生作品，沿用上游的 AGPLv3 条款分发，上游的版权声明完整保留。本仓库
+的改动见提交历史；涉及具体文件的改动，会在相应文件中注明。
+
+| | Source / 来源 |
+| --- | --- |
+| Upstream / 上游 | [yuchanns/bazaar-compute-node](https://github.com/yuchanns/bazaar-compute-node) |
+| This fork / 本仓库 | [libmedia886/superai](https://github.com/libmedia886/superai) |
+
 ## Credits / 致谢
 
 This project is inspired by [raft.build](https://raft.build).
 本项目的灵感来自 [raft.build](https://raft.build)。
+
+Thanks to the upstream authors and contributors of
+[yuchanns/bazaar-compute-node](https://github.com/yuchanns/bazaar-compute-node),
+whose work this repository builds upon.
+感谢 [yuchanns/bazaar-compute-node](https://github.com/yuchanns/bazaar-compute-node)
+的上游作者与贡献者，本仓库建立在其工作之上。
