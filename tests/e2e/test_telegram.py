@@ -9,24 +9,24 @@ from uuid import uuid4
 
 import pytest
 
-from bazaar_compute_node.app.attachments import AttachmentMaterializer
-from bazaar_compute_node.contrib.telegram.identity import TelegramThreadIdentity
-from bazaar_compute_node.contrib.telegram.outbound import TelegramOutboundChannel
-from bazaar_compute_node.contrib.telegram.plugin import TelegramBuilder
-from bazaar_compute_node.core.actor import Thread
-from bazaar_compute_node.core.channel import (
+from superai_node.app.attachments import AttachmentMaterializer
+from superai_node.contrib.telegram.identity import TelegramThreadIdentity
+from superai_node.contrib.telegram.outbound import TelegramOutboundChannel
+from superai_node.contrib.telegram.plugin import TelegramBuilder
+from superai_node.core.actor import Thread
+from superai_node.core.channel import (
     ChannelApprovalRequest,
     ChannelContext,
     ChannelIdentity,
     ChannelSendRequest,
 )
-from bazaar_compute_node.core.models import (
+from superai_node.core.models import (
     ApprovalDecision,
     ApprovalRequest,
     ChannelTargetKind,
     OutboundAttachment,
 )
-from bazaar_compute_node.core.outcomes import ProviderCallStatus
+from superai_node.core.outcomes import ProviderCallStatus
 
 pytestmark = pytest.mark.e2e
 
@@ -48,9 +48,9 @@ def _required_int(name: str) -> int:
 
 
 def _channel(tmp_path: Path) -> TelegramOutboundChannel:
-    if not os.environ.get("BCN_TELEGRAM_BOT_TOKEN"):
+    if not os.environ.get("SUPERAI_TELEGRAM_BOT_TOKEN"):
         pytest.fail(
-            "BCN_TELEGRAM_BOT_TOKEN is required for Telegram provider verification"
+            "SUPERAI_TELEGRAM_BOT_TOKEN is required for Telegram provider verification"
         )
     channel = TelegramBuilder().build(
         ChannelContext(
@@ -65,7 +65,7 @@ def _channel(tmp_path: Path) -> TelegramOutboundChannel:
 
 
 def _attachment(tmp_path: Path, name: str) -> OutboundAttachment:
-    content = f"Bazaar Compute Node Telegram Task 3C {uuid4()}\n".encode()
+    content = f"SuperAI Telegram Task 3C {uuid4()}\n".encode()
     path = tmp_path / name
     path.write_bytes(content)
     return OutboundAttachment(
@@ -102,7 +102,7 @@ def _send_request(
 async def test_telegram_real_provider_dm_rich_markdown_and_attachment(
     tmp_path: Path,
 ) -> None:
-    chat_id = _required_int("BCN_TELEGRAM_E2E_DM_CHAT_ID")
+    chat_id = _required_int("SUPERAI_TELEGRAM_E2E_DM_CHAT_ID")
     channel = _channel(tmp_path)
     await channel.start(timeout=_TELEGRAM_STARTUP_TIMEOUT_SECONDS)
     try:
@@ -126,7 +126,7 @@ async def test_telegram_real_provider_dm_rich_markdown_and_attachment(
                 identity=identity,
                 target_kind=ChannelTargetKind.DM,
                 body=(
-                    "## BCN Telegram provider verification\n\n"
+                    "## SUPERAI Telegram provider verification\n\n"
                     "- DM route\n"
                     "- **Rich Markdown**\n"
                     "- document follows\n\n"
@@ -148,9 +148,9 @@ async def test_telegram_real_provider_dm_rich_markdown_and_attachment(
 async def test_telegram_real_provider_group_topic_reply_and_attachment(
     tmp_path: Path,
 ) -> None:
-    chat_id = _required_int("BCN_TELEGRAM_E2E_GROUP_CHAT_ID")
-    topic_id = _required_int("BCN_TELEGRAM_E2E_TOPIC_ID")
-    reply_to_message_id = _required_int("BCN_TELEGRAM_E2E_REPLY_TO_MESSAGE_ID")
+    chat_id = _required_int("SUPERAI_TELEGRAM_E2E_GROUP_CHAT_ID")
+    topic_id = _required_int("SUPERAI_TELEGRAM_E2E_TOPIC_ID")
+    reply_to_message_id = _required_int("SUPERAI_TELEGRAM_E2E_REPLY_TO_MESSAGE_ID")
     channel = _channel(tmp_path)
     await channel.start(timeout=_TELEGRAM_STARTUP_TIMEOUT_SECONDS)
     try:
@@ -167,7 +167,7 @@ async def test_telegram_real_provider_group_topic_reply_and_attachment(
                 identity=identity,
                 target_kind=ChannelTargetKind.GROUP,
                 body=(
-                    "## BCN topic reply verification\n\n"
+                    "## SUPERAI topic reply verification\n\n"
                     "This Rich Markdown response and its attachment belong to the "
                     "same topic.\n\n"
                     f"Run: `{nonce}`"
@@ -186,8 +186,8 @@ async def test_telegram_real_provider_group_topic_reply_and_attachment(
 
 @pytest.mark.asyncio
 async def test_telegram_real_provider_inline_approval(tmp_path: Path) -> None:
-    chat_id = _required_int("BCN_TELEGRAM_E2E_DM_CHAT_ID")
-    sender_id = _required_int("BCN_TELEGRAM_E2E_APPROVAL_SENDER_ID")
+    chat_id = _required_int("SUPERAI_TELEGRAM_E2E_DM_CHAT_ID")
+    sender_id = _required_int("SUPERAI_TELEGRAM_E2E_APPROVAL_SENDER_ID")
     channel = _channel(tmp_path)
     await channel.start(timeout=_TELEGRAM_STARTUP_TIMEOUT_SECONDS)
     try:

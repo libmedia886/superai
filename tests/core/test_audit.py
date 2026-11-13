@@ -4,18 +4,18 @@ from collections.abc import Mapping
 from dataclasses import replace
 
 import pytest
-from bcn_test_support import RecordingAudit
+from superai_test_support import RecordingAudit
 
-from bazaar_compute_node.core.actor import Thread
-from bazaar_compute_node.core.approval import ApprovalBinding
-from bazaar_compute_node.core.audit import AuditEvent, AuditRecorder, ErrorKind
-from bazaar_compute_node.core.correlation import CorrelationContext
-from bazaar_compute_node.core.lifecycle import TimeoutBudget
-from bazaar_compute_node.core.models import (
+from superai_node.core.actor import Thread
+from superai_node.core.approval import ApprovalBinding
+from superai_node.core.audit import AuditEvent, AuditRecorder, ErrorKind
+from superai_node.core.correlation import CorrelationContext
+from superai_node.core.lifecycle import TimeoutBudget
+from superai_node.core.models import (
     ApprovalRequest,
     RuntimeEventState,
 )
-from bazaar_compute_node.core.observability import LogLevel
+from superai_node.core.observability import LogLevel
 
 
 class _FailingAudit:
@@ -41,7 +41,7 @@ class _FailingAudit:
 def make_approval_request() -> ApprovalRequest:
     return ApprovalRequest(
         request_id="request-1",
-        actor=Thread("bcn-1"),
+        actor=Thread("superai-1"),
         runtime_session_id="runtime-1",
         action="command",
         created_at_ms=1,
@@ -69,7 +69,7 @@ def test_audit_event_requires_stable_error_kind_and_redacted_metadata() -> None:
         state=RuntimeEventState.FAILED,
         created_at_ms=2,
         correlation=CorrelationContext(
-            thread_id="bcn-1",
+            thread_id="superai-1",
             runtime_session_id="runtime-1",
             turn_id="turn-1",
         ),

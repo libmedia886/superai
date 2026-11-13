@@ -6,13 +6,13 @@ import sys
 from pathlib import Path
 
 import pytest
-from bcn_test_support import isolated_test_environment, temporary_test_directory
+from superai_test_support import isolated_test_environment, temporary_test_directory
 
-from bazaar_compute_node.core.paths import resolve_data_dir
+from superai_node.core.paths import resolve_data_dir
 
 
 def test_temporary_test_directory_uses_system_temp_and_cleans_up() -> None:
-    with temporary_test_directory(prefix="bcn-support-") as directory:
+    with temporary_test_directory(prefix="superai-support-") as directory:
         created = directory
         assert created.is_dir()
 
@@ -20,8 +20,8 @@ def test_temporary_test_directory_uses_system_temp_and_cleans_up() -> None:
 
 
 def test_isolated_test_environment_scopes_paths_and_process_environment() -> None:
-    with isolated_test_environment(prefix="bcn-support-") as outer:
-        with isolated_test_environment(prefix="bcn-support-") as environment:
+    with isolated_test_environment(prefix="superai-support-") as outer:
+        with isolated_test_environment(prefix="superai-support-") as environment:
             assert all(
                 path.is_dir() and path.is_relative_to(environment.root)
                 for path in (
@@ -41,14 +41,14 @@ def test_isolated_test_environment_scopes_paths_and_process_environment() -> Non
                     sys.executable,
                     "-c",
                     (
-                        "from bazaar_compute_node.app.config import load_node_configuration; "
+                        "from superai_node.app.config import load_node_configuration; "
                         "load_node_configuration()"
                     ),
                 ],
                 check=True,
                 capture_output=True,
             )
-            assert (environment.root / ".bcn" / "config.toml").is_file()
+            assert (environment.root / ".superai" / "config.toml").is_file()
 
         assert not environment.root.exists()
         assert Path.home().is_relative_to(outer.root)
@@ -59,14 +59,14 @@ def test_isolated_test_environment_scopes_paths_and_process_environment() -> Non
                 sys.executable,
                 "-c",
                 (
-                    "from bazaar_compute_node.app.config import load_node_configuration; "
+                    "from superai_node.app.config import load_node_configuration; "
                     "load_node_configuration()"
                 ),
             ],
             check=True,
             capture_output=True,
         )
-        assert (outer.root / ".bcn" / "config.toml").is_file()
+        assert (outer.root / ".superai" / "config.toml").is_file()
 
     assert not outer.root.exists()
 

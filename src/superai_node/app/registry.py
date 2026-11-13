@@ -1,0 +1,186 @@
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from functools import partial
+from importlib.metadata import EntryPoint, entry_points
+from typing import Any, cast
+
+from ..core.channel import IChannelBuilder
+from ..core.control import ControlContext, IControl
+from ..core.observability import AuditContext, IAudit
+from ..core.runtime import IRuntime, IRuntimeBuilder, RuntimeCommandContext
+from ..core.storage import IStorage
+
+CHANNEL_ENTRY_POINT_GROUP = "superai_node.channels"
+RUNTIME_ENTRY_POINT_GROUP = "superai_node.runtimes"
+STORAGE_ENTRY_POINT_GROUP = "superai_node.storages"
+AUDIT_ENTRY_POINT_GROUP = "superai_node.audits"
+CONTROL_ENTRY_POINT_GROUP = "superai_node.controls"
+
+RuntimeFactory = Callable[[RuntimeCommandContext], IRuntime]
+StorageFactory = Callable[[], IStorage]
+AuditFactory = Callable[[AuditContext], IAudit]
+ControlFactory = Callable[[ControlContext], IControl]
+# what a node without a management plane says for its control
+NO_CONTROL = "none"
+
+
+@dataclass(frozen=True, slots=True)
+class SharedAdapterFactories:
+    storage: StorageFactory
+    audit: AuditFactory
+    control: ControlFactory | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AgentAdapterFactories:
+    channels: Mapping[str, IChannelBuilder]
+    runtimes: Mapping[str, RuntimeFactory]
+
+
+class ProviderLoadError(RuntimeError):
+    """A selected provider is missing or has an invalid entry point."""
+
+
+class AdapterRegistry:
+    """Discover shared and Agent-scoped provider factories."""
+
+    def load_shared(
+        self,
+        *,
+        storage: str = "sqlite",
+        audit: str = "logging",
+        control: str = "none",
+        storage_options: Mapping[str, object] | None = None,
+    ) -> SharedAdapterFactories:
+        storage_factory = cast(
+            Callable[[Mapping[str, object]], IStorage] | StorageFactory,
+            self._load(STORAGE_ENTRY_POINT_GROUP, storage),
+        )
+        if storage_options:
+            storage_factory = partial(storage_factory, dict(storage_options))
+        return SharedAdapterFactories(
+            storage=cast(StorageFactory, storage_factory),
+            audit=cast(AuditFactory, self._load(AUDIT_ENTRY_POINT_GROUP, audit)),
+            control=(
+                None
+                if control == NO_CONTROL
+                else cast(
+                    ControlFactory, self._load(CONTROL_ENTRY_POINT_GROUP, control)
+                )
+            ),
+        )
+
+    def load_agent(
+        self,
+        *,
+        channels: Sequence[str],
+        runtimes: Sequence[str],
+    ) -> AgentAdapterFactories:
+        return AgentAdapterFactories(
+            channels={
+                kind: self._load_channel_builder(kind)
+                for kind in dict.fromkeys(channels)
+            },
+            runtimes={
+                kind: self._load_runtime_builder(kind).build
+                for kind in dict.fromkeys(runtimes)
+            },
+        )
+
+    def _load_channel_builder(self, name: str) -> IChannelBuilder:
+        entry_point = self._find(CHANNEL_ENTRY_POINT_GROUP, name)
+        if entry_point is None:
+            raise ProviderLoadError(
+                f"provider '{name}' is not installed for entry point group "
+                f"'{CHANNEL_ENTRY_POINT_GROUP}'"
+            )
+        try:
+            builder = entry_point.load()
+        except Exception as error:
+            raise ProviderLoadError(
+                f"failed to load provider '{name}' from "
+                f"'{CHANNEL_ENTRY_POINT_GROUP}': {error}"
+            ) from error
+        if not callable(getattr(builder, "build", None)):
+            raise ProviderLoadError(
+                f"provider '{name}' from '{CHANNEL_ENTRY_POINT_GROUP}' "
+                "does not provide a callable build method"
+            )
+        return cast(IChannelBuilder, builder)
+
+    def _load_runtime_builder(self, name: str) -> IRuntimeBuilder:
+        entry_point = self._find(RUNTIME_ENTRY_POINT_GROUP, name)
+        if entry_point is None:
+            raise ProviderLoadError(
+                f"provider '{name}' is not installed for entry point group "
+                f"'{RUNTIME_ENTRY_POINT_GROUP}'"
+            )
+        try:
+            builder = entry_point.load()
+        except Exception as error:
+            raise ProviderLoadError(
+                f"failed to load provider '{name}' from "
+                f"'{RUNTIME_ENTRY_POINT_GROUP}': {error}"
+            ) from error
+        for method in ("build", "inspect", "models"):
+            if not callable(getattr(builder, method, None)):
+                raise ProviderLoadError(
+                    f"provider '{name}' from '{RUNTIME_ENTRY_POINT_GROUP}' "
+                    f"does not provide a callable {method} method"
+                )
+        return cast(IRuntimeBuilder, builder)
+
+    def _load(self, group: str, name: str) -> Any:
+        entry_point = self._find(group, name)
+        if entry_point is None:
+            raise ProviderLoadError(
+                f"provider '{name}' is not installed for entry point group '{group}'"
+            )
+        try:
+            factory = entry_point.load()
+        except Exception as error:
+            raise ProviderLoadError(
+                f"failed to load provider '{name}' from '{group}': {error}"
+            ) from error
+        if not callable(factory):
+            raise ProviderLoadError(f"provider '{name}' from '{group}' is not callable")
+        return factory
+
+    def runtime_builders(self) -> dict[str, IRuntimeBuilder]:
+        """Every installed runtime, by kind; each can be asked about
+        itself."""
+
+        return {kind: self._load_runtime_builder(kind) for kind in self.runtime_kinds()}
+
+    @staticmethod
+    def channel_kinds() -> tuple[str, ...]:
+        """The channels installed here, by name."""
+
+        return AdapterRegistry._installed(CHANNEL_ENTRY_POINT_GROUP)
+
+    @staticmethod
+    def runtime_kinds() -> tuple[str, ...]:
+        """The runtimes installed here, by name."""
+
+        return AdapterRegistry._installed(RUNTIME_ENTRY_POINT_GROUP)
+
+    @staticmethod
+    def _installed(group: str) -> tuple[str, ...]:
+        return tuple(
+            sorted({candidate.name for candidate in entry_points(group=group)})
+        )
+
+    @staticmethod
+    def _find(group: str, name: str) -> EntryPoint | None:
+        if not name:
+            raise ProviderLoadError(f"provider name for '{group}' is empty")
+        return next(
+            (
+                candidate
+                for candidate in entry_points(group=group)
+                if candidate.name == name
+            ),
+            None,
+        )

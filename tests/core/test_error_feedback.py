@@ -3,12 +3,12 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import pytest
-from bcn_test_support import MemoryStorage, RecordingAudit, TestChannel
+from superai_test_support import MemoryStorage, RecordingAudit, TestChannel
 
-from bazaar_compute_node.core.audit import AuditRecorder
-from bazaar_compute_node.core.channel import ChannelDeliveryReceipt
-from bazaar_compute_node.core.lifecycle import TimeoutBudget
-from bazaar_compute_node.core.models import (
+from superai_node.core.audit import AuditRecorder
+from superai_node.core.channel import ChannelDeliveryReceipt
+from superai_node.core.lifecycle import TimeoutBudget
+from superai_node.core.models import (
     ChannelTargetKind,
     Message,
     MessageDirection,
@@ -16,10 +16,10 @@ from bazaar_compute_node.core.models import (
     RuntimeTurnState,
     SenderIdentity,
 )
-from bazaar_compute_node.core.orchestration.delivery import OutboundDeliveryService
-from bazaar_compute_node.core.orchestration.error_feedback import RuntimeErrorReporter
-from bazaar_compute_node.core.outcomes import ProviderCallResult, ProviderCallStatus
-from bazaar_compute_node.i18n import ENGLISH, SIMPLIFIED_CHINESE, create_translator
+from superai_node.core.orchestration.delivery import OutboundDeliveryService
+from superai_node.core.orchestration.error_feedback import RuntimeErrorReporter
+from superai_node.core.outcomes import ProviderCallResult, ProviderCallStatus
+from superai_node.i18n import ENGLISH, SIMPLIFIED_CHINESE, create_translator
 
 
 def make_message() -> Message:
@@ -27,7 +27,7 @@ def make_message() -> Message:
         direction=MessageDirection.INBOUND,
         seq=7,
         message_id="message-7",
-        thread_id="bcn-1",
+        thread_id="superai-1",
         channel_session_id="channel-1",
         channel="test",
         provider_thread_id="thread-1",
@@ -121,7 +121,7 @@ async def test_reporter_delivers_localized_terminal_error_detail(
     assert len(channel.send_attempts) == 1
     request = channel.send_attempts[0]
     assert request.body == expected_body
-    assert request.session_id == "bcn-1"
+    assert request.session_id == "superai-1"
     assert request.attachments == ()
     assert request.target_kind is ChannelTargetKind.GROUP
     assert request.provider_thread_id == "thread-1"

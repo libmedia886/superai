@@ -8,35 +8,35 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from bcn_test_support import TestChannel, TestRuntime
+from superai_test_support import TestChannel, TestRuntime
 
-import bazaar_compute_node.app.agent as agent_module
-from bazaar_compute_node.app.application import NodeApplication
-from bazaar_compute_node.app.config import (
+import superai_node.app.agent as agent_module
+from superai_node.app.application import NodeApplication
+from superai_node.app.config import (
     AgentConfiguration,
     ChannelConfiguration,
     NodeConfiguration,
     RuntimeConfiguration,
 )
-from bazaar_compute_node.app.registry import (
+from superai_node.app.registry import (
     AdapterRegistry,
     AgentAdapterFactories,
 )
-from bazaar_compute_node.app.resource_dispatch import CommandDispatcher
-from bazaar_compute_node.app.upgrade import UpgradeError, UpgradeService
-from bazaar_compute_node.app.version_check import VersionWatcher
-from bazaar_compute_node.contrib.sqlite import SqliteDatabase
-from bazaar_compute_node.core.channel import ChannelContext, IChannel
-from bazaar_compute_node.core.lifecycle import TimeoutBudget
-from bazaar_compute_node.core.models import (
+from superai_node.app.resource_dispatch import CommandDispatcher
+from superai_node.app.upgrade import UpgradeError, UpgradeService
+from superai_node.app.version_check import VersionWatcher
+from superai_node.contrib.sqlite import SqliteDatabase
+from superai_node.core.channel import ChannelContext, IChannel
+from superai_node.core.lifecycle import TimeoutBudget
+from superai_node.core.models import (
     Message,
     MessageDirection,
     ReminderState,
     RuntimeSession,
     SenderIdentity,
 )
-from bazaar_compute_node.core.runtime import IRuntime, RuntimeCommandContext
-from bazaar_compute_node.core.timerwheel import TimerWheel
+from superai_node.core.runtime import IRuntime, RuntimeCommandContext
+from superai_node.core.timerwheel import TimerWheel
 
 pytestmark = pytest.mark.e2e
 
@@ -92,7 +92,7 @@ def _upgrade_node(tmp_path: Path) -> tuple[NodeApplication, TestChannel, TestRun
         ),
         shared_factories=AdapterRegistry().load_shared(storage="sqlite", audit="test"),
         registry=_StaticRegistry(channel, runtime),
-        endpoint_path=tmp_path / "bcn.sock",
+        endpoint_path=tmp_path / "superai.sock",
         timeout_budget=TimeoutBudget(
             startup_seconds=5,
             provider_call_seconds=5,
@@ -187,9 +187,9 @@ async def test_upgrade_needs_uv_to_install_anything(
 
 
 def _sealed_path(monkeypatch: pytest.MonkeyPatch, root: Path) -> Path:
-    """Replace PATH with a directory the installed bcn cannot be reached through.
+    """Replace PATH with a directory the installed superai cannot be reached through.
 
-    An upgrade must never reach the bcn this machine actually runs, and the
+    An upgrade must never reach the superai this machine actually runs, and the
     recorder left in its place also shows that nothing was spawned at all.
     """
 
@@ -199,14 +199,14 @@ def _sealed_path(monkeypatch: pytest.MonkeyPatch, root: Path) -> Path:
     sealed.mkdir()
     shutil.copy2(real_uv, sealed / Path(real_uv).name)
     record = root / "restart-argv"
-    recorder = sealed / "bcn"
+    recorder = sealed / "superai"
     recorder.write_text(
         f'#!/bin/sh\nprintf "%s\\n" "$@" > {record}\n',
         encoding="utf-8",
     )
     recorder.chmod(0o755)
     monkeypatch.setenv("PATH", os.pathsep.join((str(sealed), "/usr/bin", "/bin")))
-    assert shutil.which("bcn") == str(recorder)
+    assert shutil.which("superai") == str(recorder)
     return record
 
 
@@ -257,7 +257,7 @@ async def test_real_upgrade_installs_then_schedules_then_asks_for_a_restart(
                     "agent_id": AGENT_ID,
                     "actor_id": session.actor.id,
                     "runtime_session_id": session.id,
-                    "session_capability": environment["BCN_COMMAND_CAPABILITY"],
+                    "session_capability": environment["SUPERAI_COMMAND_CAPABILITY"],
                     "message_id": _anchor_message().message_id,
                 }
             )
@@ -267,7 +267,7 @@ async def test_real_upgrade_installs_then_schedules_then_asks_for_a_restart(
         assert result["upgrade_version"] == watcher.available_version()
 
         # case: the release is on disk by the time the command answers
-        assert (tool_dir / "bazaar-compute-node").is_dir()
+        assert (tool_dir / "superai").is_dir()
 
         # case: the follow-up is durable, so the restart cannot lose it
         repository = cast(SqliteDatabase, node.storage).scope(AGENT_ID, "Test Agent")
@@ -336,7 +336,7 @@ async def test_real_upgrade_failure_reaches_the_agent_without_a_restart(
             "agent_id": AGENT_ID,
             "actor_id": session.actor.id,
             "runtime_session_id": session.id,
-            "session_capability": environment["BCN_COMMAND_CAPABILITY"],
+            "session_capability": environment["SUPERAI_COMMAND_CAPABILITY"],
             "message_id": _anchor_message().message_id,
         }
         response = await dispatcher(request)
@@ -348,7 +348,7 @@ async def test_real_upgrade_failure_reaches_the_agent_without_a_restart(
 
         # case: nothing was installed, promised or restarted
         repository = cast(SqliteDatabase, node.storage).scope(AGENT_ID, "Test Agent")
-        assert not (tool_dir / "bazaar-compute-node").exists()
+        assert not (tool_dir / "superai").exists()
         assert restarts == []
         assert (
             await repository.list_reminders(

@@ -5,13 +5,13 @@ from uuid import uuid4
 
 import pytest
 
-from bazaar_compute_node.contrib.claude.plugin import builder as claude
-from bazaar_compute_node.contrib.claude.runtime import ENVIRONMENT as CLAUDE_ENVIRONMENT
-from bazaar_compute_node.contrib.codex.plugin import builder as codex
-from bazaar_compute_node.contrib.codex.runtime import ENVIRONMENT as CODEX_ENVIRONMENT
-from bazaar_compute_node.core.paths import resolve_workspace_dir
-from bazaar_compute_node.core.runtime import IRuntimeBuilder, RuntimeCommandContext
-from bazaar_compute_node.core.utils.command import platform_environment
+from superai_node.contrib.claude.plugin import builder as claude
+from superai_node.contrib.claude.runtime import ENVIRONMENT as CLAUDE_ENVIRONMENT
+from superai_node.contrib.codex.plugin import builder as codex
+from superai_node.contrib.codex.runtime import ENVIRONMENT as CODEX_ENVIRONMENT
+from superai_node.core.paths import resolve_workspace_dir
+from superai_node.core.runtime import IRuntimeBuilder, RuntimeCommandContext
+from superai_node.core.utils.command import platform_environment
 
 pytestmark = pytest.mark.e2e
 

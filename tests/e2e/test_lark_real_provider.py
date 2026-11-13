@@ -6,17 +6,17 @@ from uuid import uuid4
 
 import pytest
 
-from bazaar_compute_node.app.attachments import AttachmentMaterializer
-from bazaar_compute_node.contrib.lark.channel import LarkChannel
-from bazaar_compute_node.contrib.lark.identity import LarkThreadIdentity
-from bazaar_compute_node.contrib.lark.plugin import LarkBuilder
-from bazaar_compute_node.core.channel import (
+from superai_node.app.attachments import AttachmentMaterializer
+from superai_node.contrib.lark.channel import LarkChannel
+from superai_node.contrib.lark.identity import LarkThreadIdentity
+from superai_node.contrib.lark.plugin import LarkBuilder
+from superai_node.core.channel import (
     ChannelContext,
     ChannelSendRequest,
     ChannelTargetKind,
 )
-from bazaar_compute_node.core.outcomes import ProviderCallStatus
-from bazaar_compute_node.core.timerwheel import TimerWheel
+from superai_node.core.outcomes import ProviderCallStatus
+from superai_node.core.timerwheel import TimerWheel
 
 pytestmark = pytest.mark.e2e
 
@@ -26,16 +26,16 @@ async def _referenced_paths() -> set[str]:
 
 
 def _channel(tmp_path: Path, timer_wheel: TimerWheel) -> LarkChannel:
-    app_id = os.environ.get("BCN_LARK_APP_ID")
-    app_secret = os.environ.get("BCN_LARK_APP_SECRET")
+    app_id = os.environ.get("SUPERAI_LARK_APP_ID")
+    app_secret = os.environ.get("SUPERAI_LARK_APP_SECRET")
     if not app_id or not app_secret:
         pytest.fail(
-            "BCN_LARK_APP_ID and BCN_LARK_APP_SECRET are required for Lark provider verification"
+            "SUPERAI_LARK_APP_ID and SUPERAI_LARK_APP_SECRET are required for Lark provider verification"
         )
-    region = os.environ.get("BCN_LARK_REGION", "feishu")
+    region = os.environ.get("SUPERAI_LARK_REGION", "feishu")
     options: dict[str, object] = {
         "app_id": app_id,
-        "app_secret_env": "BCN_LARK_APP_SECRET",
+        "app_secret_env": "SUPERAI_LARK_APP_SECRET",
         "region": region,
     }
     channel = LarkBuilder().build(
@@ -81,9 +81,9 @@ async def test_lark_real_provider_lifecycle_identity(tmp_path: Path) -> None:
 async def test_lark_real_provider_delivers_a_message(tmp_path: Path) -> None:
     """Send through the real provider, so the reply route is covered by fact."""
 
-    chat_id = os.environ.get("BCN_LARK_TEST_CHAT_ID")
+    chat_id = os.environ.get("SUPERAI_LARK_TEST_CHAT_ID")
     if not chat_id:
-        pytest.fail("BCN_LARK_TEST_CHAT_ID is required to verify Lark delivery")
+        pytest.fail("SUPERAI_LARK_TEST_CHAT_ID is required to verify Lark delivery")
     timer_wheel = TimerWheel()
     await timer_wheel.start()
     channel: LarkChannel | None = None
@@ -99,7 +99,7 @@ async def test_lark_real_provider_delivers_a_message(tmp_path: Path) -> None:
         result = await channel.send(
             ChannelSendRequest(
                 session_id=f"session-{nonce}",
-                body=f"BCN Lark provider verification\n\nRun: `{nonce}`",
+                body=f"SUPERAI Lark provider verification\n\nRun: `{nonce}`",
                 attachments=(),
                 target_kind=ChannelTargetKind.DM,
                 provider_thread_id=thread.provider_thread_id,

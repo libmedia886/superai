@@ -7,9 +7,9 @@ from uuid import uuid7
 
 import pytest
 
-from bazaar_compute_node.core.models import Message, MessageDirection, SenderIdentity
-from bazaar_compute_node.core.reminder import ReminderScheduleRequest
-from bazaar_compute_node.core.utils.clock import now_ms
+from superai_node.core.models import Message, MessageDirection, SenderIdentity
+from superai_node.core.reminder import ReminderScheduleRequest
+from superai_node.core.utils.clock import now_ms
 
 from ._node import AGENT_ID, node_reporting_to
 from ._serving import enrol, serving_app, signed_in
@@ -28,7 +28,7 @@ async def test_a_stranger_is_looked_at_let_in_and_turned_away_from_the_page(
     async with serving_app(tmp_path) as (base, app):
         storage = app.state.storage
         enrolment = await enrol(storage, "kana")
-        monkeypatch.setenv("BCN_SERVER_TOKEN", enrolment.token)
+        monkeypatch.setenv("SUPERAI_SERVER_TOKEN", enrolment.token)
         node = await node_reporting_to(base, tmp_path)
         try:
             agent = node.agents[AGENT_ID]

@@ -10,12 +10,12 @@ from pathlib import Path
 
 import pytest
 
-from bazaar_compute_node.app.config import resolve_config_path
-from bazaar_compute_node.app.transport import (
+from superai_node.app.config import resolve_config_path
+from superai_node.app.transport import (
     LocalCommandClient,
     local_endpoint_for_path,
 )
-from bazaar_compute_node.core.paths import resolve_data_dir
+from superai_node.core.paths import resolve_data_dir
 
 
 async def wait_for_runtime_endpoint(
@@ -122,7 +122,7 @@ kind = "test"
         [
             sys.executable,
             "-m",
-            "bcn_test_support.node",
+            "superai_test_support.node",
             "run",
             "--config",
             str(config_path),
@@ -235,7 +235,7 @@ def test_a_first_run_writes_the_configuration_it_needs() -> None:
         value for value in (source_root, environment.get("PYTHONPATH")) if value
     )
     process = subprocess.Popen(
-        [sys.executable, "-m", "bazaar_compute_node.cli", "run"],
+        [sys.executable, "-m", "superai_node.cli", "run"],
         env=environment,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -246,7 +246,7 @@ def test_a_first_run_writes_the_configuration_it_needs() -> None:
         while time.monotonic() < deadline and not config_path.exists():
             if process.poll() is not None:
                 _, stderr = process.communicate()
-                raise AssertionError(f"bcn run exited before it started: {stderr}")
+                raise AssertionError(f"superai run exited before it started: {stderr}")
             time.sleep(0.05)
 
         assert config_path.exists()

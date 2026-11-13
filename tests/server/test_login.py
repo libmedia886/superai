@@ -10,8 +10,8 @@ import aiohttp
 import pytest
 from yarl import URL
 
-from bazaar_compute_server.gate import MAX_BODY_BYTES
-from bazaar_compute_server.sessions import COOKIE, load_session_key
+from superai_server.gate import MAX_BODY_BYTES
+from superai_server.sessions import COOKIE, load_session_key
 
 from ._serving import TESTER, serving, signed_in, with_password
 
@@ -206,7 +206,7 @@ async def test_changing_the_password_ends_every_other_session(tmp_path: Path) ->
 async def test_the_first_start_makes_root_and_says_the_password_once(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    caplog.set_level(logging.WARNING, logger="bazaar_compute_server")
+    caplog.set_level(logging.WARNING, logger="superai_server")
     async with serving(tmp_path) as (base, storage):
         admin = await storage.find_account("admin")
         assert admin is not None

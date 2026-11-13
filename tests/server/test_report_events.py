@@ -9,8 +9,8 @@ import aiohttp
 import aiosqlite
 import pytest
 
-from bazaar_compute_server.contrib.sqlite.storage import SqliteStorage
-from bazaar_compute_server.protocol import PROTOCOL_HEADER, PROTOCOL_VERSION, Event
+from superai_server.contrib.sqlite.storage import SqliteStorage
+from superai_server.protocol import PROTOCOL_HEADER, PROTOCOL_VERSION, Event
 
 from ._serving import enrol, root_id, serving, serving_app, signed_in
 
@@ -238,7 +238,7 @@ async def test_only_a_known_token_on_a_known_protocol_gets_in(tmp_path: Path) ->
 async def test_retention_keeps_recent_events_and_the_last_health_beat(
     tmp_path: Path,
 ) -> None:
-    storage = SqliteStorage(tmp_path / "bcs.sqlite3", retention_days=1)
+    storage = SqliteStorage(tmp_path / "superai-server.sqlite3", retention_days=1)
     await storage.start()
     try:
         enrolment = await enrol(storage, "kana")
@@ -257,7 +257,7 @@ async def test_retention_keeps_recent_events_and_the_last_health_beat(
         assert await storage.count_events(computer_id) == 4
 
         # age everything past the retention; the session then reports again
-        async with aiosqlite.connect(tmp_path / "bcs.sqlite3") as connection:
+        async with aiosqlite.connect(tmp_path / "superai-server.sqlite3") as connection:
             await connection.execute("UPDATE events SET received_at_ms = 0")
             await connection.commit()
         await storage.record_events(
@@ -275,7 +275,7 @@ async def test_retention_keeps_recent_events_and_the_last_health_beat(
         # last usage a still-heard-from session gave before the cutoff: that
         # is the baseline today's count is taken from, whatever came since
         async with (
-            aiosqlite.connect(tmp_path / "bcs.sqlite3") as connection,
+            aiosqlite.connect(tmp_path / "superai-server.sqlite3") as connection,
             connection.execute(
                 "SELECT seq, event_name FROM events WHERE computer_id = ? ORDER BY seq",
                 (computer_id,),
@@ -290,12 +290,12 @@ async def test_retention_keeps_recent_events_and_the_last_health_beat(
 
         # case: once the session has been silent for the whole retention, its
         # usage goes too; only the health beat stays
-        async with aiosqlite.connect(tmp_path / "bcs.sqlite3") as connection:
+        async with aiosqlite.connect(tmp_path / "superai-server.sqlite3") as connection:
             await connection.execute("UPDATE events SET received_at_ms = 0")
             await connection.commit()
         await storage.sweep()
         async with (
-            aiosqlite.connect(tmp_path / "bcs.sqlite3") as connection,
+            aiosqlite.connect(tmp_path / "superai-server.sqlite3") as connection,
             connection.execute(
                 "SELECT event_name FROM events WHERE computer_id = ?", (computer_id,)
             ) as cursor,
@@ -307,7 +307,7 @@ async def test_retention_keeps_recent_events_and_the_last_health_beat(
 
 @pytest.mark.asyncio
 async def test_lookups_take_more_ids_than_one_statement_holds(tmp_path: Path) -> None:
-    storage = SqliteStorage(tmp_path / "bcs.sqlite3", retention_days=30)
+    storage = SqliteStorage(tmp_path / "superai-server.sqlite3", retention_days=30)
     await storage.start()
     try:
         enrolment = await enrol(storage, "kana")
@@ -336,7 +336,7 @@ async def test_lookups_take_more_ids_than_one_statement_holds(tmp_path: Path) ->
 async def test_computers_come_in_pages_that_survive_new_enrolments(
     tmp_path: Path,
 ) -> None:
-    storage = SqliteStorage(tmp_path / "bcs.sqlite3", retention_days=30)
+    storage = SqliteStorage(tmp_path / "superai-server.sqlite3", retention_days=30)
     await storage.start()
     try:
         names = [f"computer-{index}" for index in range(5)]
@@ -372,7 +372,7 @@ async def test_computers_come_in_pages_that_survive_new_enrolments(
 async def test_a_caller_that_stops_waiting_does_not_stop_the_writer(
     tmp_path: Path,
 ) -> None:
-    storage = SqliteStorage(tmp_path / "bcs.sqlite3", retention_days=30)
+    storage = SqliteStorage(tmp_path / "superai-server.sqlite3", retention_days=30)
     await storage.start()
     try:
         enrolment = await enrol(storage, "gone")

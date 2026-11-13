@@ -1,0 +1,549 @@
+from __future__ import annotations
+
+import asyncio
+import hmac
+import logging
+import math
+import os
+import re
+import secrets
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from functools import partial
+from pathlib import Path
+
+from ..core.actor import Actor, Actors, Agent, Thread
+from ..core.agent import State
+from ..core.audit import AuditRecorder
+from ..core.channel import Channel, ChannelContext, Channels, IChannel
+from ..core.concurrency import IThreadConcurrency, ThreadLockRegistry
+from ..core.lifecycle import TimeoutBudget
+from ..core.models import (
+    InboundAttachment,
+    Message,
+    RuntimeSession,
+)
+from ..core.orchestration import AgentOrchestrator
+from ..core.paths import resolve_workspace_dir
+from ..core.review import ReviewPolicy
+from ..core.runtime import IRuntime, RuntimeCommandContext
+from ..core.storage import IStorageScope
+from ..core.timerwheel import TimerWheel
+from ..core.utils.command import PLATFORM_ENVIRONMENT
+from ..i18n import Translator
+from .attachments import AttachmentMaterializer
+from .command import CommandDispatchError
+from .config import AgentConfiguration
+from .registry import AgentAdapterFactories
+from .resource_dispatch import CommandDispatcher
+from .upgrade import UpgradeService
+from .wrapper import install_bcc_wrapper, remove_bcc_wrapper
+
+CommandRecord = tuple[str, tuple[str, ...]]
+
+_ENVIRONMENT_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+@dataclass(frozen=True, slots=True)
+class _SessionCapabilityBinding:
+    agent_id: str
+    actor_id: str
+    runtime_session_id: str
+    capability: str
+    token_values: tuple[str, ...]
+
+
+class AgentApplication:
+    """Process-local composition for one configured SUPERAI Agent."""
+
+    def __init__(
+        self,
+        *,
+        configuration: AgentConfiguration,
+        factories: AgentAdapterFactories,
+        storage: IStorageScope,
+        audit: AuditRecorder,
+        timer_wheel: TimerWheel,
+        reminder_concurrency: IThreadConcurrency,
+        reminder_poke: Callable[[], None],
+        endpoint: Callable[[], str],
+        timeout_budget: TimeoutBudget,
+        translator: Translator,
+        upgrade_service: UpgradeService | None,
+        upgrade_notice: Callable[[], tuple[str, str] | None] = lambda: None,
+        reviewed: bool = False,
+    ) -> None:
+        self.configuration = configuration
+        self.agent_id = configuration.id
+        self.name = configuration.name
+        self.storage = storage
+        self.timer_wheel = timer_wheel
+        self.timeout_budget = timeout_budget
+        self.translator = translator
+        self._endpoint = endpoint
+        self._wrapper_path: Path | None = None
+        self.command_log: list[CommandRecord] = []
+        self._session_capabilities: dict[str, _SessionCapabilityBinding] = {}
+        self._concurrency = ThreadLockRegistry()
+        self._runtime_configurations = configuration.runtimes
+        self._logger = logging.getLogger("superai_node.application.agent")
+        self._attachment_materializer = AttachmentMaterializer(
+            self.workspace_path,
+            self._referenced_attachment_paths,
+        )
+        channels = tuple(
+            Channel(
+                self.agent_id,
+                factories.channels[channel_configuration.kind].build(
+                    ChannelContext(
+                        agent_id=self.agent_id,
+                        attachments=self._attachment_materializer,
+                        options=dict(channel_configuration.options),
+                        workspace=self.workspace_path,
+                        translator=self.translator,
+                        timer_wheel=self.timer_wheel,
+                        audit=audit,
+                    )
+                ),
+            )
+            for channel_configuration in configuration.channels
+        )
+        self.channel: IChannel = Channels(channels)
+        runtime_contexts: list[RuntimeCommandContext] = []
+        runtimes: list[IRuntime] = []
+        for index, runtime_configuration in enumerate(configuration.runtimes):
+            runtime_options: dict[str, str] = {
+                key: value
+                for key, value in runtime_configuration.options.items()
+                if isinstance(value, str)
+            }
+            if runtime_configuration.model is not None:
+                runtime_options["model"] = runtime_configuration.model
+            if runtime_configuration.effort is not None:
+                runtime_options["effort"] = runtime_configuration.effort
+            context = RuntimeCommandContext(
+                run_command=self._run_runtime_command,
+                # the context belongs to one instance, so the index it builds
+                # the child environment for is fixed here
+                environment_for_session=partial(self._runtime_environment, index),
+                environment_for_probe=partial(self._probe_environment, index),
+                agent_id=self.agent_id,
+                agent_name=self.name,
+                bot_names=self._bot_names,
+                runtime_options=runtime_options,
+                mode=configuration.mode,
+                sandbox_mode=runtime_configuration.sandbox_mode,
+                network_access=runtime_configuration.network_access,
+                startup_timeout_seconds=timeout_budget.startup_seconds,
+            )
+            runtime_contexts.append(context)
+            runtimes.append(factories.runtimes[runtime_configuration.kind](context))
+        idle_timeout_seconds = configuration.idle_timeout_seconds
+        if (
+            isinstance(idle_timeout_seconds, bool)
+            or not isinstance(idle_timeout_seconds, int | float)
+            or not math.isfinite(idle_timeout_seconds)
+        ):
+            raise ValueError("agent idle timeout must be a finite number")
+        if (
+            idle_timeout_seconds > 0
+            and idle_timeout_seconds * 1_000 > timer_wheel.maximum_delay_ms
+        ):
+            raise ValueError("agent idle timeout exceeds the timer horizon")
+        self._runtime_contexts = tuple(runtime_contexts)
+        self.runtimes: tuple[IRuntime, ...] = tuple(runtimes)
+        self.actors = Actors(agent_id=self.agent_id, mode=configuration.mode)
+        self.orchestrator = AgentOrchestrator(
+            actors=self.actors,
+            channel=self.channel,
+            runtimes=self.runtimes,
+            storage=self.storage,
+            audit=audit,
+            timeout_budget=self.timeout_budget,
+            timer_wheel=self.timer_wheel,
+            runtime_idle_timeout_ms=(
+                math.ceil(idle_timeout_seconds * 1_000)
+                if idle_timeout_seconds > 0
+                else 0
+            ),
+            workspace=self.workspace_path,
+            translator=self.translator,
+            error_feedback_detail=self._redact_session_secrets,
+            upgrade_notice=upgrade_notice,
+            concurrency=self._concurrency,
+            review=ReviewPolicy(
+                tuple(
+                    (channel, channel_configuration.allowed_chats)
+                    for channel, channel_configuration in zip(
+                        channels, configuration.channels, strict=True
+                    )
+                ),
+                reviewed,
+            ),
+            reminder_concurrency=reminder_concurrency,
+            reminder_poke=reminder_poke,
+        )
+        self.command_dispatcher = CommandDispatcher(
+            self.orchestrator.command_service,
+            actors=self.actors,
+            session_binding_validator=self._validate_actor_binding,
+            upgrade_service=upgrade_service,
+        )
+
+    @property
+    def state(self) -> State:
+        """Where the agent is: not up yet, done for, or - once up - at rest,
+        since the actors' own states are theirs to tell."""
+
+        return self.orchestrator.agent.lifecycle
+
+    @property
+    def started(self) -> bool:
+        return self.orchestrator.agent.up
+
+    def workspace_path(self) -> Path:
+        return resolve_workspace_dir(self.agent_id)
+
+    async def start(self) -> None:
+        if self.started:
+            return
+        if self.state is State.TERMINATED:
+            raise RuntimeError("Agent application is terminated")
+        workspace = self.workspace_path()
+        await asyncio.to_thread(
+            workspace.mkdir,
+            parents=True,
+            exist_ok=True,
+            mode=0o700,
+        )
+        if os.name != "nt":
+            await asyncio.to_thread(workspace.chmod, 0o700)
+        try:
+            self._wrapper_path = await asyncio.to_thread(
+                install_bcc_wrapper,
+                workspace / ".superai" / "bin",
+                agent_id=self.agent_id,
+                mode=self.actors.mode,
+            )
+            await self._attachment_materializer.reconcile()
+            await self._backfill_channel_identity()
+            await self.orchestrator.start(
+                timeout=self.timeout_budget.startup_seconds,
+            )
+        except BaseException:
+            await self._cleanup_partial_start()
+            raise
+        self.command_dispatcher.start_accepting()
+
+    async def _backfill_channel_identity(self) -> None:
+        """Give conversations written before bots were told apart to this one.
+
+        Only a channel that knows its bot before it starts can do this here;
+        the kinds that carry the bot in the thread id were filled by migration.
+        A kind with several bots hands them to the first, in configuration
+        order.
+        """
+
+        for member in self.channel.members:
+            identity = member.get_identity()
+            if identity is None:
+                continue
+            for session in await self.storage.list_channel_sessions_without_identity(
+                member.name
+            ):
+                await self.storage.backfill_channel_identity(
+                    session.id,
+                    channel_identity=identity.id,
+                    provider_thread_id=member.backfill_provider_thread_id(
+                        session.provider_thread_id
+                    ),
+                )
+
+    def _bot_names(self) -> tuple[str, ...]:
+        names: dict[str, None] = {}
+        for member in self.channel.members:
+            identity = member.get_identity()
+            if identity is None:
+                continue
+            names[identity.name or identity.id] = None
+        return tuple(names)
+
+    async def stop(self) -> None:
+        if self.state is State.TERMINATED:
+            return
+        # the turn is taken before anything is awaited: whoever looks in the
+        # meantime sees an agent that is done for, not one to be changed
+        self.orchestrator.agent.terminated()
+        self.command_dispatcher.stop_accepting()
+        errors: list[BaseException] = []
+        try:
+            await self.command_dispatcher.drain(
+                timeout=self.timeout_budget.shutdown_seconds,
+            )
+        except BaseException as error:  # noqa: BLE001
+            errors.append(error)
+        try:
+            await self.orchestrator.stop(
+                timeout=self.timeout_budget.shutdown_seconds,
+            )
+        except BaseException as error:  # noqa: BLE001
+            errors.append(error)
+        try:
+            await self._cleanup_bcc_wrapper()
+        except BaseException as error:  # noqa: BLE001
+            errors.append(error)
+        self._session_capabilities.clear()
+        # the one who stopped it being cancelled is not an error of the stop:
+        # the cleanup is done, and the cancellation goes on up
+        for error in errors:
+            if isinstance(error, asyncio.CancelledError):
+                raise error
+        if errors:
+            raise RuntimeError(
+                "; ".join(type(error).__name__ for error in errors)
+            ) from errors[0]
+
+    async def dispatch(
+        self,
+        request: Mapping[str, object],
+    ) -> Mapping[str, object]:
+        return await self.command_dispatcher(request)
+
+    async def publish_inbox_wake(self, message: Message[InboundAttachment]) -> None:
+        if not self.started:
+            raise RuntimeError("Agent application is not started")
+        await self.orchestrator.publish_inbox_wake(message)
+
+    def health_record(self) -> dict[str, object]:
+        return {
+            "agent_id": self.agent_id,
+            "name": self.name,
+            "status": "started" if self.started else self.state.value,
+            "channels": tuple(member.name for member in self.channel.members),
+            "runtimes": tuple(runtime.name for runtime in self.runtimes),
+            "channel_health": dict(self.channel.health),
+            "orchestrator_health": self.orchestrator.health,
+        }
+
+    async def _cleanup_partial_start(self) -> None:
+        try:
+            await self.orchestrator.stop(
+                timeout=self.timeout_budget.shutdown_seconds,
+            )
+        except BaseException as error:
+            self._logger.debug("orchestrator cleanup failed", exc_info=error)
+        try:
+            await self._cleanup_bcc_wrapper()
+        except BaseException as error:
+            self._logger.debug("bcc wrapper cleanup failed", exc_info=error)
+        self._session_capabilities.clear()
+
+    async def _cleanup_bcc_wrapper(self) -> None:
+        wrapper_path = self._wrapper_path
+        if wrapper_path is None:
+            return
+        await asyncio.to_thread(remove_bcc_wrapper, wrapper_path)
+        self._wrapper_path = None
+
+    async def _referenced_attachment_paths(self) -> set[str]:
+        return set(await self.storage.list_ready_attachment_paths())
+
+    async def _validate_actor_binding(
+        self,
+        actor: Actor,
+        request: Mapping[str, object],
+    ) -> None:
+        request_agent_id = request.get("agent_id")
+        if request_agent_id != self.agent_id:
+            raise CommandDispatchError(
+                "SESSION_BINDING_FAILED",
+                "Agent binding is invalid",
+            )
+        runtime_session_id = request.get("runtime_session_id")
+        session_capability = request.get("session_capability")
+        match actor:
+            case Thread(thread_id):
+                if await self.storage.get_thread(thread_id) is None:
+                    raise CommandDispatchError(
+                        "SESSION_NOT_FOUND",
+                        f"unknown thread: {thread_id}",
+                    )
+            case Agent():
+                pass
+        runtime_session = self.orchestrator.runtime_session(actor)
+        if runtime_session is None or runtime_session_id != runtime_session.id:
+            raise CommandDispatchError(
+                "SESSION_BINDING_FAILED",
+                "runtime session binding is invalid",
+            )
+        binding = self._session_capabilities.get(actor.id)
+        if (
+            binding is None
+            or binding.agent_id != self.agent_id
+            or binding.actor_id != actor.id
+            or binding.runtime_session_id != runtime_session.id
+            or not isinstance(session_capability, str)
+            or not hmac.compare_digest(
+                session_capability.encode(), binding.capability.encode()
+            )
+        ):
+            raise CommandDispatchError(
+                "SESSION_BINDING_FAILED",
+                "session capability is invalid",
+            )
+
+    def _runtime_environment(
+        self,
+        runtime_index: int,
+        session: RuntimeSession,
+    ) -> Mapping[str, str]:
+        runtime_session = self.orchestrator.runtime_session(session.actor)
+        if runtime_session is None or runtime_session.id != session.id:
+            raise RuntimeError("runtime session is not the current live binding")
+        return self._build_command_environment(
+            session.actor.id,
+            session.id,
+            runtime_index=runtime_index,
+        )
+
+    def _probe_environment(self, runtime_index: int) -> dict[str, str]:
+        return self._configured_environment(runtime_index)
+
+    def _build_command_environment(
+        self,
+        actor_id: str,
+        runtime_session_id: str,
+        *,
+        runtime_index: int,
+    ) -> dict[str, str]:
+        if not runtime_session_id:
+            raise ValueError("runtime_session_id must be a non-empty string")
+        wrapper_path = self._wrapper_path
+        if wrapper_path is None:
+            raise RuntimeError("bcc wrapper is not installed")
+        environment_bindings = self._runtime_configurations[runtime_index].env
+        binding = self._session_capabilities.get(actor_id)
+        if binding is None or binding.runtime_session_id != runtime_session_id:
+            capability = secrets.token_urlsafe(32)
+            token_values = [capability]
+            for name, source_name in environment_bindings.items():
+                if name != "TOKEN" and not name.endswith("_TOKEN"):
+                    continue
+                value = os.environ.get(source_name)
+                if value and value not in token_values:
+                    token_values.append(value)
+            binding = _SessionCapabilityBinding(
+                agent_id=self.agent_id,
+                actor_id=actor_id,
+                runtime_session_id=runtime_session_id,
+                capability=capability,
+                token_values=tuple(token_values),
+            )
+            self._session_capabilities[actor_id] = binding
+        environment = self._configured_environment(runtime_index)
+        environment["PATH"] = os.pathsep.join(
+            (str(wrapper_path.parent), environment.get("PATH", os.defpath))
+        )
+        environment.update(
+            {
+                "SUPERAI_AGENT_ID": self.agent_id,
+                "SUPERAI_ENDPOINT": self._endpoint(),
+                "SUPERAI_ACTOR_ID": actor_id,
+                "SUPERAI_RUNTIME_SESSION_ID": runtime_session_id,
+                "SUPERAI_COMMAND_CAPABILITY": binding.capability,
+            }
+        )
+        return environment
+
+    def _configured_environment(self, runtime_index: int) -> dict[str, str]:
+        """What a runtime's process starts with: the platform's own
+        variables it needs, and those its configuration binds, each under
+        the name it asked for."""
+
+        environment_bindings = self._runtime_configurations[runtime_index].env
+        allowed = set(PLATFORM_ENVIRONMENT)
+        for name in self.runtimes[runtime_index].environment_variable_names():
+            if not _ENVIRONMENT_NAME.fullmatch(name):
+                raise ValueError(f"runtime environment name is invalid: {name}")
+            allowed.add(name)
+        environment = {
+            name: os.environ[name] for name in sorted(allowed) if os.environ.get(name)
+        }
+        bound: dict[str, str] = {}
+        for name, source_name in sorted(environment_bindings.items()):
+            for candidate in (name, source_name):
+                if not _ENVIRONMENT_NAME.fullmatch(candidate):
+                    raise ValueError(
+                        f"runtime environment name is invalid: {candidate}"
+                    )
+            if source_name not in os.environ:
+                raise ValueError(
+                    f"runtime environment variable is missing: {source_name}"
+                )
+            bound[name] = os.environ[source_name]
+        for source_name in environment_bindings.values():
+            # the credential reaches the child only under the name it asked for,
+            # never under the node's own name for it, unless the child asked for
+            # that name as well
+            if source_name not in environment_bindings:
+                environment.pop(source_name, None)
+        environment.update(bound)
+        return environment
+
+    def _redact_session_secrets(self, thread_id: str, text: str) -> str:
+        binding = self._session_capabilities.get(self.actors.for_thread(thread_id).id)
+        if binding is None:
+            return text
+        for token in binding.token_values:
+            text = text.replace(token, "<redacted>")
+        return text
+
+    async def _run_runtime_command(
+        self,
+        thread_id: str,
+        arguments: Sequence[str],
+        body: str | None,
+    ) -> None:
+        if not thread_id:
+            raise ValueError("thread_id must be a non-empty string")
+        if not arguments or any(
+            not isinstance(argument, str) for argument in arguments
+        ):
+            raise ValueError("runtime command arguments must be non-empty text")
+        wrapper_path = self._wrapper_path
+        if wrapper_path is None:
+            raise RuntimeError("bcc wrapper is not installed")
+        self.command_log.append((thread_id, tuple(arguments)))
+        runtime_session = self.orchestrator.runtime_session(
+            self.actors.for_thread(thread_id)
+        )
+        if runtime_session is None:
+            raise RuntimeError("runtime session is not live")
+        environment = self._build_command_environment(
+            runtime_session.actor.id,
+            runtime_session.id,
+            runtime_index=runtime_session.runtime_index,
+        )
+        process = await asyncio.create_subprocess_exec(
+            str(wrapper_path),
+            *arguments,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=environment,
+        )
+        input_data = body.encode() if body is not None else None
+        try:
+            _, stderr = await process.communicate(input=input_data)
+        except asyncio.CancelledError:
+            if process.returncode is None:
+                process.terminate()
+                await process.wait()
+            raise
+        if process.returncode != 0:
+            error = stderr.decode(errors="replace").strip()
+            command = " ".join(arguments)
+            raise RuntimeError(f"bcc command failed ({command}): {error}")
+
+
+__all__ = ["AgentApplication", "CommandRecord"]

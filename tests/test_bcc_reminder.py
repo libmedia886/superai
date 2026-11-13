@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import click
 
-from bazaar_compute_node.cmd.bcc import bcc
-from bazaar_compute_node.cmd.bcc._format import (
+from superai_node.cmd.bcc import bcc
+from superai_node.cmd.bcc._format import (
     serialize_reminder_cancel,
     serialize_reminder_list,
     serialize_reminder_schedule,
@@ -33,7 +33,7 @@ def reminder_payload(
 ) -> dict[str, object]:
     return {
         "reminder_id": REMINDER_ID,
-        "owner_thread_id": "bcn-a",
+        "owner_thread_id": "superai-a",
         "anchor_message_id": ANCHOR_ID,
         "title": "Inspect reminder",
         "state": state,

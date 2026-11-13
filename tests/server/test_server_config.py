@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from bazaar_compute_server.config import (
+from superai_server.config import (
     ConfigurationError,
     ServerConfiguration,
     load_configuration,
@@ -27,7 +27,7 @@ def test_configuration_values_are_read_and_checked(tmp_path: Path) -> None:
     path = tmp_path / "config.toml"
     path.write_text(
         'listen = "0.0.0.0:9000"\nretention_days = 7\nsession_minutes = 25\n'
-        'storage = "postgres"\n\n[postgres]\ndsn = "postgresql://bcs@db/bcs"\n',
+        'storage = "postgres"\n\n[postgres]\ndsn = "postgresql://superai-server@db/superai-server"\n',
         encoding="utf-8",
     )
     configuration = load_configuration(path)
@@ -36,7 +36,7 @@ def test_configuration_values_are_read_and_checked(tmp_path: Path) -> None:
         retention_days=7,
         session_minutes=25,
         storage="postgres",
-        storage_options={"dsn": "postgresql://bcs@db/bcs"},
+        storage_options={"dsn": "postgresql://superai-server@db/superai-server"},
     )
     assert configuration.listen_host == "0.0.0.0"
     assert configuration.listen_port == 9000
@@ -58,14 +58,14 @@ def test_configuration_values_are_read_and_checked(tmp_path: Path) -> None:
 
 
 def test_bcs_answers_version_and_help(capsys: pytest.CaptureFixture[str]) -> None:
-    from bazaar_compute_server import __version__
-    from bazaar_compute_server.cli import main
+    from superai_server import __version__
+    from superai_server.cli import main
 
     assert main(["--version"]) == 0
-    assert capsys.readouterr().out.strip() == f"bcs {__version__}"
+    assert capsys.readouterr().out.strip() == f"superai-server {__version__}"
 
     assert main([]) == 0
-    assert capsys.readouterr().out.startswith("Usage: bcs")
+    assert capsys.readouterr().out.startswith("Usage: superai-server")
 
 
 def test_the_server_runs_on_the_fast_loop_and_parser() -> None:
@@ -83,9 +83,9 @@ def test_the_server_runs_on_the_fast_loop_and_parser() -> None:
 
 
 def test_the_configured_storage_comes_from_an_entry_point(tmp_path: Path) -> None:
-    from bazaar_compute_server.contrib.sqlite.storage import SqliteStorage
-    from bazaar_compute_server.registry import ProviderLoadError, load_storage_factory
-    from bazaar_compute_server.storage import StorageContext
+    from superai_server.contrib.sqlite.storage import SqliteStorage
+    from superai_server.registry import ProviderLoadError, load_storage_factory
+    from superai_server.storage import StorageContext
 
     storage = load_storage_factory("sqlite")(
         StorageContext(options={}, data_dir=tmp_path, retention_days=30)

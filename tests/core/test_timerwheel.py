@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from bazaar_compute_node.core.timerwheel import (
+from superai_node.core.timerwheel import (
     TimerCancelledError,
     TimerWheel,
     TimerWheelClosedError,

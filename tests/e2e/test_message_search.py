@@ -10,28 +10,28 @@ from typing import cast
 from uuid import NAMESPACE_URL, uuid5, uuid7
 
 import pytest
-from bcn_test_support import RecordingAudit, StaticChannelBuilder, TestChannel
+from superai_test_support import RecordingAudit, StaticChannelBuilder, TestChannel
 
-from bazaar_compute_node.app.application import NodeApplication
-from bazaar_compute_node.app.config import (
+from superai_node.app.application import NodeApplication
+from superai_node.app.config import (
     AgentConfiguration,
     ChannelConfiguration,
     NodeConfiguration,
     RuntimeConfiguration,
 )
-from bazaar_compute_node.app.registry import (
+from superai_node.app.registry import (
     AdapterRegistry,
     AgentAdapterFactories,
     SharedAdapterFactories,
 )
-from bazaar_compute_node.app.transport import LocalCommandClient
-from bazaar_compute_node.contrib.codex.plugin import builder
-from bazaar_compute_node.contrib.sqlite import SqliteDatabase
-from bazaar_compute_node.core.actor import Mode
-from bazaar_compute_node.core.agent import State
-from bazaar_compute_node.core.instruction import DeveloperInstructionContext
-from bazaar_compute_node.core.models import Message, MessageDirection, SenderIdentity
-from bazaar_compute_node.core.storage import IStorage
+from superai_node.app.transport import LocalCommandClient
+from superai_node.contrib.codex.plugin import builder
+from superai_node.contrib.sqlite import SqliteDatabase
+from superai_node.core.actor import Mode
+from superai_node.core.agent import State
+from superai_node.core.instruction import DeveloperInstructionContext
+from superai_node.core.models import Message, MessageDirection, SenderIdentity
+from superai_node.core.storage import IStorage
 
 pytestmark = pytest.mark.e2e
 
@@ -168,7 +168,7 @@ async def test_natural_history_question_uses_original_context(
                             str(
                                 uuid5(
                                     NAMESPACE_URL,
-                                    f"bcn:{agent_id}:bcn-session:{history_id}",
+                                    f"superai:{agent_id}:superai-session:{history_id}",
                                 )
                             )
                         )
@@ -195,7 +195,12 @@ async def test_natural_history_question_uses_original_context(
                 received_at_ms=1790800000000,
             )
             actor = app.actors.for_thread(
-                str(uuid5(NAMESPACE_URL, f"bcn:{agent_id}:bcn-session:{current_id}"))
+                str(
+                    uuid5(
+                        NAMESPACE_URL,
+                        f"superai:{agent_id}:superai-session:{current_id}",
+                    )
+                )
             )
             sent_after = len(channel.sent_messages)
             events_after = len(audit.events)
@@ -252,7 +257,7 @@ async def test_natural_history_question_uses_original_context(
                 "agent_id": agent_id,
                 "actor_id": actor.id,
                 "runtime_session_id": session.id,
-                "session_capability": environment["BCN_COMMAND_CAPABILITY"],
+                "session_capability": environment["SUPERAI_COMMAND_CAPABILITY"],
                 "query": "staging",
                 "sender": f"@{owner}",
                 "limit": 1,

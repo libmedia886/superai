@@ -3,24 +3,24 @@ from __future__ import annotations
 from importlib.metadata import EntryPoint, distribution
 
 import pytest
-from bcn_test_support import RecordingAudit
-from bcn_test_support.plugin import ENTRY_POINTS
+from superai_test_support import RecordingAudit
+from superai_test_support.plugin import ENTRY_POINTS
 
-from bazaar_compute_node.app.registry import (
+from superai_node.app.registry import (
     RUNTIME_ENTRY_POINT_GROUP,
     AdapterRegistry,
     ProviderLoadError,
 )
-from bazaar_compute_node.core.lifecycle import TimeoutBudget
-from bazaar_compute_node.core.observability import AuditContext
-from bazaar_compute_node.core.timerwheel import TimerWheel
+from superai_node.core.lifecycle import TimeoutBudget
+from superai_node.core.observability import AuditContext
+from superai_node.core.timerwheel import TimerWheel
 
 PROVIDER_GROUPS = frozenset(
     {
-        "bazaar_compute_node.audits",
-        "bazaar_compute_node.channels",
-        "bazaar_compute_node.runtimes",
-        "bazaar_compute_node.storages",
+        "superai_node.audits",
+        "superai_node.channels",
+        "superai_node.runtimes",
+        "superai_node.storages",
     }
 )
 
@@ -28,7 +28,7 @@ PROVIDER_GROUPS = frozenset(
 def test_declared_provider_entry_points_load() -> None:
     production = tuple(
         entry_point
-        for entry_point in distribution("bazaar-compute-node").entry_points
+        for entry_point in distribution("superai").entry_points
         if entry_point.group in PROVIDER_GROUPS
     )
     test_support = tuple(
@@ -50,7 +50,7 @@ def test_the_test_plugins_are_not_installed_as_plugins() -> None:
 
     assert not [
         entry_point
-        for entry_point in distribution("bcn-test-support").entry_points
+        for entry_point in distribution("superai-test-support").entry_points
         if entry_point.group in PROVIDER_GROUPS
     ]
 
@@ -88,9 +88,7 @@ class _OneRuntimeRegistry(AdapterRegistry):
 
 def test_a_runtime_plugin_must_both_build_and_inspect() -> None:
     # a channel builder builds, but cannot say whether it runs here
-    registry = _OneRuntimeRegistry(
-        "bazaar_compute_node.contrib.telegram.plugin:builder"
-    )
+    registry = _OneRuntimeRegistry("superai_node.contrib.telegram.plugin:builder")
 
     with pytest.raises(ProviderLoadError, match="callable inspect method"):
         registry.runtime_builders()

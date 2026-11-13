@@ -4,8 +4,8 @@ from datetime import datetime
 
 import pytest
 
-from bazaar_compute_node.core.models import Reminder, ReminderState
-from bazaar_compute_node.core.reminder import (
+from superai_node.core.models import Reminder, ReminderState
+from superai_node.core.reminder import (
     ReminderCancelRequest,
     ReminderListRequest,
     ReminderScheduleRequest,

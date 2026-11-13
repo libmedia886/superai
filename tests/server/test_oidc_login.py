@@ -18,11 +18,11 @@ from uuid import uuid4
 import httpx2
 import pytest
 
-from bazaar_compute_server.clock import now_ms
-from bazaar_compute_server.contrib.sqlite.storage import SqliteStorage
-from bazaar_compute_server.permissions import Permission
-from bazaar_compute_server.sessions import COOKIE, Sessions, load_session_key
-from bazaar_compute_server.storage import Role
+from superai_server.clock import now_ms
+from superai_server.contrib.sqlite.storage import SqliteStorage
+from superai_server.permissions import Permission
+from superai_server.sessions import COOKIE, Sessions, load_session_key
+from superai_server.storage import Role
 
 from ._serving import TESTER, free_port, with_password
 
@@ -38,7 +38,7 @@ async def test_oidc_sign_in_and_provider_management(tmp_path: Path) -> None:
     base, issuer = f"http://127.0.0.1:{port}", f"http://127.0.0.1:{identity_port}/dex"
     directory = tmp_path / "server"
     directory.mkdir()
-    storage = SqliteStorage(directory / "bcs.sqlite3", retention_days=30)
+    storage = SqliteStorage(directory / "superai-server.sqlite3", retention_days=30)
     await storage.start()
     await with_password(storage, *TESTER)
     reader = Role(
@@ -70,7 +70,7 @@ async def test_oidc_sign_in_and_provider_management(tmp_path: Path) -> None:
     await storage.save_role(reader)
     await storage.save_role(reviewer)
     await storage.set_default_role(reader.id)
-    name = "bcs-oidc-test-" + uuid4().hex
+    name = "superai-server-oidc-test-" + uuid4().hex
     container = None
     with (tmp_path / "server.log").open("w") as log:
         server = await asyncio.to_thread(
@@ -78,7 +78,7 @@ async def test_oidc_sign_in_and_provider_management(tmp_path: Path) -> None:
             [
                 sys.executable,
                 "-c",
-                "import sys,uvicorn; from pathlib import Path; from bazaar_compute_server.app import create_app; from bazaar_compute_server.config import ServerConfiguration; uvicorn.run(create_app(ServerConfiguration(listen=sys.argv[1]),Path(sys.argv[2])),host='127.0.0.1',port=int(sys.argv[3]),log_level='warning',access_log=False)",
+                "import sys,uvicorn; from pathlib import Path; from superai_server.app import create_app; from superai_server.config import ServerConfiguration; uvicorn.run(create_app(ServerConfiguration(listen=sys.argv[1]),Path(sys.argv[2])),host='127.0.0.1',port=int(sys.argv[3]),log_level='warning',access_log=False)",
                 f"127.0.0.1:{port}",
                 str(directory),
                 str(port),
@@ -128,7 +128,7 @@ async def test_oidc_sign_in_and_provider_management(tmp_path: Path) -> None:
                     "oauth2": {"skipApprovalScreen": True},
                     "staticClients": [
                         {
-                            "id": "bcs-browser",
+                            "id": "superai-server-browser",
                             "secret": "isolated-browser-secret",
                             "name": "BCS",
                             "redirectURIs": [callback],
@@ -196,13 +196,13 @@ async def test_oidc_sign_in_and_provider_management(tmp_path: Path) -> None:
                         "button", name="Choose image", exact=True
                     ).click()
                 await (await chooser.value).set_files(
-                    Path(
-                        "src/bazaar_compute_server/resources/static/apple-touch-icon.png"
-                    )
+                    Path("src/superai_server/resources/static/apple-touch-icon.png")
                 )
                 await expect(page.locator(".provider-logo img")).to_be_visible()
                 await page.get_by_label("Issuer URL", exact=True).fill(issuer)
-                await page.get_by_label("Client ID", exact=True).fill("bcs-browser")
+                await page.get_by_label("Client ID", exact=True).fill(
+                    "superai-server-browser"
+                )
                 await page.get_by_label("Client secret", exact=True).fill(
                     "isolated-browser-secret"
                 )
@@ -366,7 +366,7 @@ async def test_oidc_sign_in_and_provider_management(tmp_path: Path) -> None:
                 )
                 assert not (await storage.list_oidc_providers())[0].logo_url
                 await page.get_by_label("Logo", exact=True).set_input_files(
-                    Path("src/bazaar_compute_server/resources/static/icon-192.png")
+                    Path("src/superai_server/resources/static/icon-192.png")
                 )
                 await page.get_by_role("button", name="Save", exact=True).click()
                 await expect(page.locator("#main")).not_to_have_attribute(

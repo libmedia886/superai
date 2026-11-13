@@ -10,20 +10,20 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 
-import bazaar_compute_node.contrib.telegram.api as telegram_api_module
-from bazaar_compute_node.app.attachments import AttachmentMaterializer
-from bazaar_compute_node.contrib.telegram.api import TelegramBotApi
-from bazaar_compute_node.contrib.telegram.approval import TelegramApprovalChannel
-from bazaar_compute_node.contrib.telegram.identity import TelegramThreadIdentity
-from bazaar_compute_node.core.actor import Thread
-from bazaar_compute_node.core.channel import ChannelApprovalRequest, ChannelContext
-from bazaar_compute_node.core.models import (
+import superai_node.contrib.telegram.api as telegram_api_module
+from superai_node.app.attachments import AttachmentMaterializer
+from superai_node.contrib.telegram.api import TelegramBotApi
+from superai_node.contrib.telegram.approval import TelegramApprovalChannel
+from superai_node.contrib.telegram.identity import TelegramThreadIdentity
+from superai_node.core.actor import Thread
+from superai_node.core.channel import ChannelApprovalRequest, ChannelContext
+from superai_node.core.models import (
     ApprovalDecision,
     ApprovalRequest,
     ApprovalResult,
     ChannelTargetKind,
 )
-from bazaar_compute_node.i18n import SIMPLIFIED_CHINESE, create_translator
+from superai_node.i18n import SIMPLIFIED_CHINESE, create_translator
 
 TEST_BOT_ID = 1_000_000_001
 TEST_CHAT_ID = 1_000_000_002
@@ -98,7 +98,7 @@ def _request(
 def _callback(*, query_id: str, token: str, sender_id: int) -> dict[str, object]:
     return {
         "id": query_id,
-        "data": f"bcn:approve:{token}",
+        "data": f"superai:approve:{token}",
         "from": {"id": sender_id},
         "message": {
             "message_id": 42,

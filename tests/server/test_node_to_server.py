@@ -6,11 +6,11 @@ from pathlib import Path
 import aiosqlite
 import pytest
 
-from bazaar_compute_node.contrib.server.audit import ServerAudit
-from bazaar_compute_node.core.audit import AuditEvent
-from bazaar_compute_node.core.correlation import CorrelationContext
-from bazaar_compute_node.core.lifecycle import TimeoutBudget
-from bazaar_compute_node.core.models import RuntimeEventState
+from superai_node.contrib.server.audit import ServerAudit
+from superai_node.core.audit import AuditEvent
+from superai_node.core.correlation import CorrelationContext
+from superai_node.core.lifecycle import TimeoutBudget
+from superai_node.core.models import RuntimeEventState
 
 from ._serving import enrol, serving
 
@@ -22,9 +22,9 @@ async def test_a_node_sink_and_the_server_agree_on_the_wire(
     # the two sides share no code; this is the one place they meet
     async with serving(tmp_path) as (base, storage):
         enrolment = await enrol(storage, "kana")
-        monkeypatch.setenv("BCN_SERVER_TOKEN", enrolment.token)
+        monkeypatch.setenv("SUPERAI_SERVER_TOKEN", enrolment.token)
         audit = ServerAudit(
-            {"url": base, "token_env": "BCN_SERVER_TOKEN"},
+            {"url": base, "token_env": "SUPERAI_SERVER_TOKEN"},
             timeout_budget=TimeoutBudget(5, 5, 5, 1),
         )
         try:
@@ -48,7 +48,7 @@ async def test_a_node_sink_and_the_server_agree_on_the_wire(
             assert audit.health["last_error"] is None
             assert await storage.count_events(enrolment.computer.id) == 3
             async with (
-                aiosqlite.connect(tmp_path / "bcs.sqlite3") as connection,
+                aiosqlite.connect(tmp_path / "superai-server.sqlite3") as connection,
                 connection.execute(
                     "SELECT agent_id, thread_id, payload FROM events ORDER BY seq"
                 ) as cursor,

@@ -10,9 +10,9 @@ import aiohttp
 import uvicorn
 from starlette.applications import Starlette
 
-from bazaar_compute_server.app import create_app
-from bazaar_compute_server.config import ServerConfiguration
-from bazaar_compute_server.storage import Enrolment, IStorage
+from superai_server.app import create_app
+from superai_server.config import ServerConfiguration
+from superai_server.storage import Enrolment, IStorage
 
 
 def free_port() -> int:
@@ -25,7 +25,7 @@ def free_port() -> int:
 async def serving(
     data_dir: Path, port: int | None = None
 ) -> AsyncIterator[tuple[str, IStorage]]:
-    """A real server on a loopback port, the way `bcs run` starts one."""
+    """A real server on a loopback port, the way `superai-server run` starts one."""
 
     async with serving_app(data_dir, port) as (base, app):
         yield base, app.state.storage

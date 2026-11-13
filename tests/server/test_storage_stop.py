@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from bazaar_compute_server.contrib.sqlite.storage import SqliteStorage
+from superai_server.contrib.sqlite.storage import SqliteStorage
 
 
 @pytest.mark.asyncio
@@ -17,7 +17,7 @@ async def test_storage_closes_even_when_its_writing_was_cancelled(
     process from exiting."""
 
     before = {thread.ident for thread in threading.enumerate()}
-    storage = SqliteStorage(tmp_path / "bcs.sqlite3", retention_days=1)
+    storage = SqliteStorage(tmp_path / "superai-server.sqlite3", retention_days=1)
     await storage.start()
     # the connections' own threads, not the loop's executor
     started = [

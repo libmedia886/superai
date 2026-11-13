@@ -1,5 +1,5 @@
 [project]
-name = "bazaar-compute-node"
+name = "superai"
 version = "0.2.3"
 description = "Runtime-agnostic computer node daemon for agents and channels."
 readme = "README.md"
@@ -33,34 +33,34 @@ dependencies = [
 Repository = "https://github.com/yuchanns/bazaar-compute-node"
 
 [project.scripts]
-bcn = "bazaar_compute_node.cli:main"
-bcs = "bazaar_compute_server.cli:main"
+superai = "superai_node.cli:main"
+superai-server = "superai_server.cli:main"
 
-[project.entry-points."bazaar_compute_node.runtimes"]
-codex = "bazaar_compute_node.contrib.codex.plugin:builder"
-claudecode = "bazaar_compute_node.contrib.claude.plugin:builder"
+[project.entry-points."superai_node.runtimes"]
+codex = "superai_node.contrib.codex.plugin:builder"
+claudecode = "superai_node.contrib.claude.plugin:builder"
 
-[project.entry-points."bazaar_compute_node.channels"]
-wecom = "bazaar_compute_node.contrib.wecom.plugin:builder"
-telegram = "bazaar_compute_node.contrib.telegram.plugin:builder"
-lark = "bazaar_compute_node.contrib.lark.plugin:builder"
+[project.entry-points."superai_node.channels"]
+wecom = "superai_node.contrib.wecom.plugin:builder"
+telegram = "superai_node.contrib.telegram.plugin:builder"
+lark = "superai_node.contrib.lark.plugin:builder"
 
-[project.entry-points."bazaar_compute_node.storages"]
-sqlite = "bazaar_compute_node.contrib.sqlite.plugin:create_storage"
+[project.entry-points."superai_node.storages"]
+sqlite = "superai_node.contrib.sqlite.plugin:create_storage"
 
-[project.entry-points."bazaar_compute_server.storages"]
-sqlite = "bazaar_compute_server.contrib.sqlite.plugin:create_storage"
+[project.entry-points."superai_server.storages"]
+sqlite = "superai_server.contrib.sqlite.plugin:create_storage"
 
-[project.entry-points."bazaar_compute_node.audits"]
-logging = "bazaar_compute_node.contrib.logging.plugin:create_audit"
-server = "bazaar_compute_node.contrib.server.plugin:create_audit"
+[project.entry-points."superai_node.audits"]
+logging = "superai_node.contrib.logging.plugin:create_audit"
+server = "superai_node.contrib.server.plugin:create_audit"
 
-[project.entry-points."bazaar_compute_node.controls"]
-server = "bazaar_compute_node.contrib.server.plugin:create_control"
+[project.entry-points."superai_node.controls"]
+server = "superai_node.contrib.server.plugin:create_control"
 
 [dependency-groups]
 dev = [
-    "bcn-test-support",
+    "superai-test-support",
     "pyright==1.1.408",
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
@@ -68,7 +68,7 @@ dev = [
 ]
 
 [tool.uv.sources]
-bcn-test-support = { path = "tests/support", editable = true }
+superai-test-support = { path = "tests/support", editable = true }
 
 [tool.pytest.ini_options]
 # anyio arrives with starlette and brings a pytest plugin that fights
@@ -84,4 +84,4 @@ requires = ["uv_build>=0.12.2,<0.13.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-module-name = ["bazaar_compute_node", "bazaar_compute_server"]
+module-name = ["superai_node", "superai_server"]

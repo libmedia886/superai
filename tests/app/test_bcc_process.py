@@ -9,35 +9,35 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from bcn_test_support import TestChannel, TestRuntime
+from superai_test_support import TestChannel, TestRuntime
 
-import bazaar_compute_node.app.agent as agent_module
-import bazaar_compute_node.app.wrapper as wrapper_module
-from bazaar_compute_node import bcc as bcc_module
-from bazaar_compute_node.app.application import NodeApplication
-from bazaar_compute_node.app.config import (
+import superai_node.app.agent as agent_module
+import superai_node.app.wrapper as wrapper_module
+from superai_node import bcc as bcc_module
+from superai_node.app.application import NodeApplication
+from superai_node.app.config import (
     AgentConfiguration,
     ChannelConfiguration,
     NodeConfiguration,
     RuntimeConfiguration,
 )
-from bazaar_compute_node.app.registry import (
+from superai_node.app.registry import (
     AdapterRegistry,
     AgentAdapterFactories,
 )
-from bazaar_compute_node.app.transport import LocalCommandClient
-from bazaar_compute_node.contrib.sqlite import SqliteDatabase
-from bazaar_compute_node.core.actor import Mode
-from bazaar_compute_node.core.channel import ChannelContext, ChannelIdentity, IChannel
-from bazaar_compute_node.core.lifecycle import TimeoutBudget
-from bazaar_compute_node.core.models import (
+from superai_node.app.transport import LocalCommandClient
+from superai_node.contrib.sqlite import SqliteDatabase
+from superai_node.core.actor import Mode
+from superai_node.core.channel import ChannelContext, ChannelIdentity, IChannel
+from superai_node.core.lifecycle import TimeoutBudget
+from superai_node.core.models import (
     Message,
     MessageDirection,
     RuntimeSession,
     SenderIdentity,
 )
-from bazaar_compute_node.core.orchestration.commands import OutboundAttachmentResolver
-from bazaar_compute_node.core.runtime import IRuntime, RuntimeCommandContext
+from superai_node.core.orchestration.commands import OutboundAttachmentResolver
+from superai_node.core.runtime import IRuntime, RuntimeCommandContext
 
 AGENT_A_ID = "0198d4e6-29c5-7465-b74b-88db31f0c118"
 AGENT_B_ID = "0198d4e6-29c5-7465-b74b-88db31f0c119"
@@ -107,7 +107,7 @@ def _make_node(
         configuration=configuration,
         shared_factories=AdapterRegistry().load_shared(storage="sqlite", audit="test"),
         registry=_RoutingRegistry(channels, runtimes),
-        endpoint_path=tmp_path / "bcn.sock",
+        endpoint_path=tmp_path / "superai.sock",
         timeout_budget=TimeoutBudget(
             startup_seconds=2,
             provider_call_seconds=2,
@@ -182,7 +182,7 @@ async def test_agents_install_isolated_wrappers_and_runtime_paths(
     wrapper_name = "bcc.cmd" if os.name == "nt" else "bcc"
     try:
         wrapper_directories = {
-            agent_id: tmp_path / "workspaces" / agent_id / ".bcn" / "bin"
+            agent_id: tmp_path / "workspaces" / agent_id / ".superai" / "bin"
             for agent_id in AGENT_NAMES
         }
         for agent_id, application in node.agents.items():
@@ -195,7 +195,7 @@ async def test_agents_install_isolated_wrappers_and_runtime_paths(
             wrapper_path = wrapper_directory / wrapper_name
             assert application._wrapper_path == wrapper_path
             assert wrapper_path.is_file()
-            assert environment["BCN_AGENT_ID"] == agent_id
+            assert environment["SUPERAI_AGENT_ID"] == agent_id
             assert environment["PATH"].split(os.pathsep)[0] == str(wrapper_directory)
             assert all(
                 str(other_directory) not in environment["PATH"]
@@ -228,19 +228,19 @@ def test_install_bcc_wrapper_renders_windows_variants(
         assert command_path.name == "bcc.cmd"
         assert command_path.read_text(encoding="utf-8").splitlines() == [
             "@echo off",
-            'set "BCN_AGENT_ID=agent-a"',
-            'set "BCN_AGENT_MODE=session"',
+            'set "SUPERAI_AGENT_ID=agent-a"',
+            'set "SUPERAI_AGENT_MODE=session"',
             'set "PYTHONIOENCODING=utf-8"',
             'set "PYTHONUTF8=1"',
             'set "LANG=C.UTF-8"',
             'set "LC_ALL=C.UTF-8"',
             "chcp 65001 >NUL 2>NUL",
-            '"C:\\Python\\python.exe" -m bazaar_compute_node.bcc %*',
+            '"C:\\Python\\python.exe" -m superai_node.bcc %*',
         ]
         assert (tmp_path / "bcc.ps1").read_text(encoding="utf-8").splitlines() == [
             "$ErrorActionPreference = 'Stop'",
-            "$env:BCN_AGENT_ID = 'agent-a'",
-            "$env:BCN_AGENT_MODE = 'session'",
+            "$env:SUPERAI_AGENT_ID = 'agent-a'",
+            "$env:SUPERAI_AGENT_MODE = 'session'",
             "$utf8NoBom = [System.Text.UTF8Encoding]::new($false)",
             "[Console]::OutputEncoding = $utf8NoBom",
             "$OutputEncoding = $utf8NoBom",
@@ -250,9 +250,9 @@ def test_install_bcc_wrapper_renders_windows_variants(
             "$env:LC_ALL = 'C.UTF-8'",
             '$python = "C:\\Python\\python.exe"',
             "if ($MyInvocation.ExpectingInput) {",
-            "    $input | & $python -m bazaar_compute_node.bcc @args",
+            "    $input | & $python -m superai_node.bcc @args",
             "} else {",
-            "    & $python -m bazaar_compute_node.bcc @args",
+            "    & $python -m superai_node.bcc @args",
             "}",
             "exit $LASTEXITCODE",
         ]
@@ -290,7 +290,7 @@ async def test_runtime_error_redaction_uses_injected_token_values(
         detail = application._redact_session_secrets(
             "session-agent-a",
             "failure "
-            f"{environment['BCN_COMMAND_CAPABILITY']} "
+            f"{environment['SUPERAI_COMMAND_CAPABILITY']} "
             "service-token-value ordinary-value",
         )
 
@@ -327,15 +327,15 @@ async def test_agent_capability_and_outbound_identity_are_scoped(
             "command": "check",
             "actor_id": runtime_session.actor.id,
             "runtime_session_id": runtime_session.id,
-            "session_capability": environment["BCN_COMMAND_CAPABILITY"],
+            "session_capability": environment["SUPERAI_COMMAND_CAPABILITY"],
         }
 
         for name in (
-            "BCN_AGENT_ID",
-            "BCN_ENDPOINT",
-            "BCN_ACTOR_ID",
-            "BCN_RUNTIME_SESSION_ID",
-            "BCN_COMMAND_CAPABILITY",
+            "SUPERAI_AGENT_ID",
+            "SUPERAI_ENDPOINT",
+            "SUPERAI_ACTOR_ID",
+            "SUPERAI_RUNTIME_SESSION_ID",
+            "SUPERAI_COMMAND_CAPABILITY",
         ):
             monkeypatch.setenv(name, environment[name])
 
@@ -414,7 +414,7 @@ async def test_agent_capability_and_outbound_identity_are_scoped(
         assert identity["agent_id"] == AGENT_A_ID
         assert identity["sender"] == AGENT_NAMES[AGENT_A_ID]
 
-        monkeypatch.setenv("BCN_AGENT_ID", AGENT_B_ID)
+        monkeypatch.setenv("SUPERAI_AGENT_ID", AGENT_B_ID)
         forged_response = await LocalCommandClient.request(node.endpoint, request)
         assert forged_response["ok"] is False
         assert forged_response["code"] in {

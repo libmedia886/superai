@@ -1,5 +1,5 @@
-from bazaar_compute_node.core.inbox import InboxTargetPage
-from bazaar_compute_node.core.models import ChannelTargetKind, InboxTargetSummary
+from superai_node.core.inbox import InboxTargetPage
+from superai_node.core.models import ChannelTargetKind, InboxTargetSummary
 
 
 def _target() -> InboxTargetSummary:

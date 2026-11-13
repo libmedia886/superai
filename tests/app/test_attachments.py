@@ -6,8 +6,8 @@ from uuid import uuid7
 
 import pytest
 
-from bazaar_compute_node.app import attachments as attachment_module
-from bazaar_compute_node.app.attachments import AttachmentMaterializer
+from superai_node.app import attachments as attachment_module
+from superai_node.app.attachments import AttachmentMaterializer
 
 
 @pytest.mark.asyncio

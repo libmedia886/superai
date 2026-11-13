@@ -12,46 +12,46 @@ from typing import cast
 import aiohttp
 import pytest
 
-from bazaar_compute_node.app.attachments import AttachmentMaterializer
-from bazaar_compute_node.contrib.lark import api as lark_api
-from bazaar_compute_node.contrib.lark import channel as lark_channel
-from bazaar_compute_node.contrib.lark.api import ClientConfig, LarkApi
-from bazaar_compute_node.contrib.lark.approval import (
+from superai_node.app.attachments import AttachmentMaterializer
+from superai_node.contrib.lark import api as lark_api
+from superai_node.contrib.lark import channel as lark_channel
+from superai_node.contrib.lark.api import ClientConfig, LarkApi
+from superai_node.contrib.lark.approval import (
     LarkApprovalChannel,
     _approval_card_content,
     _parse_card_callback,
 )
-from bazaar_compute_node.contrib.lark.attachments import (
+from superai_node.contrib.lark.attachments import (
     _RESOURCE_DOWNLOAD_TYPES,
     LarkMention,
     LarkResourceDescriptor,
     _resolve_resource_name,
     project_lark_content,
 )
-from bazaar_compute_node.contrib.lark.channel import (
+from superai_node.contrib.lark.channel import (
     LarkChannel,
     _normalize_parent_message,
 )
-from bazaar_compute_node.contrib.lark.frame import (
+from superai_node.contrib.lark.frame import (
     Frame,
     FrameDecodeError,
     Header,
     decode_frame,
     encode_frame,
 )
-from bazaar_compute_node.contrib.lark.identity import (
+from superai_node.contrib.lark.identity import (
     LarkBotIdentity,
     LarkThreadIdentity,
     parse_bot_info,
     parse_provider_thread_id,
 )
-from bazaar_compute_node.contrib.lark.outbound import (
+from superai_node.contrib.lark.outbound import (
     markdown_post_content,
     prepare_attachments,
     split_markdown,
 )
-from bazaar_compute_node.contrib.lark.plugin import LarkBuilder
-from bazaar_compute_node.contrib.lark.transport import (
+from superai_node.contrib.lark.plugin import LarkBuilder
+from superai_node.contrib.lark.transport import (
     DATA_METHOD,
     HEADER_MESSAGE_ID,
     HEADER_SEQ,
@@ -61,15 +61,15 @@ from bazaar_compute_node.contrib.lark.transport import (
     LarkAck,
     LarkTransport,
 )
-from bazaar_compute_node.core.actor import Thread
-from bazaar_compute_node.core.channel import (
+from superai_node.core.actor import Thread
+from superai_node.core.channel import (
     ChannelApprovalRequest,
     ChannelContext,
     ChannelDeliveryReceipt,
     ChannelIdentity,
     ChannelSendRequest,
 )
-from bazaar_compute_node.core.models import (
+from superai_node.core.models import (
     ApprovalDecision,
     ApprovalRequest,
     ChannelTargetKind,
@@ -83,9 +83,9 @@ from bazaar_compute_node.core.models import (
     ToolCallStarted,
     TurnCompleted,
 )
-from bazaar_compute_node.core.outcomes import ProviderCallResult, ProviderCallStatus
-from bazaar_compute_node.core.timerwheel import TimerWheel
-from bazaar_compute_node.i18n import ENGLISH, SIMPLIFIED_CHINESE, create_translator
+from superai_node.core.outcomes import ProviderCallResult, ProviderCallStatus
+from superai_node.core.timerwheel import TimerWheel
+from superai_node.i18n import ENGLISH, SIMPLIFIED_CHINESE, create_translator
 
 
 def _context(
@@ -268,7 +268,7 @@ async def test_lark_channel_send_rechecks_transport_after_send_lock(
         )
 
     monkeypatch.setattr(
-        "bazaar_compute_node.contrib.lark.channel.send_outbound",
+        "superai_node.contrib.lark.channel.send_outbound",
         fake_send_outbound,
     )
     await channel._send_lock.acquire()
@@ -456,16 +456,16 @@ def test_lark_builder_rejects_missing_or_invalid_configuration(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("BCN_TEST_LARK_SECRET", raising=False)
+    monkeypatch.delenv("SUPERAI_TEST_LARK_SECRET", raising=False)
     with pytest.raises(ValueError, match="app_id is required"):
         LarkBuilder().build(
-            _context(tmp_path, {"app_secret_env": "BCN_TEST_LARK_SECRET"})
+            _context(tmp_path, {"app_secret_env": "SUPERAI_TEST_LARK_SECRET"})
         )
     with pytest.raises(ValueError, match="credential environment is missing"):
         LarkBuilder().build(
             _context(
                 tmp_path,
-                {"app_id": "cli_app", "app_secret_env": "BCN_TEST_LARK_SECRET"},
+                {"app_id": "cli_app", "app_secret_env": "SUPERAI_TEST_LARK_SECRET"},
             )
         )
     with pytest.raises(ValueError, match="must be feishu or lark"):
@@ -474,18 +474,18 @@ def test_lark_builder_rejects_missing_or_invalid_configuration(
                 tmp_path,
                 {
                     "app_id": "cli_app",
-                    "app_secret_env": "BCN_TEST_LARK_SECRET",
+                    "app_secret_env": "SUPERAI_TEST_LARK_SECRET",
                     "region": "unknown",
                 },
             )
         )
 
-    monkeypatch.setenv("BCN_TEST_LARK_SECRET", "secret")
+    monkeypatch.setenv("SUPERAI_TEST_LARK_SECRET", "secret")
     timer_wheel = TimerWheel()
     channel = LarkBuilder().build(
         _context(
             tmp_path,
-            {"app_id": "cli_app", "app_secret_env": "BCN_TEST_LARK_SECRET"},
+            {"app_id": "cli_app", "app_secret_env": "SUPERAI_TEST_LARK_SECRET"},
             timer_wheel=timer_wheel,
         )
     )

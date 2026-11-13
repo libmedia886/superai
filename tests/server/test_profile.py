@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from bazaar_compute_node.core.paths import resolve_workspace_dir
-from bazaar_compute_server.activity import PAGE_EVENTS
-from bazaar_compute_server.protocol import Event
+from superai_node.core.paths import resolve_workspace_dir
+from superai_server.activity import PAGE_EVENTS
+from superai_server.protocol import Event
 
 from ._node import AGENT_ID, node_reporting_to
 from ._serving import enrol, serving_app, signed_in
@@ -28,7 +28,7 @@ async def test_an_agent_is_seen_changed_and_let_go_from_its_page(
     async with serving_app(tmp_path) as (base, app):
         storage = app.state.storage
         enrolment = await enrol(storage, "kana")
-        monkeypatch.setenv("BCN_SERVER_TOKEN", enrolment.token)
+        monkeypatch.setenv("SUPERAI_SERVER_TOKEN", enrolment.token)
         node = await node_reporting_to(base, tmp_path)
         try:
             async with asyncio.timeout(10):
@@ -216,7 +216,7 @@ async def test_an_agent_is_seen_changed_and_let_go_from_its_page(
                 # the value typed for the environment is kept by the node,
                 # and the page shows it set without showing it
                 assert renamed.runtimes[0].env == {
-                    "API_KEY": f"BCN_{AGENT_ID.replace('-', '_').upper()}_RUNTIME0_TEST_ENV_API_KEY"
+                    "API_KEY": f"SUPERAI_{AGENT_ID.replace('-', '_').upper()}_RUNTIME0_TEST_ENV_API_KEY"
                 }
                 assert "value-1" not in saved
                 initial = json.loads(

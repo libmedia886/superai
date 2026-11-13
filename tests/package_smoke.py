@@ -4,9 +4,9 @@ import subprocess
 import sys
 from importlib.metadata import entry_points, version
 
-from bazaar_compute_node import __version__
-from bazaar_compute_node.core.instruction import DeveloperInstructionContext
-from bazaar_compute_node.i18n import ENGLISH, SIMPLIFIED_CHINESE, create_translator
+from superai_node import __version__
+from superai_node.core.instruction import DeveloperInstructionContext
+from superai_node.i18n import ENGLISH, SIMPLIFIED_CHINESE, create_translator
 
 
 def main() -> None:
@@ -14,15 +14,15 @@ def main() -> None:
         raise SystemExit("usage: package_smoke.py VERSION")
 
     expected_version = sys.argv[1]
-    distribution_version = version("bazaar-compute-node")
+    distribution_version = version("superai")
     result = subprocess.run(
-        ["bcn", "--version"],
+        ["superai", "--version"],
         capture_output=True,
         check=True,
         text=True,
     )
     server_result = subprocess.run(
-        ["bcs", "--version"],
+        ["superai-server", "--version"],
         capture_output=True,
         check=True,
         text=True,
@@ -34,10 +34,12 @@ def main() -> None:
         )
     if __version__ != expected_version:
         raise SystemExit(f"runtime version {__version__!r} != {expected_version!r}")
-    if result.stdout.strip() != f"bcn {expected_version}":
-        raise SystemExit(f"unexpected bcn --version output: {result.stdout!r}")
-    if server_result.stdout.strip() != f"bcs {expected_version}":
-        raise SystemExit(f"unexpected bcs --version output: {server_result.stdout!r}")
+    if result.stdout.strip() != f"superai {expected_version}":
+        raise SystemExit(f"unexpected superai --version output: {result.stdout!r}")
+    if server_result.stdout.strip() != f"superai-server {expected_version}":
+        raise SystemExit(
+            f"unexpected superai-server --version output: {server_result.stdout!r}"
+        )
 
     instructions = DeveloperInstructionContext(
         agent_name="Package Smoke Agent",
@@ -48,7 +50,7 @@ def main() -> None:
         workspace="/workspace",
     ).render()
     if not instructions.startswith(
-        "You're Package Smoke Bot, A.K.A Package Smoke Agent, an AI agent in bcn "
+        "You're Package Smoke Bot, A.K.A Package Smoke Agent, an AI agent in superai "
     ):
         raise SystemExit("developer instruction resource did not render")
     if (
@@ -65,7 +67,7 @@ def main() -> None:
     lark_entry_point = next(
         (
             item
-            for item in entry_points(group="bazaar_compute_node.channels")
+            for item in entry_points(group="superai_node.channels")
             if item.name == "lark"
         ),
         None,

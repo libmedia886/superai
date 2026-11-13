@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from bazaar_compute_server.contrib.sqlite.storage import SqliteStorage
-from bazaar_compute_server.refs import Refs
+from superai_server.contrib.sqlite.storage import SqliteStorage
+from superai_server.refs import Refs
 
 
 @pytest.mark.asyncio
@@ -13,7 +13,7 @@ async def test_a_value_keeps_its_number(tmp_path: Path) -> None:
     """A value gets one short number, the same every time it is asked for
     and after the server has been restarted; a batch keeps its order."""
 
-    path = tmp_path / "bcs.sqlite3"
+    path = tmp_path / "superai-server.sqlite3"
     storage = SqliteStorage(path, retention_days=30)
     await storage.start()
     try:

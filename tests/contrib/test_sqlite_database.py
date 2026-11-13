@@ -9,30 +9,30 @@ from typing import cast
 
 import aiosqlite
 import pytest
-from bcn_test_support import RecordingAudit, recorder_for
+from superai_test_support import RecordingAudit, recorder_for
 
-from bazaar_compute_node.contrib.sqlite import (
+from superai_node.contrib.sqlite import (
     MigrationChecksumError,
     SqliteDatabase,
 )
-from bazaar_compute_node.contrib.sqlite.codec import (
+from superai_node.contrib.sqlite.codec import (
     inbound_attachment_from_row,
     message_from_row,
     validate_message_input,
 )
-from bazaar_compute_node.contrib.sqlite.migrations import (
+from superai_node.contrib.sqlite.migrations import (
     MESSAGE_UNIFICATION_MIGRATION,
     MIGRATIONS,
     SCHEMA_MIGRATION,
     STORAGE_ACCESS_MIGRATION,
 )
-from bazaar_compute_node.core.command import (
+from superai_node.core.command import (
     MessageDraft,
     MessageSendFreshnessHold,
     OutboundFreshnessPass,
 )
-from bazaar_compute_node.core.concurrency import ThreadLockRegistry
-from bazaar_compute_node.core.models import (
+from superai_node.core.concurrency import ThreadLockRegistry
+from superai_node.core.models import (
     ChannelSession,
     ChannelTargetKind,
     ConsumerCursor,
@@ -50,11 +50,11 @@ from bazaar_compute_node.core.models import (
     SystemMessageKind,
     Thread,
 )
-from bazaar_compute_node.core.orchestration.reminder import ReminderScheduler
-from bazaar_compute_node.core.paths import resolve_data_dir, resolve_workspace_dir
-from bazaar_compute_node.core.reminder import render_reminder_fire_body
-from bazaar_compute_node.core.storage import IStorage, ThreadNotFoundError
-from bazaar_compute_node.core.timerwheel import TimerWheel
+from superai_node.core.orchestration.reminder import ReminderScheduler
+from superai_node.core.paths import resolve_data_dir, resolve_workspace_dir
+from superai_node.core.reminder import render_reminder_fire_body
+from superai_node.core.storage import IStorage, ThreadNotFoundError
+from superai_node.core.timerwheel import TimerWheel
 
 
 @pytest.mark.asyncio
@@ -71,7 +71,7 @@ async def test_sqlite_check_drains_every_thread_or_none_of_them() -> None:
             updated_at_ms=1,
         )
         thread = Thread(
-            id="bcn-1",
+            id="superai-1",
             channel_session_id=channel_session.id,
             workspace_id="agent-1",
             created_at_ms=1,
@@ -99,7 +99,7 @@ async def test_sqlite_check_drains_every_thread_or_none_of_them() -> None:
 
         with pytest.raises(ThreadNotFoundError):
             await scope.check_messages(
-                (thread.id, "bcn-missing"),
+                (thread.id, "superai-missing"),
                 checked_at_ms=3,
             )
 
@@ -127,8 +127,8 @@ async def test_sqlite_persists_outbound_and_finalizes_once() -> None:
             updated_at_ms=1,
             review=Review.APPROVED,
         )
-        bcn_session = Thread(
-            id="bcn-1",
+        superai_session = Thread(
+            id="superai-1",
             channel_session_id=channel_session.id,
             workspace_id="agent-1",
             created_at_ms=1,
@@ -138,7 +138,7 @@ async def test_sqlite_persists_outbound_and_finalizes_once() -> None:
             direction=MessageDirection.OUTBOUND,
             seq=0,
             message_id="outbound-1",
-            thread_id=bcn_session.id,
+            thread_id=superai_session.id,
             channel_session_id=channel_session.id,
             target="dm:channel-1",
             body="hello",
@@ -148,14 +148,14 @@ async def test_sqlite_persists_outbound_and_finalizes_once() -> None:
         )
 
         await scope.save_channel_session(channel_session)
-        await scope.save_thread(bcn_session)
+        await scope.save_thread(superai_session)
         pending = await scope.save_message(pending)
         visible_states = frozenset(
             {OutboundDeliveryState.QUEUED, OutboundDeliveryState.SENT}
         )
         assert (
             await scope.list_messages(
-                bcn_session.id,
+                superai_session.id,
                 delivery_states=visible_states,
             )
             == ()
@@ -192,7 +192,7 @@ async def test_sqlite_persists_outbound_and_finalizes_once() -> None:
             target_kind=ChannelTargetKind.GROUP,
         )
         source_thread = Thread(
-            id="bcn-source",
+            id="superai-source",
             channel_session_id=source_channel.id,
             workspace_id="agent-1",
             created_at_ms=10,
@@ -223,7 +223,7 @@ async def test_sqlite_persists_outbound_and_finalizes_once() -> None:
             review=Review.APPROVED,
         )
         target_thread = Thread(
-            id="bcn-target",
+            id="superai-target",
             channel_session_id=target_channel.id,
             workspace_id="agent-1",
             created_at_ms=10,
@@ -366,8 +366,8 @@ async def test_sqlite_persists_sender_identity_and_kind(
             created_at_ms=1,
             updated_at_ms=1,
         )
-        bcn_session = Thread(
-            id="bcn-1",
+        superai_session = Thread(
+            id="superai-1",
             channel_session_id=channel_session.id,
             workspace_id="agent-1",
             created_at_ms=1,
@@ -377,7 +377,7 @@ async def test_sqlite_persists_sender_identity_and_kind(
             direction=MessageDirection.INBOUND,
             seq=0,
             message_id="message-1",
-            thread_id=bcn_session.id,
+            thread_id=superai_session.id,
             channel_session_id=channel_session.id,
             channel="telegram",
             provider_thread_id=channel_session.provider_thread_id,
@@ -391,7 +391,7 @@ async def test_sqlite_persists_sender_identity_and_kind(
         )
 
         await scope.save_channel_session(channel_session)
-        await scope.save_thread(bcn_session)
+        await scope.save_thread(superai_session)
         live = await scope.save_message(message)
         persisted = await scope.find_message(
             *message.inbound_identity(),
@@ -420,8 +420,8 @@ async def test_sqlite_preserves_wecom_sender_without_display_name() -> None:
             created_at_ms=1,
             updated_at_ms=1,
         )
-        bcn_session = Thread(
-            id="bcn-1",
+        superai_session = Thread(
+            id="superai-1",
             channel_session_id=channel_session.id,
             workspace_id="agent-1",
             created_at_ms=1,
@@ -431,7 +431,7 @@ async def test_sqlite_preserves_wecom_sender_without_display_name() -> None:
             direction=MessageDirection.INBOUND,
             seq=0,
             message_id="message-1",
-            thread_id=bcn_session.id,
+            thread_id=superai_session.id,
             channel_session_id=channel_session.id,
             channel="wecom",
             provider_thread_id=channel_session.provider_thread_id,
@@ -444,7 +444,7 @@ async def test_sqlite_preserves_wecom_sender_without_display_name() -> None:
         )
 
         await scope.save_channel_session(channel_session)
-        await scope.save_thread(bcn_session)
+        await scope.save_thread(superai_session)
         await scope.save_message(message)
         persisted = await scope.find_message(
             *message.inbound_identity(),
@@ -472,8 +472,8 @@ async def test_sqlite_atomically_materializes_reminder_system_message() -> None:
             updated_at_ms=1,
             review=Review.APPROVED,
         )
-        bcn_session = Thread(
-            id="bcn-1",
+        superai_session = Thread(
+            id="superai-1",
             channel_session_id=channel_session.id,
             workspace_id="agent-1",
             created_at_ms=1,
@@ -483,7 +483,7 @@ async def test_sqlite_atomically_materializes_reminder_system_message() -> None:
             direction=MessageDirection.INBOUND,
             seq=0,
             message_id="018f0000-0000-7000-8000-000000000002",
-            thread_id=bcn_session.id,
+            thread_id=superai_session.id,
             channel_session_id=channel_session.id,
             channel=channel_session.channel,
             provider_thread_id=channel_session.provider_thread_id,
@@ -496,7 +496,7 @@ async def test_sqlite_atomically_materializes_reminder_system_message() -> None:
         )
         reminder = Reminder(
             reminder_id="018f0000-0000-7000-8000-000000000001",
-            owner_thread_id=bcn_session.id,
+            owner_thread_id=superai_session.id,
             anchor_message_id=anchor.message_id,
             title="Review the pull request",
             state=ReminderState.SCHEDULED,
@@ -510,11 +510,11 @@ async def test_sqlite_atomically_materializes_reminder_system_message() -> None:
         )
 
         await scope.save_channel_session(channel_session)
-        await scope.save_thread(bcn_session)
+        await scope.save_thread(superai_session)
         anchor = await scope.save_message(anchor)
         await scope.save_consumer_cursor(
             ConsumerCursor(
-                thread_id=bcn_session.id,
+                thread_id=superai_session.id,
                 delivered_through_seq=anchor.seq,
                 updated_at_ms=1_100,
             )
@@ -531,7 +531,7 @@ async def test_sqlite_atomically_materializes_reminder_system_message() -> None:
                 direction=MessageDirection.INBOUND,
                 seq=0,
                 message_id=message_id,
-                thread_id=bcn_session.id,
+                thread_id=superai_session.id,
                 channel_session_id=channel_session.id,
                 channel=channel_session.channel,
                 provider_thread_id=channel_session.provider_thread_id,
@@ -555,7 +555,8 @@ async def test_sqlite_atomically_materializes_reminder_system_message() -> None:
                 system_message(anchor.message_id),
             )
         assert (
-            await scope.get_reminder(bcn_session.id, reminder.reminder_id) == reminder
+            await scope.get_reminder(superai_session.id, reminder.reminder_id)
+            == reminder
         )
 
         materialized = await storage.materialize_owned_reminder_message(
@@ -568,11 +569,11 @@ async def test_sqlite_atomically_materializes_reminder_system_message() -> None:
         owners = await storage.list_unread_message_owners()
         catalog = await scope.list_inbox_targets(review=None)
         freshness = await scope.check_outbound_freshness(
-            bcn_session.id,
+            superai_session.id,
             snapshot_seq=anchor.seq,
             payload=MessageDraft(
                 target=anchor.target,
-                target_id=bcn_session.id,
+                target_id=superai_session.id,
                 body="acknowledged",
                 attachments=(),
                 reply_to_message_id=None,
@@ -586,7 +587,7 @@ async def test_sqlite_atomically_materializes_reminder_system_message() -> None:
             limit=10,
         )
         checked = await scope.check_messages(
-            (bcn_session.id,),
+            (superai_session.id,),
             checked_at_ms=2_300,
         )
 
@@ -595,10 +596,12 @@ async def test_sqlite_atomically_materializes_reminder_system_message() -> None:
         assert persisted is not None
         assert persisted.sender == SenderIdentity(id="system", name="system")
         assert persisted.system_message_kind is SystemMessageKind.REMINDER
-        assert await scope.get_reminder(bcn_session.id, reminder.reminder_id) == fired
+        assert (
+            await scope.get_reminder(superai_session.id, reminder.reminder_id) == fired
+        )
         assert len(owners) == 1
         assert owners[0].agent_id == "agent-1"
-        assert owners[0].owner_thread_id == bcn_session.id
+        assert owners[0].owner_thread_id == superai_session.id
         assert owners[0].trigger_message == materialized
         assert catalog.targets[0].pending_count == 1
         assert catalog.targets[0].latest_message_id == materialized.message_id
@@ -750,7 +753,7 @@ async def test_sqlite_bootstrap_binds_agent_scope_without_node_state() -> None:
 async def test_v19_migrates_pending_reminders_and_v21_drops_handoffs() -> None:
     data_dir = resolve_data_dir()
     data_dir.mkdir()
-    database_path = data_dir / "bcn.sqlite3"
+    database_path = data_dir / "superai.sqlite3"
     one_time_id = "018f0000-0000-7000-8000-000000000001"
     recurring_id = "018f0000-0000-7000-8000-000000000002"
     read_id = "018f0000-0000-7000-8000-000000000003"
@@ -978,7 +981,7 @@ async def test_sqlite_migration_checksum_mismatch_fails_closed() -> None:
     await database.start(timeout=2)
     await database.stop(timeout=2)
 
-    async with aiosqlite.connect(data_dir / "bcn.sqlite3") as connection:
+    async with aiosqlite.connect(data_dir / "superai.sqlite3") as connection:
         await connection.execute(
             "UPDATE schema_migrations SET checksum = ? WHERE version = ?",
             ("tampered", 1),
@@ -995,7 +998,7 @@ async def test_sqlite_migration_checksum_mismatch_fails_closed() -> None:
 async def test_sqlite_applies_new_migration_to_existing_v1_database() -> None:
     data_dir = resolve_data_dir()
     data_dir.mkdir()
-    database_path = data_dir / "bcn.sqlite3"
+    database_path = data_dir / "superai.sqlite3"
 
     async with aiosqlite.connect(database_path) as connection:
         for statement in SCHEMA_MIGRATION.statements:
@@ -1059,7 +1062,7 @@ async def test_sqlite_applies_new_migration_to_existing_v1_database() -> None:
 async def test_sqlite_v26_removes_handoff_messages_and_keeps_the_rest() -> None:
     data_dir = resolve_data_dir()
     data_dir.mkdir()
-    database_path = data_dir / "bcn.sqlite3"
+    database_path = data_dir / "superai.sqlite3"
 
     async with aiosqlite.connect(database_path) as connection:
         connection.row_factory = aiosqlite.Row
@@ -1226,7 +1229,7 @@ async def test_sqlite_v26_removes_handoff_messages_and_keeps_the_rest() -> None:
 async def test_sqlite_v27_names_a_dm_by_the_peer_it_belongs_to() -> None:
     data_dir = resolve_data_dir()
     data_dir.mkdir()
-    database_path = data_dir / "bcn.sqlite3"
+    database_path = data_dir / "superai.sqlite3"
 
     async with aiosqlite.connect(database_path) as connection:
         connection.row_factory = aiosqlite.Row
@@ -1383,7 +1386,7 @@ async def test_sqlite_v13_migration_preserves_durable_session_and_attempt_facts(
 ):
     data_dir = resolve_data_dir()
     data_dir.mkdir()
-    database_path = data_dir / "bcn.sqlite3"
+    database_path = data_dir / "superai.sqlite3"
 
     async with aiosqlite.connect(database_path) as connection:
         for migration in MIGRATIONS[:10]:
@@ -1411,13 +1414,13 @@ async def test_sqlite_v13_migration_preserves_durable_session_and_attempt_facts(
             "INSERT INTO bcn_sessions ("
             "id, channel_session_id, workspace_id, created_at_ms, updated_at_ms, "
             "metadata_json"
-            ") VALUES ('bcn-1', 'channel-1', 'workspace-1', 1, 1, '{}')"
+            ") VALUES ('superai-1', 'channel-1', 'workspace-1', 1, 1, '{}')"
         )
         await connection.execute(
             "INSERT INTO runtime_sessions ("
             "id, bcn_session_id, channel_session_id, runtime, created_at_ms, "
             "updated_at_ms, metadata_json"
-            ") VALUES ('runtime-1', 'bcn-1', 'channel-1', 'test', 1, 1, '{}')"
+            ") VALUES ('runtime-1', 'superai-1', 'channel-1', 'test', 1, 1, '{}')"
         )
         await connection.execute(
             "INSERT INTO runtime_attempts "
@@ -1441,7 +1444,7 @@ async def test_sqlite_v13_migration_preserves_durable_session_and_attempt_facts(
             ownership_rows = await session.fetchall(
                 "SELECT agent_id FROM channel_sessions WHERE id = 'channel-1' "
                 "UNION ALL "
-                "SELECT agent_id FROM threads WHERE id = 'bcn-1' "
+                "SELECT agent_id FROM threads WHERE id = 'superai-1' "
                 "UNION ALL "
                 "SELECT agent_id FROM runtime_attempts WHERE turn_id = 'turn-1'"
             )
@@ -1474,8 +1477,8 @@ async def test_sqlite_v13_migration_preserves_durable_session_and_attempt_facts(
             updated_at_ms=1,
             review=Review.APPROVED,
         )
-        assert await scope.get_thread("bcn-1") == Thread(
-            id="bcn-1",
+        assert await scope.get_thread("superai-1") == Thread(
+            id="superai-1",
             channel_session_id="channel-1",
             workspace_id="workspace-1",
             created_at_ms=1,
@@ -1492,7 +1495,7 @@ async def test_sqlite_v13_migration_preserves_durable_session_and_attempt_facts(
 async def test_sqlite_removes_runtime_events_and_node_state() -> None:
     data_dir = resolve_data_dir()
     data_dir.mkdir()
-    database_path = data_dir / "bcn.sqlite3"
+    database_path = data_dir / "superai.sqlite3"
 
     async with aiosqlite.connect(database_path) as connection:
         for migration in MIGRATIONS[:8]:
@@ -1573,7 +1576,7 @@ async def test_sqlite_removes_runtime_events_and_node_state() -> None:
 async def test_sqlite_v16_fixture_upgrades_without_ownership_triggers() -> None:
     data_dir = resolve_data_dir()
     data_dir.mkdir()
-    database_path = data_dir / "bcn.sqlite3"
+    database_path = data_dir / "superai.sqlite3"
 
     async with aiosqlite.connect(database_path) as connection:
         await connection.create_function("bcn_agent_id", 0, lambda: "agent-1")
@@ -1732,7 +1735,7 @@ async def test_sqlite_v16_fixture_upgrades_without_ownership_triggers() -> None:
 async def test_sqlite_v16_fixture_unifies_message_history() -> None:
     data_dir = resolve_data_dir()
     data_dir.mkdir()
-    database_path = data_dir / "bcn.sqlite3"
+    database_path = data_dir / "superai.sqlite3"
 
     async with aiosqlite.connect(database_path) as connection:
         connection.row_factory = aiosqlite.Row
@@ -2207,7 +2210,7 @@ async def test_sqlite_v16_fixture_unifies_message_history() -> None:
 async def test_sqlite_retries_unmarked_post_migration_compaction() -> None:
     data_dir = resolve_data_dir()
     data_dir.mkdir()
-    database_path = data_dir / "bcn.sqlite3"
+    database_path = data_dir / "superai.sqlite3"
 
     async with aiosqlite.connect(database_path) as connection:
         for migration in MIGRATIONS[:8]:
@@ -2270,7 +2273,7 @@ async def test_sqlite_retries_unmarked_post_migration_compaction() -> None:
 async def test_sqlite_migrates_provider_reply_ids_to_internal_message_ids() -> None:
     data_dir = resolve_data_dir()
     data_dir.mkdir()
-    database_path = data_dir / "bcn.sqlite3"
+    database_path = data_dir / "superai.sqlite3"
 
     async with aiosqlite.connect(database_path) as connection:
         for migration in MIGRATIONS[:4]:
@@ -2386,12 +2389,12 @@ async def test_sqlite_uses_the_configured_home(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    data_dir = tmp_path / "node state" / ".bcn"
-    monkeypatch.setenv("BCN_HOME", str(data_dir.parent))
+    data_dir = tmp_path / "node state" / ".superai"
+    monkeypatch.setenv("SUPERAI_HOME", str(data_dir.parent))
     database = SqliteDatabase()
     await database.start(timeout=2)
     try:
-        assert (data_dir / "bcn.sqlite3").is_file()
+        assert (data_dir / "superai.sqlite3").is_file()
     finally:
         await database.stop(timeout=2)
 
@@ -2404,7 +2407,7 @@ async def test_sqlite_uses_configured_database_name() -> None:
     try:
         assert database.database_path == resolve_data_dir() / "task.sqlite3"
         assert database.database_path.exists()
-        assert not (resolve_data_dir() / "bcn.sqlite3").exists()
+        assert not (resolve_data_dir() / "superai.sqlite3").exists()
     finally:
         await database.stop(timeout=2)
 
@@ -2416,14 +2419,14 @@ def test_sqlite_rejects_database_paths(value: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_sqlite_defaults_to_home_bcn(
+async def test_sqlite_defaults_to_home_superai(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("BCN_HOME")
+    monkeypatch.delenv("SUPERAI_HOME")
     database = SqliteDatabase()
     await database.start(timeout=2)
     try:
-        assert (Path.home() / ".bcn" / "bcn.sqlite3").is_file()
+        assert (Path.home() / ".superai" / "superai.sqlite3").is_file()
     finally:
         await database.stop(timeout=2)
 
@@ -2439,21 +2442,21 @@ async def test_sqlite_resolves_home_links(
     alias = tmp_path / "home link"
     alias.symlink_to(home, target_is_directory=True)
     if configured:
-        monkeypatch.setenv("BCN_HOME", str(alias))
+        monkeypatch.setenv("SUPERAI_HOME", str(alias))
     else:
-        monkeypatch.delenv("BCN_HOME")
+        monkeypatch.delenv("SUPERAI_HOME")
         monkeypatch.setenv("HOME", str(alias))
         monkeypatch.setenv("USERPROFILE", str(alias))
     database = SqliteDatabase()
     await database.start(timeout=2)
     try:
-        assert (home / ".bcn" / "bcn.sqlite3").is_file()
+        assert (home / ".superai" / "superai.sqlite3").is_file()
         assert resolve_data_dir().is_relative_to(home)
     finally:
         await database.stop(timeout=2)
 
 
-def test_default_workspace_uses_the_home_bcn_root() -> None:
+def test_default_workspace_uses_the_home_superai_root() -> None:
     assert (
         resolve_workspace_dir("workspace-1")
         == resolve_data_dir() / "workspaces" / "workspace-1"
@@ -2478,22 +2481,22 @@ async def test_sqlite_scheduler_fires_reminder_anchored_to_a_system_message() ->
             created_at_ms=1,
             updated_at_ms=1,
         )
-        bcn_session = Thread(
-            id="bcn-1",
+        superai_session = Thread(
+            id="superai-1",
             channel_session_id=channel_session.id,
             workspace_id="agent-1",
             created_at_ms=1,
             updated_at_ms=1,
         )
         await scope.save_channel_session(channel_session)
-        await scope.save_thread(bcn_session)
+        await scope.save_thread(superai_session)
 
         anchor = await scope.save_message(
             Message(
                 direction=MessageDirection.INBOUND,
                 seq=0,
                 message_id="018f0000-0000-7000-8000-0000000000a1",
-                thread_id=bcn_session.id,
+                thread_id=superai_session.id,
                 channel_session_id=channel_session.id,
                 channel=channel_session.channel,
                 provider_thread_id=channel_session.provider_thread_id,
@@ -2511,7 +2514,7 @@ async def test_sqlite_scheduler_fires_reminder_anchored_to_a_system_message() ->
                 direction=MessageDirection.INBOUND,
                 seq=0,
                 message_id="018f0000-0000-7000-8000-0000000000a2",
-                thread_id=bcn_session.id,
+                thread_id=superai_session.id,
                 channel_session_id=channel_session.id,
                 channel=channel_session.channel,
                 provider_thread_id=channel_session.provider_thread_id,
@@ -2532,7 +2535,7 @@ async def test_sqlite_scheduler_fires_reminder_anchored_to_a_system_message() ->
         def scheduled(anchor_message_id: str, title: str) -> Reminder:
             return Reminder(
                 reminder_id="018f0000-0000-7000-8000-0000000000b1",
-                owner_thread_id=bcn_session.id,
+                owner_thread_id=superai_session.id,
                 anchor_message_id=anchor_message_id,
                 title=title,
                 state=ReminderState.SCHEDULED,
@@ -2571,10 +2574,10 @@ async def test_sqlite_scheduler_fires_reminder_anchored_to_a_system_message() ->
         await scheduler.stop(timeout=2)
 
         from_system = await scope.get_reminder(
-            bcn_session.id, on_system_anchor.reminder_id
+            superai_session.id, on_system_anchor.reminder_id
         )
         from_provider = await scope.get_reminder(
-            bcn_session.id, on_provider_anchor.reminder_id
+            superai_session.id, on_provider_anchor.reminder_id
         )
         assert from_system is not None
         assert from_provider is not None
@@ -2739,7 +2742,7 @@ async def test_sqlite_channel_session_identity_is_claimed_once_and_kept_apart() 
 async def test_sqlite_v29_names_the_bot_a_conversation_lives_on() -> None:
     data_dir = resolve_data_dir()
     data_dir.mkdir()
-    database_path = data_dir / "bcn.sqlite3"
+    database_path = data_dir / "superai.sqlite3"
 
     async with aiosqlite.connect(database_path) as connection:
         connection.row_factory = aiosqlite.Row

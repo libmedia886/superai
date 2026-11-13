@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import pytest
-from bcn_test_support import MemoryStorage
+from superai_test_support import MemoryStorage
 
-from bazaar_compute_node.core.models import RuntimeAttempt
+from superai_node.core.models import RuntimeAttempt
 
 
 @pytest.mark.asyncio

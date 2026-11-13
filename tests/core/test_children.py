@@ -7,12 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from bazaar_compute_node.contrib.claude.process import ProcessSpec, ProcessSupervisor
-from bazaar_compute_node.contrib.codex.process import (
+from superai_node.contrib.claude.process import ProcessSpec, ProcessSupervisor
+from superai_node.contrib.codex.process import (
     JsonlProcessSpec,
     JsonlProcessSupervisor,
 )
-from bazaar_compute_node.core.utils import children
+from superai_node.core.utils import children
 
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32", reason="POSIX process groups; Windows uses taskkill"

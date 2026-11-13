@@ -9,13 +9,13 @@ from typing import cast
 from uuid import uuid7
 
 import pytest
-from bcn_test_support.channel import TestChannel
+from superai_test_support.channel import TestChannel
 
-from bazaar_compute_node.core.channel import Channel
-from bazaar_compute_server.clock import now_ms
-from bazaar_compute_server.permissions import Permission as P
-from bazaar_compute_server.polling import TOPICS
-from bazaar_compute_server.storage import Role
+from superai_node.core.channel import Channel
+from superai_server.clock import now_ms
+from superai_server.permissions import Permission as P
+from superai_server.polling import TOPICS
+from superai_server.storage import Role
 
 from ._node import AGENT_ID, node_reporting_to
 from ._serving import TESTER, enrol, serving_app, with_password
@@ -55,7 +55,7 @@ async def test_role_sharing_and_member_actions_in_the_browser(
         await storage.set_account_roles(member.id, [reader.id, reviewer.id])
         await with_password(storage, "resource-owner", TESTER[1])
         enrolled = await enrol(storage, "Shared workstation", owner="resource-owner")
-        monkeypatch.setenv("BCN_SERVER_TOKEN", enrolled.token)
+        monkeypatch.setenv("SUPERAI_SERVER_TOKEN", enrolled.token)
         directory = tmp_path / "node"
         directory.mkdir()
         node = await node_reporting_to(base, directory)
@@ -275,7 +275,7 @@ async def test_role_sharing_and_member_actions_in_the_browser(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["agent", "computer"])
 async def test_share_transfer_and_saved_roles(tmp_path: Path, kind: str) -> None:
-    from bazaar_compute_server.protocol import Event
+    from superai_server.protocol import Event
 
     playwright = pytest.importorskip("playwright.async_api")
     expect = playwright.expect
@@ -469,7 +469,7 @@ async def test_share_transfer_and_saved_roles(tmp_path: Path, kind: str) -> None
 @pytest.mark.e2e
 @pytest.mark.asyncio
 async def test_computer_sharer_preserves_administrator_grants(tmp_path: Path) -> None:
-    from bazaar_compute_server.storage import RoleShare
+    from superai_server.storage import RoleShare
 
     playwright = pytest.importorskip("playwright.async_api")
     expect = playwright.expect

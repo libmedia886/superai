@@ -9,28 +9,28 @@ from pathlib import Path
 
 import pytest
 
-from bazaar_compute_node.contrib.claude.client import (
+from superai_node.contrib.claude.client import (
     Client,
     ProviderCycleState,
     ProviderCycleStateMachine,
     TurnInbox,
 )
-from bazaar_compute_node.contrib.claude.events import TurnEventStream
-from bazaar_compute_node.contrib.claude.plugin import builder
-from bazaar_compute_node.contrib.claude.process import (
+from superai_node.contrib.claude.events import TurnEventStream
+from superai_node.contrib.claude.plugin import builder
+from superai_node.contrib.claude.process import (
     MAX_JSONL_BYTES,
     ProcessSpec,
     ProcessSupervisor,
     build_arguments,
     decode_stdout_line,
 )
-from bazaar_compute_node.contrib.claude.protocol import (
+from superai_node.contrib.claude.protocol import (
     ClaudeProcessExited,
     ClaudeProtocolError,
 )
-from bazaar_compute_node.contrib.claude.runtime import _Connection, _observe_background
-from bazaar_compute_node.core.actor import Thread
-from bazaar_compute_node.core.models import (
+from superai_node.contrib.claude.runtime import _Connection, _observe_background
+from superai_node.core.actor import Thread
+from superai_node.core.models import (
     ContextCompactionCompleted,
     RuntimeSession,
     ToolCallCompleted,
@@ -42,12 +42,12 @@ from bazaar_compute_node.core.models import (
     TurnStarted,
     UsageUpdated,
 )
-from bazaar_compute_node.core.runtime import RuntimeCommandContext, RuntimeSandboxMode
+from superai_node.core.runtime import RuntimeCommandContext, RuntimeSandboxMode
 
 
 def test_claude_command_uses_sdk_style_streaming_contract() -> None:
     arguments = build_arguments(
-        system_prompt="BCN instructions",
+        system_prompt="SUPERAI instructions",
         settings='{"sandbox":{"enabled":true}}',
         session_id="session-1",
         model="model-1",
@@ -63,7 +63,7 @@ def test_claude_command_uses_sdk_style_streaming_contract() -> None:
 
 def test_claude_command_can_bypass_permissions() -> None:
     arguments = build_arguments(
-        system_prompt="BCN instructions",
+        system_prompt="SUPERAI instructions",
         settings='{"sandbox":{"enabled":false}}',
         permission_mode="bypassPermissions",
         session_id="session-1",
@@ -227,7 +227,7 @@ def _turn_event_stream() -> tuple[TurnEventStream, TurnInbox]:
     return (
         TurnEventStream(
             inbox,
-            actor=Thread("bcn-session-1"),
+            actor=Thread("superai-session-1"),
             runtime_session_id="runtime-session-1",
             turn_id="turn-1",
             provider_thread_id="provider-session-1",
@@ -545,7 +545,7 @@ async def test_claude_task_notification_adoption() -> None:
 
     stream = TurnEventStream(
         inbox,
-        actor=Thread("bcn-session-1"),
+        actor=Thread("superai-session-1"),
         runtime_session_id="runtime-session-1",
         turn_id="turn-1",
         provider_thread_id="provider-session-1",

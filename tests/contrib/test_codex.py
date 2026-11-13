@@ -13,7 +13,7 @@ from typing import cast
 from uuid import NAMESPACE_URL, uuid5, uuid7
 
 import pytest
-from bcn_test_support import RecordingAudit, StaticChannelBuilder, TestChannel
+from superai_test_support import RecordingAudit, StaticChannelBuilder, TestChannel
 from test_orchestration import (
     _wait_for_audit_event,
     _wait_for_inbound_messages,
@@ -21,19 +21,19 @@ from test_orchestration import (
     run_natural_conversation_contract,
 )
 
-from bazaar_compute_node.app.application import NodeApplication
-from bazaar_compute_node.app.config import (
+from superai_node.app.application import NodeApplication
+from superai_node.app.config import (
     AgentConfiguration,
     ChannelConfiguration,
     NodeConfiguration,
     RuntimeConfiguration,
 )
-from bazaar_compute_node.app.registry import (
+from superai_node.app.registry import (
     AdapterRegistry,
     AgentAdapterFactories,
     SharedAdapterFactories,
 )
-from bazaar_compute_node.contrib.codex import (
+from superai_node.contrib.codex import (
     Client,
     JsonlProcessSpec,
     JsonlProcessState,
@@ -60,15 +60,15 @@ from bazaar_compute_node.contrib.codex import (
     parse_turn_response,
     parse_turn_steer_response,
 )
-from bazaar_compute_node.contrib.codex import runtime as runtime_module
-from bazaar_compute_node.contrib.codex.plugin import builder
-from bazaar_compute_node.contrib.sqlite import SqliteDatabase
-from bazaar_compute_node.core.actor import Thread
-from bazaar_compute_node.core.approval import IApprovalHandler
-from bazaar_compute_node.core.channel import IChannel
-from bazaar_compute_node.core.client import CLIENT_INFO
-from bazaar_compute_node.core.lifecycle import TimeoutBudget
-from bazaar_compute_node.core.models import (
+from superai_node.contrib.codex import runtime as runtime_module
+from superai_node.contrib.codex.plugin import builder
+from superai_node.contrib.sqlite import SqliteDatabase
+from superai_node.core.actor import Thread
+from superai_node.core.approval import IApprovalHandler
+from superai_node.core.channel import IChannel
+from superai_node.core.client import CLIENT_INFO
+from superai_node.core.lifecycle import TimeoutBudget
+from superai_node.core.models import (
     ApprovalRequest,
     ApprovalResult,
     ContentDelta,
@@ -91,15 +91,15 @@ from bazaar_compute_node.core.models import (
     TurnStarted,
     UsageUpdated,
 )
-from bazaar_compute_node.core.outcomes import ProviderCallStatus
-from bazaar_compute_node.core.paths import resolve_workspace_dir
-from bazaar_compute_node.core.runtime import (
+from superai_node.core.outcomes import ProviderCallStatus
+from superai_node.core.paths import resolve_workspace_dir
+from superai_node.core.runtime import (
     RuntimeCommandContext,
     RuntimeExpire,
     RuntimeSandboxMode,
     RuntimeSessionUnavailable,
 )
-from bazaar_compute_node.core.storage import IStorage
+from superai_node.core.storage import IStorage
 
 TEST_MODEL = "gpt-5.6-luna"
 TEST_EFFORT = "max"
@@ -161,7 +161,7 @@ class _NoopApprovalHandler(IApprovalHandler):
 def _turn_event_stream() -> TurnEventStream:
     return TurnEventStream(
         JsonlProcessSupervisor(JsonlProcessSpec(executable="unused")),
-        actor=Thread("bcn-1"),
+        actor=Thread("superai-1"),
         runtime_session_id="runtime-1",
         turn_id="turn-1",
         provider_thread_id="thread-1",
@@ -510,7 +510,7 @@ def test_codex_protocol_builders_and_parsers_preserve_runtime_contract() -> None
     watched_path = Path.cwd() / "AGENTS.md"
     assert build_initialize_params(CLIENT_INFO) == {
         "clientInfo": {
-            "name": "bcn",
+            "name": "superai",
             "version": CLIENT_INFO.version,
         },
         "capabilities": {"experimentalApi": True},
@@ -729,7 +729,7 @@ async def test_codex_runtime_reports_missing_connection_before_turn_start() -> N
     now_ms = time_ns() // 1_000_000
     session = RuntimeSession(
         id="runtime-missing-connection",
-        actor=Thread("bcn-missing-connection"),
+        actor=Thread("superai-missing-connection"),
         runtime="codex",
         runtime_index=0,
         workspace_id="workspace-missing-connection",
@@ -777,7 +777,7 @@ async def test_codex_runtime_declines_steer_without_active_binding() -> None:
     now_ms = time_ns() // 1_000_000
     session = RuntimeSession(
         id="runtime-without-active-turn",
-        actor=Thread("bcn-without-active-turn"),
+        actor=Thread("superai-without-active-turn"),
         runtime="codex",
         runtime_index=0,
         workspace_id="workspace-without-active-turn",
@@ -835,7 +835,7 @@ async def test_codex_runtime_stops_session(
     now_ms = time_ns() // 1_000_000
     session = RuntimeSession(
         id="runtime-queued-stop",
-        actor=Thread("bcn-queued-stop"),
+        actor=Thread("superai-queued-stop"),
         runtime="codex",
         runtime_index=0,
         workspace_id="workspace-queued-stop",
@@ -904,7 +904,7 @@ async def test_codex_runtime_reports_background_job_when_the_query_fails(
     now_ms = time_ns() // 1_000_000
     session = RuntimeSession(
         id="runtime-background-job-error",
-        actor=Thread("bcn-background-job-error"),
+        actor=Thread("superai-background-job-error"),
         runtime="codex",
         runtime_index=0,
         workspace_id="workspace-background-job-error",
@@ -962,7 +962,7 @@ async def test_codex_runtime_reports_background_job(
     now_ms = time_ns() // 1_000_000
     session = RuntimeSession(
         id="runtime-background-job",
-        actor=Thread("bcn-background-job"),
+        actor=Thread("superai-background-job"),
         runtime="codex",
         runtime_index=0,
         workspace_id="workspace-background-job",
@@ -1335,7 +1335,7 @@ async def test_local_codex_uses_required_model_and_effort() -> None:
         assert parse_turn_steer_response(steer_response) == provider_turn.turn_id
         stream = TurnEventStream(
             supervisor,
-            actor=Thread("bcn-test"),
+            actor=Thread("superai-test"),
             runtime_session_id="session-test",
             turn_id="local-turn-1",
             provider_thread_id=thread_id,
@@ -1421,7 +1421,7 @@ async def test_real_codex_background_job_defers_idle_recycling(
     scoped_session_id = str(
         uuid5(
             NAMESPACE_URL,
-            f"bcn:{agent_id}:bcn-session:{session_id}",
+            f"superai:{agent_id}:superai-session:{session_id}",
         )
     )
     # a terminal only survives the tool call when the command outlives
@@ -1576,7 +1576,7 @@ async def test_local_codex_runtime_writes_current_workspace_with_default_sandbox
     scoped_session_id = str(
         uuid5(
             NAMESPACE_URL,
-            f"bcn:{agent_id}:bcn-session:{session_id}",
+            f"superai:{agent_id}:superai-session:{session_id}",
         )
     )
     message = make_message(
@@ -1646,7 +1646,7 @@ async def test_local_codex_runtime_maps_context_changes_to_expiry(
     agent_id = "agent-test"
     session = RuntimeSession(
         id=f"runtime-context-{uuid7()}",
-        actor=Thread(f"bcn-context-{uuid7()}"),
+        actor=Thread(f"superai-context-{uuid7()}"),
         runtime="codex",
         runtime_index=0,
         workspace_id=agent_id,
@@ -1770,7 +1770,7 @@ async def test_local_codex_runtime_maps_follow_up_resume_and_concurrency() -> No
     now = time_ns() // 1_000_000
     first_session = RuntimeSession(
         id=f"runtime-first-{uuid7()}",
-        actor=Thread(f"bcn-first-{uuid7()}"),
+        actor=Thread(f"superai-first-{uuid7()}"),
         runtime="codex",
         runtime_index=0,
         workspace_id=agent_id,
@@ -1779,7 +1779,7 @@ async def test_local_codex_runtime_maps_follow_up_resume_and_concurrency() -> No
     )
     second_session = RuntimeSession(
         id=f"runtime-second-{uuid7()}",
-        actor=Thread(f"bcn-second-{uuid7()}"),
+        actor=Thread(f"superai-second-{uuid7()}"),
         runtime="codex",
         runtime_index=0,
         workspace_id=agent_id,

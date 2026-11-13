@@ -12,33 +12,33 @@ from uuid import uuid4
 
 import aiohttp
 import pytest
-from bcn_test_support import RecordingAudit, TestChannel, TestRuntime, recorder_for
+from superai_test_support import RecordingAudit, TestChannel, TestRuntime, recorder_for
 
-from bazaar_compute_node.app.attachments import AttachmentMaterializer
-from bazaar_compute_node.contrib.sqlite.storage import SqliteDatabase
-from bazaar_compute_node.contrib.wecom.channel import WeComChannel
-from bazaar_compute_node.contrib.wecom.identity import (
+from superai_node.app.attachments import AttachmentMaterializer
+from superai_node.contrib.sqlite.storage import SqliteDatabase
+from superai_node.contrib.wecom.channel import WeComChannel
+from superai_node.contrib.wecom.identity import (
     TopicAddress,
     conversation_thread_id,
 )
-from bazaar_compute_node.contrib.wecom.topic import TopicConversations
-from bazaar_compute_node.contrib.wecom.topic_api import Members, TopicClient
-from bazaar_compute_node.core.actor import Actors, Agent, Mode
-from bazaar_compute_node.core.channel import ChannelContext, ChannelSendRequest
-from bazaar_compute_node.core.lifecycle import TimeoutBudget
-from bazaar_compute_node.core.models import (
+from superai_node.contrib.wecom.topic import TopicConversations
+from superai_node.contrib.wecom.topic_api import Members, TopicClient
+from superai_node.core.actor import Actors, Agent, Mode
+from superai_node.core.channel import ChannelContext, ChannelSendRequest
+from superai_node.core.lifecycle import TimeoutBudget
+from superai_node.core.models import (
     ChannelTargetKind,
     MessageDirection,
     Review,
 )
-from bazaar_compute_node.core.orchestration.commands.messages import (
+from superai_node.core.orchestration.commands.messages import (
     OutboundAttachmentResolver,
 )
-from bazaar_compute_node.core.orchestration.orchestrator import AgentOrchestrator
-from bazaar_compute_node.core.outcomes import ProviderCallStatus
-from bazaar_compute_node.core.timerwheel import TimerWheel
-from bazaar_compute_node.core.utils.clock import now_ms
-from bazaar_compute_node.i18n import ENGLISH, create_translator
+from superai_node.core.orchestration.orchestrator import AgentOrchestrator
+from superai_node.core.outcomes import ProviderCallStatus
+from superai_node.core.timerwheel import TimerWheel
+from superai_node.core.utils.clock import now_ms
+from superai_node.i18n import ENGLISH, create_translator
 
 pytestmark = pytest.mark.e2e
 
@@ -49,12 +49,12 @@ async def test_real_reply_authors_remain_distinct_after_reading_sent_context(
 ) -> None:
     """Read real replies and route a reconstructed event through ordinary history."""
 
-    own_id = os.environ.get("BCN_WECOM_TEST_SELF_REPLY")
-    other_id = os.environ.get("BCN_WECOM_TEST_OTHER_REPLY")
+    own_id = os.environ.get("SUPERAI_WECOM_TEST_SELF_REPLY")
+    other_id = os.environ.get("SUPERAI_WECOM_TEST_OTHER_REPLY")
     if not own_id or not other_id:
         pytest.skip("Real self and other-author reply identities are required")
-    bot_id = os.environ["BCN_WECOM_BOT_ID"]
-    topic_id = os.environ["BCN_WECOM_TOPIC_ID"]
+    bot_id = os.environ["SUPERAI_WECOM_BOT_ID"]
+    topic_id = os.environ["SUPERAI_WECOM_TOPIC_ID"]
     database = SqliteDatabase(database_name="real-reply-context.sqlite3")
     await database.start(timeout=5)
     scope = database.scope("isolated-wecom-e2e", "WeCom test")
@@ -90,7 +90,7 @@ async def test_real_reply_authors_remain_distinct_after_reading_sent_context(
             options={},
         ),
         bot_id=bot_id,
-        secret=os.environ["BCN_WECOM_SECRET"],
+        secret=os.environ["SUPERAI_WECOM_SECRET"],
         emit=channel.inject,
         logger=logging.getLogger(__name__),
     )
@@ -172,9 +172,9 @@ async def test_native_posts_replies_mentions_and_files_on_the_real_provider(
 ) -> None:
     """Read back delivered content and bytes from the real test channel."""
 
-    bot_id = os.environ["BCN_WECOM_BOT_ID"]
-    secret = os.environ["BCN_WECOM_SECRET"]
-    topic_id = os.environ["BCN_WECOM_TOPIC_ID"]
+    bot_id = os.environ["SUPERAI_WECOM_BOT_ID"]
+    secret = os.environ["SUPERAI_WECOM_SECRET"]
+    topic_id = os.environ["SUPERAI_WECOM_TOPIC_ID"]
 
     async def referenced() -> set[str]:
         return set()
@@ -406,14 +406,14 @@ async def test_native_posts_replies_mentions_and_files_on_the_real_provider(
 async def test_ordinary_chat_on_the_same_real_bot(tmp_path: Path) -> None:
     """Use a chat id obtained from a real ordinary-chat callback."""
 
-    chat_id = os.environ.get("BCN_WECOM_TEST_CHAT_ID")
+    chat_id = os.environ.get("SUPERAI_WECOM_TEST_CHAT_ID")
     if not chat_id:
         pytest.skip("An ordinary-chat callback's chat id is required")
 
     async def referenced() -> set[str]:
         return set()
 
-    bot_id = os.environ["BCN_WECOM_BOT_ID"]
+    bot_id = os.environ["SUPERAI_WECOM_BOT_ID"]
     wheel = TimerWheel()
     await wheel.start()
     channel = WeComChannel(
@@ -425,7 +425,7 @@ async def test_ordinary_chat_on_the_same_real_bot(tmp_path: Path) -> None:
             timer_wheel=wheel,
         ),
         bot_id=bot_id,
-        secret=os.environ["BCN_WECOM_SECRET"],
+        secret=os.environ["SUPERAI_WECOM_SECRET"],
         websocket_url="wss://openws.work.weixin.qq.com",
     )
     try:

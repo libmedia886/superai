@@ -23,7 +23,7 @@ async def test_an_agent_is_taken_in_from_the_computer_page(
     async with serving_app(tmp_path) as (base, app):
         storage = app.state.storage
         enrolment = await enrol(storage, "kana")
-        monkeypatch.setenv("BCN_SERVER_TOKEN", enrolment.token)
+        monkeypatch.setenv("SUPERAI_SERVER_TOKEN", enrolment.token)
         node = await node_reporting_to(base, tmp_path)
         try:
             async with asyncio.timeout(10):
@@ -116,7 +116,7 @@ async def test_an_agent_is_taken_in_from_the_computer_page(
                 assert (runtime.model, runtime.effort) == ("test-model", "high")
                 assert runtime.network_access is True
                 # the value is kept by the node, under a name it gives
-                kept = f"BCN_{newcomer.id.replace('-', '_').upper()}_RUNTIME0_TEST_ENV_CODEX_HOME"
+                kept = f"SUPERAI_{newcomer.id.replace('-', '_').upper()}_RUNTIME0_TEST_ENV_CODEX_HOME"
                 assert runtime.env == {"CODEX_HOME": kept}
                 assert os.environ[kept] == "/srv/codex"
                 # what it tells those waiting was kept on the agent too

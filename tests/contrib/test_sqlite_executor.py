@@ -5,8 +5,8 @@ import asyncio
 import aiosqlite
 import pytest
 
-from bazaar_compute_node.contrib.sqlite import SqliteDatabase
-from bazaar_compute_node.contrib.sqlite.executor import (
+from superai_node.contrib.sqlite import SqliteDatabase
+from superai_node.contrib.sqlite.executor import (
     SqliteExecutorClosedError,
     SqliteSession,
 )

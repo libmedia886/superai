@@ -17,17 +17,17 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from bcn_test_support import isolated_test_environment
+from superai_test_support import isolated_test_environment
 
-from bazaar_compute_node import cli
-from bazaar_compute_node.app import system_service
-from bazaar_compute_node.app.config import load_node_configuration
-from bazaar_compute_node.app.server_management import write_env_value
-from bazaar_compute_node.app.transport import (
+from superai_node import cli
+from superai_node.app import system_service
+from superai_node.app.config import load_node_configuration
+from superai_node.app.server_management import write_env_value
+from superai_node.app.transport import (
     LocalCommandClient,
     local_endpoint_for_path,
 )
-from bazaar_compute_node.cmd.bcn._runner import UsageReporter
+from superai_node.cmd.superai._runner import UsageReporter
 
 pytestmark = pytest.mark.system
 
@@ -43,7 +43,7 @@ def registered_service() -> Iterator[system_service.SystemServiceContext]:
         if existing.returncode == 0:
             pytest.fail("the isolated runner already has a node task")
 
-    name = f"bcn-system-test-{uuid4().hex}"
+    name = f"superai-system-test-{uuid4().hex}"
     native_environment = os.environ.copy()
     if sys.platform == "linux":
         runtime = f"/run/user/{os.getuid()}"
@@ -53,7 +53,7 @@ def registered_service() -> Iterator[system_service.SystemServiceContext]:
         )
 
     with isolated_test_environment(prefix="sys-") as isolated:
-        data_dir = isolated.root / "installed ${TEAM} %Q" / ".bcn"
+        data_dir = isolated.root / "installed ${TEAM} %Q" / ".superai"
         data_dir.mkdir(parents=True)
         config_path = data_dir / "config ${TEAM} %h.toml"
         config_path.write_text(
@@ -62,7 +62,7 @@ def registered_service() -> Iterator[system_service.SystemServiceContext]:
         env_file = data_dir / (
             "credentials.ps1" if os.name == "nt" else "credentials.env"
         )
-        write_env_value(env_file, "BCN_HOME", str(isolated.root / "other home"))
+        write_env_value(env_file, "SUPERAI_HOME", str(isolated.root / "other home"))
         write_env_value(env_file, "TEAM", "other-directory")
         native_environment.update(
             UV_TOOL_DIR=str(isolated.root / "tools"),
@@ -82,9 +82,11 @@ def registered_service() -> Iterator[system_service.SystemServiceContext]:
             env=native_environment,
             check=True,
         )
-        executable = isolated.root / "bin" / ("bcn.exe" if os.name == "nt" else "bcn")
+        executable = (
+            isolated.root / "bin" / ("superai.exe" if os.name == "nt" else "superai")
+        )
         if os.name != "nt":
-            link = data_dir.parent / "bin ${TEAM} %Q" / "bcn"
+            link = data_dir.parent / "bin ${TEAM} %Q" / "superai"
             link.parent.mkdir()
             link.symlink_to(executable)
             executable = link
@@ -106,7 +108,7 @@ def registered_service() -> Iterator[system_service.SystemServiceContext]:
                 unit.parent.mkdir(parents=True)
                 unit.write_text(system_service._render_systemd_unit(context))
                 # The same installed unit runs under a unique name on the real user
-                # manager, so a developer's existing bcn.service is never targeted.
+                # manager, so a developer's existing superai.service is never targeted.
                 temporary_unit = isolated.root / f"{name}.service"
                 temporary_unit.write_bytes(unit.read_bytes())
                 subprocess.run(
@@ -169,7 +171,7 @@ def registered_service() -> Iterator[system_service.SystemServiceContext]:
 
 
 def _check_running(context: system_service.SystemServiceContext) -> None:
-    health = asyncio.run(system_service._wait_for_bcn_health(context, attempts=600))
+    health = asyncio.run(system_service._wait_for_superai_health(context, attempts=600))
     if health != "ready":
         detail = (
             context.log_path.read_text(encoding="utf-8", errors="replace")
@@ -179,7 +181,7 @@ def _check_running(context: system_service.SystemServiceContext) -> None:
         pytest.fail(f"native node did not become ready: {health}\n{detail}")
     response = asyncio.run(
         LocalCommandClient.request(
-            local_endpoint_for_path(context.data_dir / "bcn.sock"),
+            local_endpoint_for_path(context.data_dir / "superai.sock"),
             {"kind": "control", "operation": "health"},
         )
     )
@@ -187,8 +189,8 @@ def _check_running(context: system_service.SystemServiceContext) -> None:
     assert isinstance(result, dict)
     assert result["ready"]
     assert result["accepting"]
-    assert (context.data_dir / "bcn.sqlite3").is_file()
-    with closing(sqlite3.connect(context.data_dir / "bcn.sqlite3")) as database:
+    assert (context.data_dir / "superai.sqlite3").is_file()
+    with closing(sqlite3.connect(context.data_dir / "superai.sqlite3")) as database:
         assert database.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
         ).fetchall()
@@ -294,7 +296,7 @@ def test_native_supervisor_keeps_running_and_recopies_after_child_exit(
     # A real uv launcher for another environment makes a stale running copy
     # observable in the restarted Python process, on Unix and Windows alike.
     shutil.copy2(
-        updated / "bin" / ("bcn.exe" if os.name == "nt" else "bcn"), executable
+        updated / "bin" / ("superai.exe" if os.name == "nt" else "superai"), executable
     )
     if force:
         if os.name == "nt":
@@ -306,7 +308,7 @@ def test_native_supervisor_keeps_running_and_recopies_after_child_exit(
     else:
         response = asyncio.run(
             LocalCommandClient.request(
-                local_endpoint_for_path(context.data_dir / "bcn.sock"),
+                local_endpoint_for_path(context.data_dir / "superai.sock"),
                 {"kind": "control", "operation": "shutdown"},
             )
         )
@@ -341,7 +343,7 @@ def test_native_supervisor_restarts_after_a_real_uv_reinstall(
     )
     response = asyncio.run(
         LocalCommandClient.request(
-            local_endpoint_for_path(context.data_dir / "bcn.sock"),
+            local_endpoint_for_path(context.data_dir / "superai.sock"),
             {"kind": "control", "operation": "shutdown"},
         )
     )
@@ -351,10 +353,10 @@ def test_native_supervisor_restarts_after_a_real_uv_reinstall(
     )
 
 
-def test_native_service_and_reconnect_use_registered_paths_without_bcn_home(
+def test_native_service_and_reconnect_use_registered_paths_without_superai_home(
     registered_service: system_service.SystemServiceContext,
 ) -> None:
-    os.environ.pop("BCN_HOME", None)
+    os.environ.pop("SUPERAI_HOME", None)
     args = Namespace(
         config=None,
         storage=None,
@@ -387,7 +389,7 @@ def test_connect_preserves_registered_paths_for_a_real_uid_without_an_account(
     user = 60001
     with pytest.raises(KeyError):
         pwd.getpwuid(user)
-    os.environ.pop("BCN_HOME", None)
+    os.environ.pop("SUPERAI_HOME", None)
     # getpass looks up the real UID. Keep the effective UID as the test-file
     # owner so the real CLI can read the runner's Python and package installation.
     subprocess.run(
@@ -402,7 +404,7 @@ def test_connect_preserves_registered_paths_for_a_real_uid_without_an_account(
             "-i",
             f"HOME={Path.home()}",
             f"PATH={os.environ['PATH']}",
-            str(Path(sys.executable).parent / "bcn"),
+            str(Path(sys.executable).parent / "superai"),
             "server",
             "connect",
             "--url",

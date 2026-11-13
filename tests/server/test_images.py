@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from bazaar_compute_server.images import Images
+from superai_server.images import Images
 
 from ._serving import free_port, serving_app, signed_in
 

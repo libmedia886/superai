@@ -9,20 +9,20 @@ from uuid import uuid7
 import pytest
 from test_orchestration import make_sqlite_node
 
-from bazaar_compute_node.app.attachments import AttachmentMaterializer
-from bazaar_compute_node.contrib.lark.channel import LarkChannel
-from bazaar_compute_node.contrib.lark.identity import LarkBotIdentity
-from bazaar_compute_node.contrib.telegram.channel import TelegramChannel
-from bazaar_compute_node.contrib.wecom.channel import WeComChannel
-from bazaar_compute_node.contrib.wecom.identity import TopicAddress, reply_message_id
-from bazaar_compute_node.contrib.wecom.topic import topic_message
-from bazaar_compute_node.contrib.wecom.topic_api import Member
-from bazaar_compute_node.core.actor import Agent
-from bazaar_compute_node.core.channel import ChannelContext, ChannelDeliveryReceipt
-from bazaar_compute_node.core.command import MessageSendSuccess
-from bazaar_compute_node.core.models import Message, MessageDirection
-from bazaar_compute_node.core.outcomes import ProviderCallResult, ProviderCallStatus
-from bazaar_compute_node.core.timerwheel import TimerWheel
+from superai_node.app.attachments import AttachmentMaterializer
+from superai_node.contrib.lark.channel import LarkChannel
+from superai_node.contrib.lark.identity import LarkBotIdentity
+from superai_node.contrib.telegram.channel import TelegramChannel
+from superai_node.contrib.wecom.channel import WeComChannel
+from superai_node.contrib.wecom.identity import TopicAddress, reply_message_id
+from superai_node.contrib.wecom.topic import topic_message
+from superai_node.contrib.wecom.topic_api import Member
+from superai_node.core.actor import Agent
+from superai_node.core.channel import ChannelContext, ChannelDeliveryReceipt
+from superai_node.core.command import MessageSendSuccess
+from superai_node.core.models import Message, MessageDirection
+from superai_node.core.outcomes import ProviderCallResult, ProviderCallStatus
+from superai_node.core.timerwheel import TimerWheel
 
 
 @pytest.mark.asyncio

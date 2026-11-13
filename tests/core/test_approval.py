@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from bazaar_compute_node.core.approval import (
+from superai_node.core.approval import (
     approval_action_text,
     approval_description_text,
 )
-from bazaar_compute_node.i18n import ENGLISH, SIMPLIFIED_CHINESE, create_translator
+from superai_node.i18n import ENGLISH, SIMPLIFIED_CHINESE, create_translator
 
 
 def test_approval_description_is_localized_alongside_the_action() -> None:

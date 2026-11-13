@@ -2,28 +2,28 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from bazaar_compute_node.app.application import NodeApplication
-from bazaar_compute_node.app.config import (
+from superai_node.app.application import NodeApplication
+from superai_node.app.config import (
     AgentConfiguration,
     ChannelConfiguration,
     NodeConfiguration,
     RuntimeConfiguration,
     write_configuration,
 )
-from bazaar_compute_node.app.registry import AdapterRegistry
-from bazaar_compute_node.core.lifecycle import TimeoutBudget
+from superai_node.app.registry import AdapterRegistry
+from superai_node.core.lifecycle import TimeoutBudget
 
 AGENT_ID = "0198d4e6-29c5-7465-b74b-88db31f0c118"
 
 
 async def node_reporting_to(base: str, tmp_path: Path) -> NodeApplication:
     """A real node with one agent, reporting to the server at `base` and
-    taking its requests from there, the way `bcn server connect` sets one
-    up; `BCN_SERVER_TOKEN` holds its enrolment. Its configuration is on
+    taking its requests from there, the way `superai server connect` sets one
+    up; `SUPERAI_SERVER_TOKEN` holds its enrolment. Its configuration is on
     disk beside its socket, so a change made from the server is written
     where a restart would read it."""
 
-    server = {"url": base, "token_env": "BCN_SERVER_TOKEN"}
+    server = {"url": base, "token_env": "SUPERAI_SERVER_TOKEN"}
     configuration = NodeConfiguration(
         version_check=False,
         storage="sqlite",
@@ -47,7 +47,7 @@ async def node_reporting_to(base: str, tmp_path: Path) -> NodeApplication:
         shared_factories=AdapterRegistry().load_shared(
             storage="sqlite", audit="server", control="server"
         ),
-        endpoint_path=tmp_path / "bcn.sock",
+        endpoint_path=tmp_path / "superai.sock",
         config_path=config_path,
         env_path=tmp_path / "runtime.env",
         timeout_budget=TimeoutBudget(

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from server._serving import serving_app, signed_in
 
-from bazaar_compute_server.images import Images
+from superai_server.images import Images
 
 pytestmark = pytest.mark.e2e
 

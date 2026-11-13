@@ -1,7 +1,7 @@
 [project]
-name = "bcn-test-support"
+name = "superai-test-support"
 version = "0.1.0"
-description = "Test-only adapters for Bazaar Compute Node"
+description = "Test-only adapters for SuperAI"
 requires-python = ">=3.14"
 dependencies = []
 

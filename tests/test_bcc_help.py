@@ -3,7 +3,7 @@ from __future__ import annotations
 import click
 import pytest
 
-from bazaar_compute_node.cmd.bcc import bcc
+from superai_node.cmd.bcc import bcc
 
 
 def render_help(path: tuple[str, ...]) -> str:

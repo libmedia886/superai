@@ -7,7 +7,7 @@ from pathlib import Path
 import aiosqlite
 import pytest
 
-from bazaar_compute_node.core.models import (
+from superai_node.core.models import (
     Message,
     MessageDirection,
     OutboundDeliveryState,
@@ -16,9 +16,9 @@ from bazaar_compute_node.core.models import (
     SenderKind,
     SystemMessageKind,
 )
-from bazaar_compute_server.clock import now_ms
-from bazaar_compute_server.fleet import PAGE_SIZE
-from bazaar_compute_server.protocol import Event
+from superai_server.clock import now_ms
+from superai_server.fleet import PAGE_SIZE
+from superai_server.protocol import Event
 
 from ._node import AGENT_ID, node_reporting_to
 from ._serving import enrol, serving_app, signed_in
@@ -63,7 +63,7 @@ async def test_an_agents_conversations_are_listed_as_its_node_has_them(
     async with serving_app(tmp_path) as (base, app):
         storage = app.state.storage
         enrolment = await enrol(storage, "kana")
-        monkeypatch.setenv("BCN_SERVER_TOKEN", enrolment.token)
+        monkeypatch.setenv("SUPERAI_SERVER_TOKEN", enrolment.token)
         node = await node_reporting_to(base, tmp_path)
         try:
             computer_id = enrolment.computer.id
@@ -185,7 +185,7 @@ async def test_an_offline_computer_is_not_asked(tmp_path: Path) -> None:
         await storage.record_events(
             enrolment.computer.id, "run-1", [Event.model_validate(stale)]
         )
-        async with aiosqlite.connect(tmp_path / "bcs.sqlite3") as connection:
+        async with aiosqlite.connect(tmp_path / "superai-server.sqlite3") as connection:
             await connection.execute(
                 "UPDATE events SET received_at_ms = ?", (now_ms() - 10 * 60_000,)
             )
@@ -251,7 +251,7 @@ async def test_a_conversation_reads_newest_last_and_pages_up(
     async with serving_app(tmp_path) as (base, app):
         storage = app.state.storage
         enrolment = await enrol(storage, "kana")
-        monkeypatch.setenv("BCN_SERVER_TOKEN", enrolment.token)
+        monkeypatch.setenv("SUPERAI_SERVER_TOKEN", enrolment.token)
         node = await node_reporting_to(base, tmp_path)
         try:
             computer_id = enrolment.computer.id

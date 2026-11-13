@@ -20,7 +20,7 @@
     禁止绕过 orchestration 直接用测试 approval handler 模拟 Channel 行为
 18. 已发布的 migration 属于不可变历史：禁止修改其任何内容（包括注释、空白、名称和 SQL）；schema 变化只能新增 migration。
     禁止修改或绕过 migration checksum 校验，也禁止手工篡改 migration ledger
-19. BCN e2e 测试必须使用测试专用配置、临时数据库和隔离进程；禁止安装开发分支覆盖正式 uv tool，禁止启动、停止、
-    重启或复用正式 `bcn.service`，禁止连接 `~/.bcn` 的正式数据库、socket 或 Channel
-20. 发现额外 BCN 进程时，必须先核对其 PPID、启动来源、配置和用途；人工为故障恢复而启动的临时进程未经操作者明确确认
-    禁止终止。运行当前 agent 的 BCN 进程不得由该 agent 自行终止
+19. SUPERAI e2e 测试必须使用测试专用配置、临时数据库和隔离进程；禁止安装开发分支覆盖正式 uv tool，禁止启动、停止、
+    重启或复用正式 `superai.service`，禁止连接 `~/.superai` 的正式数据库、socket 或 Channel
+20. 发现额外 SUPERAI 进程时，必须先核对其 PPID、启动来源、配置和用途；人工为故障恢复而启动的临时进程未经操作者明确确认
+    禁止终止。运行当前 agent 的 SUPERAI 进程不得由该 agent 自行终止

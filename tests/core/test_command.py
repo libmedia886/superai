@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from bazaar_compute_node.core.utils.command import platform_environment, said_by
+from superai_node.core.utils.command import platform_environment, said_by
 
 
 @pytest.mark.asyncio
@@ -88,12 +88,12 @@ async def test_a_probe_gets_the_platform_and_its_own_names_only(
     started to ask a runtime about itself sees the platform's variables and
     the runtime's own, and none of those."""
 
-    monkeypatch.setenv("BCN_AGENT_TELEGRAM_TOKEN", "secret")
+    monkeypatch.setenv("SUPERAI_AGENT_TELEGRAM_TOKEN", "secret")
     monkeypatch.setenv("CODEX_HOME", "/srv/codex")
     script = tmp_path / "env.py"
     script.write_text(
         "import os\nprint(','.join(sorted(n for n in os.environ if n in "
-        "('BCN_AGENT_TELEGRAM_TOKEN', 'CODEX_HOME', 'PATH'))))\n"
+        "('SUPERAI_AGENT_TELEGRAM_TOKEN', 'CODEX_HOME', 'PATH'))))\n"
     )
 
     said = await said_by(

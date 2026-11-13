@@ -6,20 +6,20 @@ from dataclasses import replace
 import pytest
 from test_orchestration import make_sqlite_node
 
-from bazaar_compute_node.contrib.wecom.identity import (
+from superai_node.contrib.wecom.identity import (
     TopicAddress,
     post_message_id,
     reply_message_id,
 )
-from bazaar_compute_node.contrib.wecom.topic import topic_message
-from bazaar_compute_node.contrib.wecom.topic_api import Member
-from bazaar_compute_node.core.actor import Agent
-from bazaar_compute_node.core.channel import ChannelDeliveryReceipt
-from bazaar_compute_node.core.command import MessageSendSuccess
-from bazaar_compute_node.core.models import MessageDirection, Review
-from bazaar_compute_node.core.outcomes import ProviderCallResult, ProviderCallStatus
-from bazaar_compute_node.core.review import ReviewPolicy
-from bazaar_compute_node.core.utils.clock import now_ms
+from superai_node.contrib.wecom.topic import topic_message
+from superai_node.contrib.wecom.topic_api import Member
+from superai_node.core.actor import Agent
+from superai_node.core.channel import ChannelDeliveryReceipt
+from superai_node.core.command import MessageSendSuccess
+from superai_node.core.models import MessageDirection, Review
+from superai_node.core.outcomes import ProviderCallResult, ProviderCallStatus
+from superai_node.core.review import ReviewPolicy
+from superai_node.core.utils.clock import now_ms
 
 
 @pytest.mark.asyncio

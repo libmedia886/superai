@@ -10,12 +10,12 @@ import aiohttp
 import aiosqlite
 import pytest
 
-from bazaar_compute_server.clock import clock_text, local, now_ms, start_of_today_ms
-from bazaar_compute_server.fleet import PAGE_SIZE
-from bazaar_compute_server.permissions import Permission
-from bazaar_compute_server.protocol import Event
-from bazaar_compute_server.rendering import identicon
-from bazaar_compute_server.storage import IStorage, Role
+from superai_server.clock import clock_text, local, now_ms, start_of_today_ms
+from superai_server.fleet import PAGE_SIZE
+from superai_server.permissions import Permission
+from superai_server.protocol import Event
+from superai_server.rendering import identicon
+from superai_server.storage import IStorage, Role
 
 from ._serving import TESTER, enrol, root_id, serving, signed_in, with_password
 
@@ -96,7 +96,7 @@ async def test_the_agents_module_lists_what_computers_report(tmp_path: Path) -> 
                         "agent-1",
                         text="hi",
                         target="group:1",
-                        target_name="B小町 #bcn",
+                        target_name="B小町 #superai",
                         sender={
                             "id": "7",
                             "name": "hanchin",
@@ -188,9 +188,9 @@ async def test_the_agents_module_lists_what_computers_report(tmp_path: Path) -> 
             **{"Accept-Language": "zh-CN"},
         )
         assert status == 200
-        assert "正在处理 B小町 #bcn" in card
+        assert "正在处理 B小町 #superai" in card
         assert "开始工具调用 · Bash" in card
-        assert "消息已接收 · B小町 #bcn · Hanchin" in card
+        assert "消息已接收 · B小町 #superai · Hanchin" in card
         assert card.count("消息已发送") == 1
         # the running total is summed up below the list, not read out in it
         assert "用量已更新" not in card
@@ -445,7 +445,7 @@ async def test_a_silent_computer_shows_offline(tmp_path: Path) -> None:
             enrolment.computer.id, "run-1", [Event.model_validate(stale)]
         )
         # age the report itself past two beats
-        async with aiosqlite.connect(tmp_path / "bcs.sqlite3") as connection:
+        async with aiosqlite.connect(tmp_path / "superai-server.sqlite3") as connection:
             await connection.execute(
                 "UPDATE events SET received_at_ms = ?", (now_ms() - 10 * 60_000,)
             )
@@ -521,11 +521,11 @@ async def test_a_computer_is_added_from_the_page_and_the_token_shown_once(
         # they are what gets copied
         text = html.unescape(re.sub(r"<[^>]+>", "", page))
         connect = text.split("接入命令")[1]
-        assert connect.index("bcn server connect") < connect.index("电脑上的智能体")
+        assert connect.index("superai server connect") < connect.index("电脑上的智能体")
         assert 'class="for md" id="for-unix"' in page and 'class="tok-' in page
         # case: the snippet carries the token and the server's own address,
         # once for either kind of machine, open on the browser's own kind
-        assert f"bcn server connect --url {base} --token {token_prefix}" in text
+        assert f"superai server connect --url {base} --token {token_prefix}" in text
         assert "仅显示一次" in page
         assert "install.sh | sh" in text and "install.ps1 | iex" in text
         assert 'id="snippet-unix" checked' in page
@@ -596,7 +596,7 @@ async def test_a_computer_is_removed_with_everything_it_said(tmp_path: Path) -> 
         assert await storage.count_events(computer_id) == 0
         # case: nobody stands in any relation to it or its agents any more
         async with (
-            aiosqlite.connect(tmp_path / "bcs.sqlite3") as connection,
+            aiosqlite.connect(tmp_path / "superai-server.sqlite3") as connection,
             connection.execute("SELECT COUNT(*) FROM relations") as cursor,
         ):
             assert await cursor.fetchone() == (0,)

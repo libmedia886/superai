@@ -5,8 +5,8 @@ from contextlib import AbstractContextManager
 from pathlib import Path
 
 import pytest
-from bcn_test_support import temporary_test_directory
-from bcn_test_support.plugin import install
+from superai_test_support import temporary_test_directory
+from superai_test_support.plugin import install
 
 _owned_basetemp: AbstractContextManager[Path] | None = None
 
@@ -21,7 +21,7 @@ def pytest_configure(config: pytest.Config) -> None:
     if config.option.basetemp is not None:
         return
 
-    _owned_basetemp = temporary_test_directory(prefix="bcn-pytest-")
+    _owned_basetemp = temporary_test_directory(prefix="superai-pytest-")
     config.option.basetemp = _owned_basetemp.__enter__()
 
 
@@ -33,7 +33,7 @@ def pytest_unconfigure(config: pytest.Config) -> None:
 
 @pytest.fixture
 def system_temp_dir() -> Iterator[Path]:
-    with temporary_test_directory(prefix="bcn-test-") as directory:
+    with temporary_test_directory(prefix="superai-test-") as directory:
         yield directory
 
 
@@ -46,11 +46,11 @@ def isolate_home(
     """Keep every test, and the processes it spawns, out of the developer's home.
 
     A real-provider test keeps its home: the claude and codex children read
-    their own credentials from there. BCN state uses a temporary root.
+    their own credentials from there. SUPERAI state uses a temporary root.
     """
 
     home = tmp_path_factory.mktemp("node")
-    monkeypatch.setenv("BCN_HOME", str(home))
+    monkeypatch.setenv("SUPERAI_HOME", str(home))
     if request.node.get_closest_marker("e2e") is not None:
         yield None
         return

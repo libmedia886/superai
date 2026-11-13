@@ -9,10 +9,10 @@ from uuid import UUID
 
 import pytest
 
-import bazaar_compute_node.app.config as config_module
-from bazaar_compute_node.app.config import ConfigurationError, load_node_configuration
-from bazaar_compute_node.core.actor import Mode
-from bazaar_compute_node.core.runtime import RuntimeSandboxMode
+import superai_node.app.config as config_module
+from superai_node.app.config import ConfigurationError, load_node_configuration
+from superai_node.core.actor import Mode
+from superai_node.core.runtime import RuntimeSandboxMode
 
 LEGACY_AGENT_ID = "0198d4e6-29c5-7465-b74b-88db31f0c118"
 FALLBACK_AGENT_ID = "0198d4e7-2a28-7448-8228-388be1bf70b7"
@@ -42,7 +42,7 @@ def test_wecom_legacy_config_reuses_sqlite_workspace_identity(
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     monkeypatch.setattr(config_module, "resolve_data_dir", lambda: data_dir)
-    with sqlite3.connect(data_dir / "bcn.sqlite3") as connection:
+    with sqlite3.connect(data_dir / "superai.sqlite3") as connection:
         connection.execute(
             "CREATE TABLE node_state ("
             "singleton_key INTEGER PRIMARY KEY, workspace_id TEXT"
@@ -139,7 +139,7 @@ def test_telegram_legacy_config_uses_uuid7_and_default_token_env(
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     monkeypatch.setattr(config_module, "resolve_data_dir", lambda: data_dir)
-    sqlite3.connect(data_dir / "bcn.sqlite3").close()
+    sqlite3.connect(data_dir / "superai.sqlite3").close()
     monkeypatch.setattr(config_module, "uuid7", lambda: UUID(FALLBACK_AGENT_ID))
     config_path = tmp_path / "config.toml"
     config_path.write_text(
@@ -153,7 +153,7 @@ def test_telegram_legacy_config_uses_uuid7_and_default_token_env(
     assert agent.id == FALLBACK_AGENT_ID
     (channel,) = agent.channels
     assert channel.kind == "telegram"
-    assert channel.options == {"token_env": "BCN_TELEGRAM_BOT_TOKEN"}
+    assert channel.options == {"token_env": "SUPERAI_TELEGRAM_BOT_TOKEN"}
 
 
 def test_v2_configuration_is_migrated_to_a_single_element_runtime_array(
@@ -180,7 +180,7 @@ token_env = "TELEGRAM_TOKEN"
 kind = "codex"
 model = "gpt-5.6-luna"
 env_include = ["CODEX_HOME", "CUSTOM_CA"]
-env = { CODEX_HOME = "BCN_CODEX_HOME_WORK" }
+env = { CODEX_HOME = "SUPERAI_CODEX_HOME_WORK" }
 provider_option = "kept"
 """.lstrip(),
         encoding="utf-8",
@@ -195,7 +195,7 @@ provider_option = "kept"
     assert runtime.model == "gpt-5.6-luna"
     # both spellings merge, and the newer env wins the name they share
     assert runtime.env == {
-        "CODEX_HOME": "BCN_CODEX_HOME_WORK",
+        "CODEX_HOME": "SUPERAI_CODEX_HOME_WORK",
         "CUSTOM_CA": "CUSTOM_CA",
     }
     # non-standard runtime keys still reach the provider options untouched
@@ -203,7 +203,7 @@ provider_option = "kept"
     written = tomllib.loads(config_path.read_text(encoding="utf-8"))
     assert written["version"] == "4"
     assert written["agent"][0]["runtime"][0]["env"] == {
-        "CODEX_HOME": "BCN_CODEX_HOME_WORK",
+        "CODEX_HOME": "SUPERAI_CODEX_HOME_WORK",
         "CUSTOM_CA": "CUSTOM_CA",
     }
 
@@ -234,7 +234,7 @@ kind = "codex"
 model = "gpt-5.6-luna"
 
 [agent.runtime.env]
-CODEX_HOME = "BCN_CODEX_HOME_WORK"
+CODEX_HOME = "SUPERAI_CODEX_HOME_WORK"
 """.lstrip(),
         encoding="utf-8",
     )
@@ -250,7 +250,7 @@ CODEX_HOME = "BCN_CODEX_HOME_WORK"
     assert agent.idle_timeout_seconds == 60
     (runtime,) = agent.runtimes
     assert runtime.model == "gpt-5.6-luna"
-    assert runtime.env == {"CODEX_HOME": "BCN_CODEX_HOME_WORK"}
+    assert runtime.env == {"CODEX_HOME": "SUPERAI_CODEX_HOME_WORK"}
     written = tomllib.loads(config_path.read_text(encoding="utf-8"))
     assert written["version"] == "4"
     assert written["agent"][0]["channel"] == [
@@ -302,7 +302,7 @@ network_access = false
 provider_option = "kept"
 
 [agent.runtime.env]
-CODEX_HOME = "BCN_CODEX_HOME_PERSONAL"
+CODEX_HOME = "SUPERAI_CODEX_HOME_PERSONAL"
 
 [[agent]]
 id = "0198d4e7-2a28-7448-8228-388be1bf70b7"
@@ -345,7 +345,9 @@ kind = "codex"
     }
     assert first.agents[0].runtimes[1].network_access is False
     assert first.agents[0].runtimes[1].options == {"provider_option": "kept"}
-    assert first.agents[0].runtimes[1].env == {"CODEX_HOME": "BCN_CODEX_HOME_PERSONAL"}
+    assert first.agents[0].runtimes[1].env == {
+        "CODEX_HOME": "SUPERAI_CODEX_HOME_PERSONAL"
+    }
     assert first.agents[1].runtimes[0].env == {}
     # an agent without a mode answers one conversation at a time
     assert first.agents[0].mode is Mode.SESSION
@@ -457,7 +459,7 @@ def test_v4_rejects_invalid_agent_tables() -> None:
     with pytest.raises(ConfigurationError, match=r"agent #1\.channel #2\.kind"):
         parse(agent(channel=[{"kind": "telegram"}, {"token_env": "SECOND"}]))
 
-    # a mode names one of the execution models bcn knows
+    # a mode names one of the execution models superai knows
     with pytest.raises(ConfigurationError, match=r"agent #1\.mode"):
         parse(agent(mode="individual"))
 
@@ -566,7 +568,7 @@ version_check = false
 
 [node.server]
 url = "http://127.0.0.1:8765"
-token_env = "BCN_SERVER_TOKEN"
+token_env = "SUPERAI_SERVER_TOKEN"
 """.lstrip(),
         encoding="utf-8",
     )
@@ -577,7 +579,7 @@ token_env = "BCN_SERVER_TOKEN"
     assert configuration.audit == "server"
     assert dict(configuration.audit_options) == {
         "url": "http://127.0.0.1:8765",
-        "token_env": "BCN_SERVER_TOKEN",
+        "token_env": "SUPERAI_SERVER_TOKEN",
     }
 
     # case: the table survives a serialize and re-read round trip

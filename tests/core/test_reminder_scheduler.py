@@ -6,21 +6,26 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from bcn_test_support import MemoryStorage, RecordingAudit, TestChannel, recorder_for
+from superai_test_support import (
+    MemoryStorage,
+    RecordingAudit,
+    TestChannel,
+    recorder_for,
+)
 
-from bazaar_compute_node.app.application import NodeApplication
-from bazaar_compute_node.app.config import (
+from superai_node.app.application import NodeApplication
+from superai_node.app.config import (
     AgentConfiguration,
     ChannelConfiguration,
     NodeConfiguration,
     RuntimeConfiguration,
 )
-from bazaar_compute_node.app.registry import AdapterRegistry
-from bazaar_compute_node.core.actor import Actors, Mode
-from bazaar_compute_node.core.actor import Thread as ThreadActor
-from bazaar_compute_node.core.audit import AuditRecorder
-from bazaar_compute_node.core.concurrency import IThreadConcurrency, ThreadLockRegistry
-from bazaar_compute_node.core.models import (
+from superai_node.app.registry import AdapterRegistry
+from superai_node.core.actor import Actors, Mode
+from superai_node.core.actor import Thread as ThreadActor
+from superai_node.core.audit import AuditRecorder
+from superai_node.core.concurrency import IThreadConcurrency, ThreadLockRegistry
+from superai_node.core.models import (
     ChannelSession,
     ChannelTargetKind,
     ConsumerCursor,
@@ -34,18 +39,18 @@ from bazaar_compute_node.core.models import (
     SystemMessageKind,
     Thread,
 )
-from bazaar_compute_node.core.models.reminder_owner import OwnedReminder
-from bazaar_compute_node.core.orchestration.commands import CommandService
-from bazaar_compute_node.core.orchestration.delivery import OutboundDeliveryService
-from bazaar_compute_node.core.orchestration.reminder import ReminderScheduler
-from bazaar_compute_node.core.reminder import (
+from superai_node.core.models.reminder_owner import OwnedReminder
+from superai_node.core.orchestration.commands import CommandService
+from superai_node.core.orchestration.delivery import OutboundDeliveryService
+from superai_node.core.orchestration.reminder import ReminderScheduler
+from superai_node.core.reminder import (
     ReminderCancelRequest,
     ReminderScheduleRequest,
     ReminderSnoozeRequest,
     ReminderUpdateRequest,
 )
-from bazaar_compute_node.core.storage import IStorage
-from bazaar_compute_node.core.timerwheel import TimerWheel
+from superai_node.core.storage import IStorage
+from superai_node.core.timerwheel import TimerWheel
 
 _AGENT_A = "agent-a"
 _AGENT_B = "agent-b"
@@ -357,7 +362,7 @@ async def test_scheduler_runs_when_all_agents_fail_to_start(tmp_path: Path) -> N
             ),
         ),
         shared_factories=AdapterRegistry().load_shared(storage="test", audit="test"),
-        endpoint_path=tmp_path / "bcn.sock",
+        endpoint_path=tmp_path / "superai.sock",
     )
 
     await node.start()
@@ -382,7 +387,7 @@ async def test_node_exits_when_shared_timer_driver_stops(tmp_path: Path) -> None
             version_check=False,
         ),
         shared_factories=AdapterRegistry().load_shared(storage="test", audit="test"),
-        endpoint_path=tmp_path / "bcn.sock",
+        endpoint_path=tmp_path / "superai.sock",
     )
 
     await node.start()

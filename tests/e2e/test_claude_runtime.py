@@ -12,38 +12,38 @@ from typing import cast
 from uuid import NAMESPACE_URL, uuid4, uuid5, uuid7
 
 import pytest
-from bcn_test_support import (
+from superai_test_support import (
     MemoryStorage,
     RecordingAudit,
     StaticChannelBuilder,
     TestChannel,
 )
 
-from bazaar_compute_node.app.application import NodeApplication
-from bazaar_compute_node.app.config import (
+from superai_node.app.application import NodeApplication
+from superai_node.app.config import (
     AgentConfiguration,
     ChannelConfiguration,
     NodeConfiguration,
     RuntimeConfiguration,
 )
-from bazaar_compute_node.app.registry import (
+from superai_node.app.registry import (
     AdapterRegistry,
     AgentAdapterFactories,
     SharedAdapterFactories,
 )
-from bazaar_compute_node.contrib.claude.client import Client
-from bazaar_compute_node.contrib.claude.events import TurnEventStream
-from bazaar_compute_node.contrib.claude.plugin import builder
-from bazaar_compute_node.contrib.claude.process import (
+from superai_node.contrib.claude.client import Client
+from superai_node.contrib.claude.events import TurnEventStream
+from superai_node.contrib.claude.plugin import builder
+from superai_node.contrib.claude.process import (
     ProcessSpec,
     ProcessSupervisor,
     build_arguments,
 )
-from bazaar_compute_node.contrib.claude.runtime import Runtime
-from bazaar_compute_node.core.actor import Thread
-from bazaar_compute_node.core.channel import IChannel
-from bazaar_compute_node.core.lifecycle import TimeoutBudget
-from bazaar_compute_node.core.models import (
+from superai_node.contrib.claude.runtime import Runtime
+from superai_node.core.actor import Thread
+from superai_node.core.channel import IChannel
+from superai_node.core.lifecycle import TimeoutBudget
+from superai_node.core.models import (
     ApprovalDecision,
     ContentDelta,
     ContentDeltaKind,
@@ -56,13 +56,13 @@ from bazaar_compute_node.core.models import (
     TurnFailed,
     TurnUnknown,
 )
-from bazaar_compute_node.core.paths import resolve_workspace_dir
-from bazaar_compute_node.core.runtime import (
+from superai_node.core.paths import resolve_workspace_dir
+from superai_node.core.runtime import (
     IRuntime,
     RuntimeCommandContext,
     RuntimeSandboxMode,
 )
-from bazaar_compute_node.core.storage import IStorage
+from superai_node.core.storage import IStorage
 
 pytestmark = pytest.mark.e2e
 
@@ -304,7 +304,7 @@ async def test_real_claude_turn_stream_and_running_steer(
     node, channel, audit, agent_id = _node(system_temp_dir / "claude-steer.sock")
     session_id = f"claude-steer-{uuid4()}"
     scoped_session_id = str(
-        uuid5(NAMESPACE_URL, f"bcn:{agent_id}:bcn-session:{session_id}")
+        uuid5(NAMESPACE_URL, f"superai:{agent_id}:superai-session:{session_id}")
     )
     first = _message(
         session_id,
@@ -353,7 +353,7 @@ async def test_real_claude_active_child_exit_is_terminal_unknown(
     node, channel, audit, agent_id = _node(system_temp_dir / "claude-active-exit.sock")
     session_id = f"claude-active-exit-{uuid4()}"
     scoped_session_id = str(
-        uuid5(NAMESPACE_URL, f"bcn:{agent_id}:bcn-session:{session_id}")
+        uuid5(NAMESPACE_URL, f"superai:{agent_id}:superai-session:{session_id}")
     )
     message = _message(
         session_id,
@@ -416,7 +416,7 @@ async def test_real_claude_idle_child_exit_rebuilds_for_next_turn(
     node, channel, audit, agent_id = _node(system_temp_dir / "claude-idle-exit.sock")
     session_id = f"claude-idle-exit-{uuid4()}"
     scoped_session_id = str(
-        uuid5(NAMESPACE_URL, f"bcn:{agent_id}:bcn-session:{session_id}")
+        uuid5(NAMESPACE_URL, f"superai:{agent_id}:superai-session:{session_id}")
     )
     first = _message(
         session_id, body="Summarize why leaves are green in one paragraph."
@@ -468,7 +468,7 @@ async def test_real_claude_approval_lifecycle_uses_test_channel(
     )
     session_id = f"claude-approval-{uuid4()}"
     scoped_session_id = str(
-        uuid5(NAMESPACE_URL, f"bcn:{agent_id}:bcn-session:{session_id}")
+        uuid5(NAMESPACE_URL, f"superai:{agent_id}:superai-session:{session_id}")
     )
     workspace = resolve_workspace_dir(agent_id)
     approved_note = workspace / f"approved-{uuid4()}.md"
@@ -573,7 +573,7 @@ async def test_real_claude_danger_full_access_bypasses_approval(
     )
     session_id = f"claude-danger-full-access-{uuid4()}"
     scoped_session_id = str(
-        uuid5(NAMESPACE_URL, f"bcn:{agent_id}:bcn-session:{session_id}")
+        uuid5(NAMESPACE_URL, f"superai:{agent_id}:superai-session:{session_id}")
     )
     workspace = resolve_workspace_dir(agent_id)
     note = workspace / f"danger-full-access-{uuid4()}.md"
@@ -614,7 +614,7 @@ async def test_real_claude_background_job_defers_idle_recycling(
     )
     session_id = f"claude-background-idle-{uuid4()}"
     scoped_session_id = str(
-        uuid5(NAMESPACE_URL, f"bcn:{agent_id}:bcn-session:{session_id}")
+        uuid5(NAMESPACE_URL, f"superai:{agent_id}:superai-session:{session_id}")
     )
     message = _message(
         session_id,
@@ -679,7 +679,7 @@ async def test_real_claude_background_lifecycle_keeps_process_running(
     )
     session_id = f"claude-background-{uuid4()}"
     scoped_session_id = str(
-        uuid5(NAMESPACE_URL, f"bcn:{agent_id}:bcn-session:{session_id}")
+        uuid5(NAMESPACE_URL, f"superai:{agent_id}:superai-session:{session_id}")
     )
     first = _message(
         session_id,
@@ -875,7 +875,7 @@ async def test_real_claude_provider_limit_result_remains_authoritative() -> None
     assert send_error is None
     stream = TurnEventStream(
         inbox,
-        actor=Thread("bcn-provider-limit"),
+        actor=Thread("superai-provider-limit"),
         runtime_session_id="runtime-provider-limit",
         turn_id=str(uuid4()),
         provider_thread_id=session_id,
@@ -1016,11 +1016,11 @@ async def test_real_claude_hands_a_failing_runtime_over_to_the_next_one(
     )
     session_id = f"claude-multi-runtime-{uuid4()}"
     scoped_session_id = str(
-        uuid5(NAMESPACE_URL, f"bcn:{agent_id}:bcn-session:{session_id}")
+        uuid5(NAMESPACE_URL, f"superai:{agent_id}:superai-session:{session_id}")
     )
     follow_up_id = f"claude-multi-runtime-follow-{uuid4()}"
     scoped_follow_up_id = str(
-        uuid5(NAMESPACE_URL, f"bcn:{agent_id}:bcn-session:{follow_up_id}")
+        uuid5(NAMESPACE_URL, f"superai:{agent_id}:superai-session:{follow_up_id}")
     )
     try:
         await node.start()

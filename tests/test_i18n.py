@@ -4,8 +4,8 @@ import locale
 
 import pytest
 
-import bazaar_compute_node.i18n.catalog as catalog_module
-from bazaar_compute_node.i18n import ENGLISH, SIMPLIFIED_CHINESE, create_translator
+import superai_node.i18n.catalog as catalog_module
+from superai_node.i18n import ENGLISH, SIMPLIFIED_CHINESE, create_translator
 
 
 def test_translator_preserves_interpolation_values_and_requires_exact_keys() -> None:

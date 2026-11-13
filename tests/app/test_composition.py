@@ -3,19 +3,19 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from bcn_test_support import RecordingAudit
+from superai_test_support import RecordingAudit
 
-from bazaar_compute_node import __version__
-from bazaar_compute_node.app.application import NodeApplication
-from bazaar_compute_node.app.config import (
+from superai_node import __version__
+from superai_node.app.application import NodeApplication
+from superai_node.app.config import (
     AgentConfiguration,
     ChannelConfiguration,
     NodeConfiguration,
     RuntimeConfiguration,
 )
-from bazaar_compute_node.app.registry import AdapterRegistry
-from bazaar_compute_node.core.lifecycle import TimeoutBudget
-from bazaar_compute_node.i18n import ENGLISH, SIMPLIFIED_CHINESE
+from superai_node.app.registry import AdapterRegistry
+from superai_node.core.lifecycle import TimeoutBudget
+from superai_node.i18n import ENGLISH, SIMPLIFIED_CHINESE
 
 AGENT_ID = "0198d4e6-29c5-7465-b74b-88db31f0c118"
 
@@ -67,14 +67,14 @@ async def test_node_composes_one_translator_for_all_agents(
     expected: str,
 ) -> None:
     monkeypatch.setattr(
-        "bazaar_compute_node.i18n.catalog.locale.getlocale",
+        "superai_node.i18n.catalog.locale.getlocale",
         lambda: (system_language, "UTF-8"),
     )
     shared_factories = AdapterRegistry().load_shared(storage="sqlite", audit="test")
     node = NodeApplication(
         configuration=make_configuration(lang=configured_language),
         shared_factories=shared_factories,
-        endpoint_path=tmp_path / "bcn.sock",
+        endpoint_path=tmp_path / "superai.sock",
         timeout_budget=make_budget(),
     )
 
@@ -94,7 +94,7 @@ async def test_command_dispatcher_rejects_requests_before_and_after_lifecycle(
     node = NodeApplication(
         configuration=make_configuration(),
         shared_factories=shared_factories,
-        endpoint_path=tmp_path / "bcn.sock",
+        endpoint_path=tmp_path / "superai.sock",
         timeout_budget=make_budget(),
     )
 
@@ -122,7 +122,7 @@ async def test_node_skips_the_version_watcher_when_the_operator_turns_it_off(
     node = NodeApplication(
         configuration=make_configuration(),
         shared_factories=shared_factories,
-        endpoint_path=tmp_path / "bcn.sock",
+        endpoint_path=tmp_path / "superai.sock",
         timeout_budget=make_budget(),
     )
 
@@ -144,7 +144,7 @@ async def test_node_runs_the_audit_sink_and_reports_its_own_health(
     node = NodeApplication(
         configuration=make_configuration(),
         shared_factories=shared_factories,
-        endpoint_path=tmp_path / "bcn.sock",
+        endpoint_path=tmp_path / "superai.sock",
         timeout_budget=make_budget(),
     )
     audit = node.audit

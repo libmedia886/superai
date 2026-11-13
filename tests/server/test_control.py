@@ -7,14 +7,14 @@ from typing import Any
 from uuid import uuid7
 
 import pytest
-from bcn_test_support import TestRuntime
+from superai_test_support import TestRuntime
 
-from bazaar_compute_node.core.models import Message, MessageDirection, SenderIdentity
-from bazaar_compute_node.core.paths import resolve_workspace_dir
-from bazaar_compute_node.core.reminder import ReminderScheduleRequest
-from bazaar_compute_node.core.runtime import RuntimeDescription, RuntimeSkill
-from bazaar_compute_node.core.utils.clock import now_ms
-from bazaar_compute_server.control import Controls
+from superai_node.core.models import Message, MessageDirection, SenderIdentity
+from superai_node.core.paths import resolve_workspace_dir
+from superai_node.core.reminder import ReminderScheduleRequest
+from superai_node.core.runtime import RuntimeDescription, RuntimeSkill
+from superai_node.core.utils.clock import now_ms
+from superai_server.control import Controls
 
 from ._node import AGENT_ID, node_reporting_to
 from ._serving import enrol, free_port, serving_app
@@ -28,7 +28,7 @@ async def test_a_request_goes_down_and_its_answer_comes_back(
         storage = app.state.storage
         controls: Controls = app.state.controls
         enrolment = await enrol(storage, "kana")
-        monkeypatch.setenv("BCN_SERVER_TOKEN", enrolment.token)
+        monkeypatch.setenv("SUPERAI_SERVER_TOKEN", enrolment.token)
         node = await node_reporting_to(base, tmp_path)
         try:
             assert node.control is not None
@@ -68,7 +68,7 @@ async def test_a_computer_that_does_not_answer_is_said_so_and_asked_no_more(
         storage = app.state.storage
         controls: Controls = app.state.controls
         enrolment = await enrol(storage, "kana")
-        monkeypatch.setenv("BCN_SERVER_TOKEN", enrolment.token)
+        monkeypatch.setenv("SUPERAI_SERVER_TOKEN", enrolment.token)
         request = {"read": "contacts", "agent_id": AGENT_ID}
 
         # case: nobody is polling: the asker gets nothing after its wait, and
@@ -111,7 +111,7 @@ async def test_a_server_that_is_not_there_is_asked_again_quietly(
     port = free_port()
     async with serving_app(tmp_path, port) as (_, app):
         enrolment = await enrol(app.state.storage, "kana")
-    monkeypatch.setenv("BCN_SERVER_TOKEN", enrolment.token)
+    monkeypatch.setenv("SUPERAI_SERVER_TOKEN", enrolment.token)
     # the server's port, taken by something that hangs up on every fetch
     attempts: list[float] = []
 
@@ -165,7 +165,7 @@ async def test_a_server_reviews_and_sets_what_an_agent_does(
         storage = app.state.storage
         controls: Controls = app.state.controls
         enrolment = await enrol(storage, "kana")
-        monkeypatch.setenv("BCN_SERVER_TOKEN", enrolment.token)
+        monkeypatch.setenv("SUPERAI_SERVER_TOKEN", enrolment.token)
         node = await node_reporting_to(base, tmp_path)
         try:
             agent = node.agents[AGENT_ID]
@@ -251,7 +251,7 @@ async def test_a_server_takes_an_agent_in_changes_it_and_lets_it_go(
         storage = app.state.storage
         controls: Controls = app.state.controls
         enrolment = await enrol(storage, "kana")
-        monkeypatch.setenv("BCN_SERVER_TOKEN", enrolment.token)
+        monkeypatch.setenv("SUPERAI_SERVER_TOKEN", enrolment.token)
         node = await node_reporting_to(base, tmp_path)
         computer = enrolment.computer.id
         config_path = tmp_path / "config.toml"
@@ -302,7 +302,7 @@ async def test_a_server_takes_an_agent_in_changes_it_and_lets_it_go(
             said = await ask(read="setting", agent_id=newcomer, key="review.reply")
             assert said["value"] == "One moment."
             assert "secret-1" not in str(written) and "value-1" not in str(written)
-            prefix = f"BCN_{newcomer.replace('-', '_').upper()}"
+            prefix = f"SUPERAI_{newcomer.replace('-', '_').upper()}"
             # POSIX keeps names apart by case; Windows names are case insensitive.
             environment = written["runtime"][0]["env"]
             assert "value-1" in os.environ[environment["API_KEY"]]

@@ -13,17 +13,17 @@ from uuid import UUID
 import click
 import pytest
 
-import bazaar_compute_node.app.system_service as system_service_module
-from bazaar_compute_node import __version__
-from bazaar_compute_node.app.config import ConfigurationError, load_node_configuration
-from bazaar_compute_node.cli import main
-from bazaar_compute_node.cmd.bcn import build_cli
-from bazaar_compute_node.cmd.bcn._runner import UsageReporter, arguments
-from bazaar_compute_node.cmd.bcn.node import _apply_runtime_configuration
-from bazaar_compute_node.core.client import CLIENT_INFO
-from bazaar_compute_node.core.paths import resolve_data_dir
-from bazaar_compute_node.core.runtime import RuntimeSandboxMode
-from bazaar_compute_node.i18n import (
+import superai_node.app.system_service as system_service_module
+from superai_node import __version__
+from superai_node.app.config import ConfigurationError, load_node_configuration
+from superai_node.cli import main
+from superai_node.cmd.superai import build_cli
+from superai_node.cmd.superai._runner import UsageReporter, arguments
+from superai_node.cmd.superai.node import _apply_runtime_configuration
+from superai_node.core.client import CLIENT_INFO
+from superai_node.core.paths import resolve_data_dir
+from superai_node.core.runtime import RuntimeSandboxMode
+from superai_node.i18n import (
     SIMPLIFIED_CHINESE,
     Translator,
     create_translator,
@@ -32,7 +32,7 @@ from bazaar_compute_node.i18n import (
 
 def render_help(translator: Translator) -> str:
     cli = build_cli(translator)
-    return cli.get_help(click.Context(cli, info_name="bcn"))
+    return cli.get_help(click.Context(cli, info_name="superai"))
 
 
 def render_command_help(cli: click.Group, name: str) -> str:
@@ -64,13 +64,13 @@ def test_a_group_asked_for_nothing_answers_with_its_own_help(
 ) -> None:
     # naming a group and stopping there is a question about that group
     assert main(["agent"]) == 0
-    assert capsys.readouterr().out.startswith("Usage: bcn agent")
+    assert capsys.readouterr().out.startswith("Usage: superai agent")
 
     assert main(["system-service"]) == 0
-    assert capsys.readouterr().out.startswith("Usage: bcn system-service")
+    assert capsys.readouterr().out.startswith("Usage: superai system-service")
 
     assert main([]) == 0
-    assert capsys.readouterr().out.startswith("Usage: bcn ")
+    assert capsys.readouterr().out.startswith("Usage: superai ")
 
 
 def test_help_and_version_output() -> None:
@@ -89,12 +89,12 @@ def test_help_and_version_output() -> None:
     agent_help = render_command_help(cli, "agent")
     service_help = render_command_help(cli, "system-service")
 
-    assert translator.text("cli.bcn.config") in root_help
+    assert translator.text("cli.superai.config") in root_help
     assert translator.text("cli.agent.description") in agent_help
     assert translator.text("cli.system_service.description") in service_help
 
     # the reported version matches distribution metadata
-    distribution_version = version("bazaar-compute-node")
+    distribution_version = version("superai")
 
     assert __version__ == distribution_version
     assert CLIENT_INFO.version == distribution_version
@@ -269,14 +269,14 @@ kind = "codex"
 
 def test_help_works_in_a_real_process() -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "bazaar_compute_node.cli", "--help"],
+        [sys.executable, "-m", "superai_node.cli", "--help"],
         capture_output=True,
         check=False,
         text=True,
     )
 
     assert result.returncode == 0
-    assert "Usage: bcn" in result.stdout
+    assert "Usage: superai" in result.stdout
 
 
 def test_run_accepts_a_zero_agent_configuration(tmp_path: Path) -> None:
@@ -303,7 +303,7 @@ def test_another_audit_sink_leaves_the_server_control_behind(tmp_path: Path) -> 
     config_path = tmp_path / "config.toml"
     config_path.write_text(
         'version = "4"\n\n[node]\naudit = "server"\ncontrol = "server"\n\n'
-        '[node.server]\nurl = "http://bcs.test"\ntoken = "t"\n',
+        '[node.server]\nurl = "http://superai-server.test"\ntoken = "t"\n',
         encoding="utf-8",
     )
     kept = arguments(
@@ -396,7 +396,7 @@ def test_agent_add_preserves_typed_options_and_round_trips(
                 "--runtime",
                 "codex",
                 "--set",
-                "channel.token_env=BCN_TELEGRAM_TIFA_TOKEN",
+                "channel.token_env=SUPERAI_TELEGRAM_TIFA_TOKEN",
                 "--set",
                 "channel.bot_id=bot-id",
                 "--set",
@@ -406,7 +406,7 @@ def test_agent_add_preserves_typed_options_and_round_trips(
                 "--set",
                 "agent.idle_timeout=600",
                 "--set",
-                "runtime.env=CODEX_HOME=BCN_CODEX_HOME_WORK",
+                "runtime.env=CODEX_HOME=SUPERAI_CODEX_HOME_WORK",
                 "--set",
                 "runtime.env=SSH_AUTH_SOCK=SSH_AUTH_SOCK",
             ]
@@ -416,7 +416,7 @@ def test_agent_add_preserves_typed_options_and_round_trips(
 
     output = capsys.readouterr().out
     assert "Agent added id=" in output
-    assert "Run `bcn restart` to apply." in output
+    assert "Run `superai restart` to apply." in output
     document = tomllib.loads(config_path.read_text(encoding="utf-8"))
     agent = document["agent"][0]
     assert UUID(agent["id"]).version == 7
@@ -426,7 +426,7 @@ def test_agent_add_preserves_typed_options_and_round_trips(
         {
             "kind": "telegram",
             "bot_id": "bot-id",
-            "token_env": "BCN_TELEGRAM_TIFA_TOKEN",
+            "token_env": "SUPERAI_TELEGRAM_TIFA_TOKEN",
         }
     ]
     assert agent["runtime"] == [
@@ -436,7 +436,7 @@ def test_agent_add_preserves_typed_options_and_round_trips(
             "sandbox_mode": "workspace-write",
             "network_access": False,
             "env": {
-                "CODEX_HOME": "BCN_CODEX_HOME_WORK",
+                "CODEX_HOME": "SUPERAI_CODEX_HOME_WORK",
                 "SSH_AUTH_SOCK": "SSH_AUTH_SOCK",
             },
         }
@@ -501,7 +501,7 @@ def test_agent_add_converts_deprecated_env_include_to_env(
                 "--runtime",
                 "codex",
                 "--set",
-                "runtime.env=CODEX_HOME=BCN_CODEX_HOME_WORK",
+                "runtime.env=CODEX_HOME=SUPERAI_CODEX_HOME_WORK",
                 "--set",
                 'runtime.env_include=["CODEX_HOME", "CUSTOM_CA"]',
             ]
@@ -522,8 +522,8 @@ def test_agent_add_converts_deprecated_env_include_to_env(
         'runtime.env_include=["A", "A"]',
         "runtime.env_include=[1]",
         "runtime.env=CODEX_HOME",
-        "runtime.env==BCN_CODEX_HOME_WORK",
-        "runtime.env=bad-name=BCN_CODEX_HOME_WORK",
+        "runtime.env==SUPERAI_CODEX_HOME_WORK",
+        "runtime.env=bad-name=SUPERAI_CODEX_HOME_WORK",
     ):
         with pytest.raises(SystemExit):
             main(
@@ -813,7 +813,7 @@ def test_server_connect_records_the_server_and_keeps_the_token_out_of_config(
     assert payload["node"]["control"] == "server"
     assert payload["node"]["server"] == {
         "url": "http://127.0.0.1:8765",
-        "token_env": "BCN_SERVER_TOKEN",
+        "token_env": "SUPERAI_SERVER_TOKEN",
     }
     assert token not in config_path.read_text(encoding="utf-8")
 
@@ -822,10 +822,10 @@ def test_server_connect_records_the_server_and_keeps_the_token_out_of_config(
     assert token in env_file.read_text(encoding="utf-8")
     if os.name != "nt":
         assert stat.S_IMODE(env_file.stat().st_mode) == 0o600
-    assert "bcn system-service start" in capsys.readouterr().out
+    assert "superai system-service start" in capsys.readouterr().out
 
     # case: connecting again replaces the token and keeps other variables
-    from bazaar_compute_node.app.server_management import write_env_value
+    from superai_node.app.server_management import write_env_value
 
     write_env_value(env_file, "OTHER", "kept")
     assert (
@@ -881,7 +881,7 @@ def test_server_connect_records_the_server_and_keeps_the_token_out_of_config(
             (
                 "import resource, sys",
                 f"resource.setrlimit(resource.RLIMIT_FSIZE, ({limit}, {limit}))",
-                "from bazaar_compute_node.cli import main",
+                "from superai_node.cli import main",
                 "sys.exit(main(sys.argv[1:]))",
             )
         )
@@ -936,7 +936,7 @@ def test_server_connect_takes_the_env_file_from_the_registered_service(
     assert default_file.is_relative_to(tmp_path.parent)
     # the service reads that file without being told, so the hint says so
     out = capsys.readouterr().out
-    assert "bcn system-service install`" in out and "--env-file" not in out
+    assert "superai system-service install`" in out and "--env-file" not in out
     assert ":secret" in default_file.read_text(encoding="utf-8")
 
     # case: the file the service was installed with is the one that gets the
@@ -944,7 +944,7 @@ def test_server_connect_takes_the_env_file_from_the_registered_service(
     if platform.system() != "Linux":
         pytest.skip("the registered file is read from a systemd unit here")
     capsys.readouterr()
-    unit_path = Path.home() / ".config" / "systemd" / "user" / "bcn.service"
+    unit_path = Path.home() / ".config" / "systemd" / "user" / "superai.service"
     unit_path.parent.mkdir(parents=True)
     env_file = tmp_path / "service env" / "vars.env"
     unit_path.write_text(
@@ -967,6 +967,6 @@ def test_server_connect_takes_the_env_file_from_the_registered_service(
     )
     assert main(arguments_) == 0
     assert env_file.read_text(encoding="utf-8") == (
-        "BCN_SERVER_TOKEN='0198d4e6-29c5-7465-b74b-88db31f0c118:secret'\n"
+        "SUPERAI_SERVER_TOKEN='0198d4e6-29c5-7465-b74b-88db31f0c118:secret'\n"
     )
-    assert "bcn system-service start" in capsys.readouterr().out
+    assert "superai system-service start" in capsys.readouterr().out

@@ -3,15 +3,15 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from bcn_test_support import TestChannel
+from superai_test_support import TestChannel
 
-from bazaar_compute_node.core.channel import (
+from superai_node.core.channel import (
     ChannelDeliveryReceipt,
     ChannelSendRequest,
 )
-from bazaar_compute_node.core.models import ChannelTargetKind, OutboundDeliveryState
-from bazaar_compute_node.core.orchestration.delivery import OutboundDeliveryService
-from bazaar_compute_node.core.outcomes import ProviderCallResult, ProviderCallStatus
+from superai_node.core.models import ChannelTargetKind, OutboundDeliveryState
+from superai_node.core.orchestration.delivery import OutboundDeliveryService
+from superai_node.core.outcomes import ProviderCallResult, ProviderCallStatus
 
 
 def _request() -> ChannelSendRequest:

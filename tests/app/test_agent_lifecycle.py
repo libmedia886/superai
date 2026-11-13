@@ -6,11 +6,11 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from bcn_test_support import RecordingAudit, TestRuntime
+from superai_test_support import RecordingAudit, TestRuntime
 from test_composition import AGENT_ID, make_budget, make_configuration
 
-from bazaar_compute_node.app.application import NodeApplication
-from bazaar_compute_node.app.config import (
+from superai_node.app.application import NodeApplication
+from superai_node.app.config import (
     AgentConfiguration,
     ChannelConfiguration,
     ConfigurationError,
@@ -18,7 +18,7 @@ from bazaar_compute_node.app.config import (
     load_node_configuration,
     write_configuration,
 )
-from bazaar_compute_node.app.registry import AdapterRegistry
+from superai_node.app.registry import AdapterRegistry
 
 NEWCOMER_ID = "0199aa00-1111-7222-8333-444455556666"
 
@@ -36,12 +36,13 @@ async def test_a_running_node_takes_agents_in_changes_them_and_lets_them_go(
     env_path = tmp_path / "runtime.env"
     write_configuration(config_path, make_configuration())
     monkeypatch.delenv(
-        "BCN_0199AA00_1111_7222_8333_444455556666_CHANNEL0_TEST_TOKEN", raising=False
+        "SUPERAI_0199AA00_1111_7222_8333_444455556666_CHANNEL0_TEST_TOKEN",
+        raising=False,
     )
     node = NodeApplication(
         configuration=make_configuration(),
         shared_factories=AdapterRegistry().load_shared(storage="sqlite", audit="test"),
-        endpoint_path=tmp_path / "bcn.sock",
+        endpoint_path=tmp_path / "superai.sock",
         timeout_budget=make_budget(),
         config_path=config_path,
         env_path=env_path,
@@ -62,10 +63,12 @@ async def test_a_running_node_takes_agents_in_changes_them_and_lets_them_go(
         # variable name in the environment file and the process
         added = await node.add_agent(newcomer, {0: {"token": "secret-1"}})
         assert added.channels[0].options == {
-            "token_env": "BCN_0199AA00_1111_7222_8333_444455556666_CHANNEL0_TEST_TOKEN"
+            "token_env": "SUPERAI_0199AA00_1111_7222_8333_444455556666_CHANNEL0_TEST_TOKEN"
         }
         assert (
-            os.environ["BCN_0199AA00_1111_7222_8333_444455556666_CHANNEL0_TEST_TOKEN"]
+            os.environ[
+                "SUPERAI_0199AA00_1111_7222_8333_444455556666_CHANNEL0_TEST_TOKEN"
+            ]
             == "secret-1"
         )
         assert (
@@ -76,7 +79,7 @@ async def test_a_running_node_takes_agents_in_changes_them_and_lets_them_go(
         stored = load_node_configuration(config_path)
         assert [agent.id for agent in stored.agents] == [AGENT_ID, NEWCOMER_ID]
         assert stored.agents[1].channels[0].options == {
-            "token_env": "BCN_0199AA00_1111_7222_8333_444455556666_CHANNEL0_TEST_TOKEN"
+            "token_env": "SUPERAI_0199AA00_1111_7222_8333_444455556666_CHANNEL0_TEST_TOKEN"
         }
         assert _beaten(audit) == [AGENT_ID, NEWCOMER_ID]
         assert "secret-1" not in str(audit.events)
@@ -88,10 +91,12 @@ async def test_a_running_node_takes_agents_in_changes_them_and_lets_them_go(
             replace(added, name="Renamed"), {0: {"token": "secret-2"}}
         )
         assert changed.channels[0].options == {
-            "token_env": "BCN_0199AA00_1111_7222_8333_444455556666_CHANNEL0_TEST_TOKEN"
+            "token_env": "SUPERAI_0199AA00_1111_7222_8333_444455556666_CHANNEL0_TEST_TOKEN"
         }
         assert (
-            os.environ["BCN_0199AA00_1111_7222_8333_444455556666_CHANNEL0_TEST_TOKEN"]
+            os.environ[
+                "SUPERAI_0199AA00_1111_7222_8333_444455556666_CHANNEL0_TEST_TOKEN"
+            ]
             == "secret-2"
         )
         assert (
@@ -144,7 +149,7 @@ async def test_a_running_node_takes_agents_in_changes_them_and_lets_them_go(
         assert [a.id for a in load_node_configuration(config_path).agents] == [AGENT_ID]
         assert _beaten(audit) == [AGENT_ID]
         assert (
-            "BCN_0199AA00_1111_7222_8333_444455556666_CHANNEL0_TEST_TOKEN"
+            "SUPERAI_0199AA00_1111_7222_8333_444455556666_CHANNEL0_TEST_TOKEN"
             in env_path.read_text()
         )
         assert node.agents[AGENT_ID] is first and first.started
@@ -163,7 +168,7 @@ async def test_a_running_node_takes_agents_in_changes_them_and_lets_them_go(
     finally:
         await node.stop()
         monkeypatch.delenv(
-            "BCN_0199AA00_1111_7222_8333_444455556666_CHANNEL0_TEST_TOKEN",
+            "SUPERAI_0199AA00_1111_7222_8333_444455556666_CHANNEL0_TEST_TOKEN",
             raising=False,
         )
 
@@ -182,7 +187,7 @@ async def test_a_change_the_node_will_not_have_keeps_nothing_and_a_bad_stop_goes
     node = NodeApplication(
         configuration=make_configuration(),
         shared_factories=AdapterRegistry().load_shared(storage="sqlite", audit="test"),
-        endpoint_path=tmp_path / "bcn.sock",
+        endpoint_path=tmp_path / "superai.sock",
         timeout_budget=make_budget(),
         config_path=config_path,
         env_path=env_path,
@@ -217,7 +222,7 @@ async def test_a_stop_cancelled_on_the_way_down_is_cancelled(tmp_path: Path) -> 
     node = NodeApplication(
         configuration=make_configuration(),
         shared_factories=AdapterRegistry().load_shared(storage="sqlite", audit="test"),
-        endpoint_path=tmp_path / "bcn.sock",
+        endpoint_path=tmp_path / "superai.sock",
         timeout_budget=make_budget(),
         config_path=config_path,
     )

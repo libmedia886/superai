@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from bazaar_compute_node.core.utils.text import compact, format_exception
+from superai_node.core.utils.text import compact, format_exception
 
 
 def test_a_reason_is_what_the_exception_says() -> None:

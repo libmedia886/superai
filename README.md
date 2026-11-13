@@ -1,4 +1,4 @@
-# Bazaar Compute Node
+# SuperAI
 
 Bring Your Own Agents to the bazaar, and build with your teams in the open.
 
@@ -31,20 +31,20 @@ Python 3.14+ is required.
 需要 Python 3.14 或更高版本。
 
 > **Note / 注意**: the commands below install
-> [`bazaar-compute-node`](https://pypi.org/project/bazaar-compute-node) from PyPI,
+> [`superai`](https://pypi.org/project/superai) from PyPI,
 > which is **upstream** code, not this fork. To run the code in this repository,
 > install it from a checkout instead.
 >
-> 下方命令从 PyPI 安装的 `bazaar-compute-node` 是**上游**代码，不是本仓库的代码。
+> 下方命令从 PyPI 安装的 `superai` 是**上游**代码，不是本仓库的代码。
 > 要运行本仓库的代码，请从本地检出的副本安装。
 
 ```sh
 # Install / 安装
-uv tool install bazaar-compute-node
-bcn --version
+uv tool install superai
+superai --version
 
 # Upgrade / 升级
-uv tool upgrade bazaar-compute-node
+uv tool upgrade superai
 
 # Add an Agent / 添加智能体
 # allowed_chats lists the chats let in by name: Telegram chat ids (a private
@@ -52,37 +52,37 @@ uv tool upgrade bazaar-compute-node
 # server; with no server and no list, everyone is let in
 # allowed_chats 是按名放行的会话：Telegram 的 chat id（私聊的 chat id 就是对方
 # 的 user id）。其余的等服务端审核；没接服务端也没写名单时，谁来都放行
-bcn agent add \
+superai agent add \
   --name Tifa \
   --channel telegram \
   --runtime codex \
-  --set channel.token_env=BCN_TELEGRAM_TIFA_TOKEN \
+  --set channel.token_env=SUPERAI_TELEGRAM_TIFA_TOKEN \
   --set channel.allowed_chats=["123456789"]
 
 # Configure the runtime environment / 配置运行时环境
 # Example file content / 示例文件内容:
-# BCN_TELEGRAM_TIFA_TOKEN=replace-with-your-token
+# SUPERAI_TELEGRAM_TIFA_TOKEN=replace-with-your-token
 
 # Register the user-level system service / 注册用户级宿主机服务
-bcn system-service install --env-file ~/.config/bcn/runtime.env
+superai system-service install --env-file ~/.config/superai/runtime.env
 
 # Start the registered service / 启动已注册的服务
-bcn system-service start
+superai system-service start
 
-# Inspect registration and bcn health / 查看注册状态和 bcn 运行状态
-bcn system-service status
+# Inspect registration and superai health / 查看注册状态和 superai 运行状态
+superai system-service status
 
 # Restart or stop the registered service / 重启或停止已注册的服务
-bcn system-service restart
-bcn system-service stop
+superai system-service restart
+superai system-service stop
 ```
 
 ## Service logs / 服务日志
 
 ```text
-Linux:   journalctl --user -u bcn.service -f
-macOS:   tail -f ~/.bcn/system-service.log
-Windows: Get-Content "$env:USERPROFILE\.bcn\system-service.log" -Wait
+Linux:   journalctl --user -u superai.service -f
+macOS:   tail -f ~/.superai/system-service.log
+Windows: Get-Content "$env:USERPROFILE\.superai\system-service.log" -Wait
 ```
 
 ## Features / 功能

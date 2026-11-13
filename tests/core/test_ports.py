@@ -6,19 +6,19 @@ from dataclasses import replace
 from typing import cast
 
 import pytest
-from bcn_test_support import TestChannel, TestRuntime
+from superai_test_support import TestChannel, TestRuntime
 
-from bazaar_compute_node.core.actor import Thread
-from bazaar_compute_node.core.channel import (
+from superai_node.core.actor import Thread
+from superai_node.core.channel import (
     Channel,
     ChannelApprovalRequest,
     ChannelIdentity,
     Channels,
     ChannelSendRequest,
 )
-from bazaar_compute_node.core.concurrency import ThreadLockRegistry
-from bazaar_compute_node.core.lifecycle import TimeoutBudget
-from bazaar_compute_node.core.models import (
+from superai_node.core.concurrency import ThreadLockRegistry
+from superai_node.core.lifecycle import TimeoutBudget
+from superai_node.core.models import (
     ApprovalDecision,
     ApprovalRequest,
     ChannelTargetKind,
@@ -30,8 +30,8 @@ from bazaar_compute_node.core.models import (
     SenderKind,
     TurnCompleted,
 )
-from bazaar_compute_node.core.outcomes import ProviderCallResult, ProviderCallStatus
-from bazaar_compute_node.core.runtime import (
+from superai_node.core.outcomes import ProviderCallResult, ProviderCallStatus
+from superai_node.core.runtime import (
     RuntimeExpire,
 )
 
@@ -99,7 +99,7 @@ async def test_channel_sends_and_streams_under_one_session_namespace() -> None:
                 provider_turn_id=None,
                 occurred_at_ms=1,
             ),
-            payload=TurnCompleted(event_name="bcn.turn.completed"),
+            payload=TurnCompleted(event_name="superai.turn.completed"),
         ),
         session_id=local_session_id,
     )
@@ -477,7 +477,7 @@ def _turn_event(thread_id: str) -> RuntimeOutputEvent:
             provider_turn_id=None,
             occurred_at_ms=1,
         ),
-        payload=TurnCompleted(event_name="bcn.turn.completed"),
+        payload=TurnCompleted(event_name="superai.turn.completed"),
     )
 
 

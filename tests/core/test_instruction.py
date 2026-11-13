@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from bazaar_compute_node.core.instruction import DeveloperInstructionContext
-from bazaar_compute_node.rendering import TextTemplate
+from superai_node.core.instruction import DeveloperInstructionContext
+from superai_node.rendering import TextTemplate
 
 
 def test_developer_instructions_render_identity() -> None:
@@ -20,7 +20,7 @@ def test_developer_instructions_render_identity() -> None:
     rendered = context.render()
 
     assert rendered.startswith(
-        "You're Test Bot, A.K.A Test {{ agent }}, an AI agent in bcn "
+        "You're Test Bot, A.K.A Test {{ agent }}, an AI agent in superai "
     )
     assert "- Agent ID: agent-1" in rendered
     assert "- Runtime session ID: runtime-1" in rendered
@@ -38,7 +38,7 @@ def test_developer_instructions_render_identity() -> None:
         workspace="/workspace",
     ).render()
 
-    assert rendered.startswith("You're Test Agent, an AI agent in bcn ")
+    assert rendered.startswith("You're Test Agent, an AI agent in superai ")
 
     # an agent on several bots is introduced by every name it goes by
     rendered = DeveloperInstructionContext(
@@ -51,7 +51,7 @@ def test_developer_instructions_render_identity() -> None:
     ).render()
 
     assert rendered.startswith(
-        "You're Bot One, Bot Two and Bot Three, A.K.A Test Agent, an AI agent in bcn "
+        "You're Bot One, Bot Two and Bot Three, A.K.A Test Agent, an AI agent in superai "
     )
 
     with pytest.raises(ValueError, match="bot_names must not contain line breaks"):

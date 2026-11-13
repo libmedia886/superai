@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from bazaar_compute_node.app.version_check import VersionWatcher
-from bazaar_compute_node.core.timerwheel import TimerWheel
+from superai_node.app.version_check import VersionWatcher
+from superai_node.core.timerwheel import TimerWheel
 
 
 def _watcher(wheel: TimerWheel) -> VersionWatcher:

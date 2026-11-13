@@ -1,0 +1,25 @@
+{% import "components.html" as c with context %}
+{# the commands for either kind of machine, differing only in how uv arrives;
+   the browser's own kind is the tab open at first, the other is a click away.
+   the comments are part of the text: pasted whole, they run as nothing #}
+{% set uv = {
+  "unix": "curl -LsSf https://astral.sh/uv/install.sh | sh",
+  "windows": "powershell -ExecutionPolicy ByPass -c \"irm https://astral.sh/uv/install.ps1 | iex\""
+} %}
+{% set rest = "uv tool install superai\nsuperai server connect --url " ~ base_url ~ " --token " ~ enrolment.token ~ "\n# " ~ t.text("computers.first_time") ~ "\nsuperai system-service install\nsuperai system-service start" %}
+{# a section of the page like the agents under it: a title, then a box #}
+{{ c.section_title(t.text("computers.connect")) }}
+<div class="connect">
+  <p class="st">{{ t.text("computers.added") }}</p>
+  <div class="tabs">
+    {% for kind in ("unix", "windows") %}
+    <input type="radio" name="snippet" id="snippet-{{ kind }}"{% if kind == system %} checked{% endif %}>
+    <label for="snippet-{{ kind }}">{{ t.text("computers.on_" ~ kind) }}</label>
+    {% endfor %}
+    {# drawn as a code block in a chat is, read as bash #}
+    {% for kind, install in uv.items() %}
+    <div class="for md" id="for-{{ kind }}">{{ ("```bash\n" ~ install ~ "\n" ~ rest ~ "\n```")|markdown }}</div>
+    {% endfor %}
+  </div>
+  {% include "presence.html" %}
+</div>

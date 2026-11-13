@@ -9,7 +9,7 @@ from typing import cast
 
 import pytest
 
-from bazaar_compute_server.protocol import Event
+from superai_server.protocol import Event
 
 from ._serving import TESTER, enrol, serving_app, with_password
 from .test_pages import _event, _health, _short
@@ -208,19 +208,19 @@ async def test_real_node_reminders_time_and_offline_recovery(
     from dataclasses import replace
     from uuid import uuid7
 
-    from bcn_test_support.channel import TestChannel
-    from bcn_test_support.runtime import TestRuntime, TestTurnPlan
+    from superai_test_support.channel import TestChannel
+    from superai_test_support.runtime import TestRuntime, TestTurnPlan
 
-    from bazaar_compute_node.core.actor import Thread
-    from bazaar_compute_node.core.channel import Channel
-    from bazaar_compute_node.core.reminder import (
+    from superai_node.core.actor import Thread
+    from superai_node.core.channel import Channel
+    from superai_node.core.reminder import (
         ReminderCancelRequest,
         ReminderListRequest,
         ReminderScheduleRequest,
         ReminderSnoozeRequest,
         ReminderUpdateRequest,
     )
-    from bazaar_compute_server.clock import now_ms
+    from superai_server.clock import now_ms
 
     from ._node import AGENT_ID, node_reporting_to
     from .test_review import _stranger
@@ -232,7 +232,7 @@ async def test_real_node_reminders_time_and_offline_recovery(
         storage = app.state.storage
         await with_password(storage, *TESTER)
         enrolled = await enrol(storage, "Reminder test computer")
-        monkeypatch.setenv("BCN_SERVER_TOKEN", enrolled.token)
+        monkeypatch.setenv("SUPERAI_SERVER_TOKEN", enrolled.token)
         directory = tmp_path / "node"
         directory.mkdir()
         node = await node_reporting_to(base, directory)

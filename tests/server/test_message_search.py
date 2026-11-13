@@ -10,19 +10,19 @@ from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5, uuid7
 
 import pytest
-from bcn_test_support import StaticChannelBuilder, TestChannel
+from superai_test_support import StaticChannelBuilder, TestChannel
 
-from bazaar_compute_node.app.application import NodeApplication
-from bazaar_compute_node.app.config import (
+from superai_node.app.application import NodeApplication
+from superai_node.app.config import (
     AgentConfiguration,
     ChannelConfiguration,
     NodeConfiguration,
     RuntimeConfiguration,
 )
-from bazaar_compute_node.app.registry import AdapterRegistry, AgentAdapterFactories
-from bazaar_compute_node.contrib.codex.plugin import builder
-from bazaar_compute_node.core.agent import State
-from bazaar_compute_node.core.models import (
+from superai_node.app.registry import AdapterRegistry, AgentAdapterFactories
+from superai_node.contrib.codex.plugin import builder
+from superai_node.core.agent import State
+from superai_node.core.models import (
     Message,
     MessageDirection,
     Review,
@@ -80,7 +80,7 @@ async def test_search_control_browser_filters_and_subscription_state(
     async with serving_app(system_temp_dir / "server") as (base, server):
         await with_password(server.state.storage, *TESTER)
         enrolled = await enrol(server.state.storage, "Search workstation")
-        monkeypatch.setenv("BCN_SERVER_TOKEN", enrolled.token)
+        monkeypatch.setenv("SUPERAI_SERVER_TOKEN", enrolled.token)
         agent_id = str(uuid7())
         channel = TestChannel()
         configuration = NodeConfiguration(
@@ -88,8 +88,8 @@ async def test_search_control_browser_filters_and_subscription_state(
             storage="sqlite",
             audit="server",
             control="server",
-            audit_options={"url": base, "token_env": "BCN_SERVER_TOKEN"},
-            control_options={"url": base, "token_env": "BCN_SERVER_TOKEN"},
+            audit_options={"url": base, "token_env": "SUPERAI_SERVER_TOKEN"},
+            control_options={"url": base, "token_env": "SUPERAI_SERVER_TOKEN"},
             agents=(
                 AgentConfiguration(
                     id=agent_id,
@@ -144,7 +144,7 @@ async def test_search_control_browser_filters_and_subscription_state(
                 messages.append(message)
                 await channel.inject(message)
             threads = [
-                str(uuid5(NAMESPACE_URL, f"bcn:{agent_id}:bcn-session:{value}"))
+                str(uuid5(NAMESPACE_URL, f"superai:{agent_id}:superai-session:{value}"))
                 for value in sessions
             ]
             async with asyncio.timeout(30):
@@ -553,7 +553,7 @@ async def test_search_sender_pages_and_agent_navigation(
     async with serving_app(system_temp_dir / "server") as (base, server):
         await with_password(server.state.storage, *TESTER)
         enrolled = await enrol(server.state.storage, "Search scopes")
-        monkeypatch.setenv("BCN_SERVER_TOKEN", enrolled.token)
+        monkeypatch.setenv("SUPERAI_SERVER_TOKEN", enrolled.token)
         channels = {"test": TestChannel(), "other": TestChannel()}
         ids = [str(uuid7()), str(uuid7())]
         names = ["Alpha colleague", "Beta colleague"]
@@ -562,8 +562,8 @@ async def test_search_sender_pages_and_agent_navigation(
             storage="sqlite",
             audit="server",
             control="server",
-            audit_options={"url": base, "token_env": "BCN_SERVER_TOKEN"},
-            control_options={"url": base, "token_env": "BCN_SERVER_TOKEN"},
+            audit_options={"url": base, "token_env": "SUPERAI_SERVER_TOKEN"},
+            control_options={"url": base, "token_env": "SUPERAI_SERVER_TOKEN"},
             agents=tuple(
                 AgentConfiguration(
                     id=agent_id,
@@ -641,7 +641,9 @@ async def test_search_sender_pages_and_agent_navigation(
                         )
                     )
                 thread = str(
-                    uuid5(NAMESPACE_URL, f"bcn:{ids[index]}:bcn-session:{session}")
+                    uuid5(
+                        NAMESPACE_URL, f"superai:{ids[index]}:superai-session:{session}"
+                    )
                 )
                 async with asyncio.timeout(20):
                     while (
@@ -811,7 +813,7 @@ async def test_search_sender_pages_and_agent_navigation(
 async def test_search_focus_preserves_history_and_discards_old_responses(
     system_temp_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from bazaar_compute_node.core.models import (
+    from superai_node.core.models import (
         ChannelSession,
         ChannelTargetKind,
         Thread,
@@ -824,7 +826,7 @@ async def test_search_focus_preserves_history_and_discards_old_responses(
     async with serving_app(system_temp_dir / "server") as (base, server):
         await with_password(server.state.storage, *TESTER)
         enrolled = await enrol(server.state.storage, "History workstation")
-        monkeypatch.setenv("BCN_SERVER_TOKEN", enrolled.token)
+        monkeypatch.setenv("SUPERAI_SERVER_TOKEN", enrolled.token)
         agent_id = str(uuid7())
         channel = TestChannel()
         configuration = NodeConfiguration(
@@ -832,8 +834,8 @@ async def test_search_focus_preserves_history_and_discards_old_responses(
             storage="sqlite",
             audit="server",
             control="server",
-            audit_options={"url": base, "token_env": "BCN_SERVER_TOKEN"},
-            control_options={"url": base, "token_env": "BCN_SERVER_TOKEN"},
+            audit_options={"url": base, "token_env": "SUPERAI_SERVER_TOKEN"},
+            control_options={"url": base, "token_env": "SUPERAI_SERVER_TOKEN"},
             agents=(
                 AgentConfiguration(
                     id=agent_id,
@@ -855,7 +857,11 @@ async def test_search_focus_preserves_history_and_discards_old_responses(
         try:
             sessions = [str(uuid7()), str(uuid7())]
             threads = [
-                str(uuid5(NAMESPACE_URL, f"bcn:{agent_id}:bcn-session:{session}"))
+                str(
+                    uuid5(
+                        NAMESPACE_URL, f"superai:{agent_id}:superai-session:{session}"
+                    )
+                )
                 for session in sessions
             ]
             messages = []
@@ -903,7 +909,7 @@ async def test_search_focus_preserves_history_and_discards_old_responses(
                     id=str(
                         uuid5(
                             NAMESPACE_URL,
-                            f"bcn:{agent_id}:channel-session:{empty_session}",
+                            f"superai:{agent_id}:channel-session:{empty_session}",
                         )
                     ),
                     channel="test",
@@ -915,7 +921,10 @@ async def test_search_focus_preserves_history_and_discards_old_responses(
                     review=Review.APPROVED,
                 )
                 empty_thread = str(
-                    uuid5(NAMESPACE_URL, f"bcn:{agent_id}:bcn-session:{empty_session}")
+                    uuid5(
+                        NAMESPACE_URL,
+                        f"superai:{agent_id}:superai-session:{empty_session}",
+                    )
                 )
                 await node.agents[agent_id].storage.save_channel_session(empty_channel)
                 await node.agents[agent_id].storage.save_thread(

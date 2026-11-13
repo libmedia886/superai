@@ -5,13 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from bazaar_compute_server.access import Access
-from bazaar_compute_server.clock import now_ms
-from bazaar_compute_server.contrib.sqlite.storage import SqliteStorage
-from bazaar_compute_server.fleet import agent_page
-from bazaar_compute_server.permissions import Permission as P
-from bazaar_compute_server.protocol import Event
-from bazaar_compute_server.storage import OIDCProvider, Role, RoleShare
+from superai_server.access import Access
+from superai_server.clock import now_ms
+from superai_server.contrib.sqlite.storage import SqliteStorage
+from superai_server.fleet import agent_page
+from superai_server.permissions import Permission as P
+from superai_server.protocol import Event
+from superai_server.storage import OIDCProvider, Role, RoleShare
 
 from ._serving import serving, signed_in
 
@@ -145,7 +145,7 @@ async def test_role_members_browse_shared_resources_and_receive_action_grants(
 async def test_first_oidc_login_assigns_the_current_default_and_keeps_membership(
     tmp_path: Path,
 ) -> None:
-    path = tmp_path / "bcs.sqlite3"
+    path = tmp_path / "superai-server.sqlite3"
     storage = SqliteStorage(path, retention_days=30)
     await storage.start()
     try:
@@ -168,7 +168,7 @@ async def test_first_oidc_login_assigns_the_current_default_and_keeps_membership
             "https://issuer.example",
             "client",
             "secret",
-            "https://bcs.example/callback",
+            "https://superai-server.example/callback",
             now_ms(),
             now_ms(),
         )
@@ -206,7 +206,7 @@ async def test_first_oidc_login_assigns_the_current_default_and_keeps_membership
 async def test_provider_default_role_overrides_global_for_new_accounts(
     tmp_path: Path,
 ) -> None:
-    storage = SqliteStorage(tmp_path / "bcs.sqlite3", retention_days=30)
+    storage = SqliteStorage(tmp_path / "superai-server.sqlite3", retention_days=30)
     await storage.start()
     try:
         reader = Role(
@@ -228,7 +228,7 @@ async def test_provider_default_role_overrides_global_for_new_accounts(
             "https://issuer.example",
             "client",
             "secret",
-            "https://bcs.example/callback",
+            "https://superai-server.example/callback",
             now_ms(),
             now_ms(),
             default_role_id=reviewer.id,

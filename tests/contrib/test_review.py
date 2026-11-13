@@ -3,15 +3,15 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
-from bcn_test_support import TestChannel
+from superai_test_support import TestChannel
 from test_orchestration import make_message, make_sqlite_node
 
-from bazaar_compute_node.app.config import ChannelConfiguration, ConfigurationError
-from bazaar_compute_node.core.actor import Agent
-from bazaar_compute_node.core.channel import ChannelIdentity
-from bazaar_compute_node.core.models import Review, RuntimeTurnState
-from bazaar_compute_node.core.review import REVIEW_REPLY, ReviewPolicy
-from bazaar_compute_node.core.storage import InboxTargetResolutionError
+from superai_node.app.config import ChannelConfiguration, ConfigurationError
+from superai_node.core.actor import Agent
+from superai_node.core.channel import ChannelIdentity
+from superai_node.core.models import Review, RuntimeTurnState
+from superai_node.core.review import REVIEW_REPLY, ReviewPolicy
+from superai_node.core.storage import InboxTargetResolutionError
 
 
 @pytest.mark.asyncio
@@ -55,9 +55,9 @@ async def test_a_stranger_is_kept_but_not_heard_until_let_in() -> None:
     try:
         # case: the first message is kept, quiet
         assert await orchestrator.handle_inbound(make_message(seq=1)) is None
-        session = await scope.get_channel_session("channel-bcn-1")
+        session = await scope.get_channel_session("channel-superai-1")
         assert session is not None and session.review is Review.PENDING
-        kept = await scope.get_message("message-bcn-1-1")
+        kept = await scope.get_message("message-superai-1-1")
         assert kept is not None and kept.notifies_runtime is False
 
         # case: to the agent the conversation is not there, though the
@@ -65,33 +65,36 @@ async def test_a_stranger_is_kept_but_not_heard_until_let_in() -> None:
         listing = await service.check_inbox(agent, pending_only=False)
         assert listing.targets == () and listing.pending_review == 1
         with pytest.raises(InboxTargetResolutionError):
-            await service.read_messages(agent, raw_target="dm:channel-bcn-1")
+            await service.read_messages(agent, raw_target="dm:channel-superai-1")
         with pytest.raises(InboxTargetResolutionError):
             await service.send_message(
-                actor=agent, raw_target="dm:channel-bcn-1", body="hi", created_at_ms=2
+                actor=agent,
+                raw_target="dm:channel-superai-1",
+                body="hi",
+                created_at_ms=2,
             )
         # whoever reviews sees it, first message and all
         waiting = await service.check_inbox(
             agent, pending_only=False, review=Review.PENDING
         )
-        assert [item.thread_id for item in waiting.targets] == ["bcn-1"]
+        assert [item.thread_id for item in waiting.targets] == ["superai-1"]
         history = await service.read_messages(
-            agent, raw_target="dm:channel-bcn-1", review=None
+            agent, raw_target="dm:channel-superai-1", review=None
         )
         assert [item.body for item in history.messages] == ["inbound-1"]
 
         # case: let in, the next message runs a turn and the conversation is listed
-        await service.review_contact("bcn-1", Review.APPROVED)
+        await service.review_contact("superai-1", Review.APPROVED)
         turn = await orchestrator.handle_inbound(make_message(seq=2))
         assert turn is not None and turn.state is RuntimeTurnState.COMPLETED
         listing = await service.check_inbox(agent, pending_only=False)
-        assert [item.thread_id for item in listing.targets] == ["bcn-1"]
+        assert [item.thread_id for item in listing.targets] == ["superai-1"]
         assert listing.pending_review == 0
 
         # case: turned away, the next message is kept and asks again
-        await service.review_contact("bcn-1", Review.DENIED)
+        await service.review_contact("superai-1", Review.DENIED)
         assert await orchestrator.handle_inbound(make_message(seq=3)) is None
-        session = await scope.get_channel_session("channel-bcn-1")
+        session = await scope.get_channel_session("channel-superai-1")
         assert session is not None and session.review is Review.PENDING
         reviewed = [
             event.metadata["review"]
@@ -131,7 +134,7 @@ async def test_a_conversation_pending_review_is_answered_as_the_agent_is_set() -
             "Not yet: ask the operator.",
             "Not yet: ask the operator.",
         ]
-        assert channel.send_requests[0].provider_thread_id == "thread-bcn-1"
+        assert channel.send_requests[0].provider_thread_id == "thread-superai-1"
         replied = [
             event
             for event in audit.events
@@ -141,7 +144,7 @@ async def test_a_conversation_pending_review_is_answered_as_the_agent_is_set() -
         assert "setting.changed" in [event.event_name for event in audit.events]
 
         # case: let in, the reply stops
-        await service.review_contact("bcn-1", Review.APPROVED)
+        await service.review_contact("superai-1", Review.APPROVED)
         turn = await orchestrator.handle_inbound(make_message(seq=5))
         assert turn is not None and len(channel.send_requests) == 2
     finally:

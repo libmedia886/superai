@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from bazaar_compute_server.secrets import hash_secret, new_secret, verify_secret
+from superai_server.secrets import hash_secret, new_secret, verify_secret
 
 
 def test_secrets_verify_against_their_own_salt_only() -> None:

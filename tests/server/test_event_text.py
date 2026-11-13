@@ -3,9 +3,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from bazaar_compute_server.i18n import LANGUAGES, create_translator
+from superai_server.i18n import LANGUAGES, create_translator
 
-_NODE_SRC = Path(__file__).resolve().parents[2] / "src" / "bazaar_compute_node"
+_NODE_SRC = Path(__file__).resolve().parents[2] / "src" / "superai_node"
 
 # the names core builds at runtime, spelled out per the enum they come from
 _DYNAMIC = (
@@ -49,7 +49,7 @@ _DYNAMIC = (
 
 # a runtime's own word for a turn event rides in metadata; the audit names it
 # runtime.turn.<state> whichever runtime it was
-_RUNTIME_WORDS = re.compile(r"^(claudecode|codex|bcn)\.turn\.")
+_RUNTIME_WORDS = re.compile(r"^(claudecode|codex|superai)\.turn\.")
 
 
 def _literal_event_names() -> set[str]:

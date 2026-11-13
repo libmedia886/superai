@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from bazaar_compute_node.core.actor import Actors, Agent, Mode, Thread
+from superai_node.core.actor import Actors, Agent, Mode, Thread
 
 
 def test_a_session_actor_is_the_conversation_itself() -> None:

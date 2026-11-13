@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from bazaar_compute_node.contrib.codex.approval import parse_approval_request
-from bazaar_compute_node.core.actor import Thread
+from superai_node.contrib.codex.approval import parse_approval_request
+from superai_node.core.actor import Thread
 
 
 @pytest.mark.parametrize(

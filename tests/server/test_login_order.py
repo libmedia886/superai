@@ -5,8 +5,8 @@ from uuid import uuid7
 
 import pytest
 
-from bazaar_compute_server.clock import now_ms
-from bazaar_compute_server.storage import OIDCProvider
+from superai_server.clock import now_ms
+from superai_server.storage import OIDCProvider
 
 from ._serving import TESTER, serving_app, with_password
 

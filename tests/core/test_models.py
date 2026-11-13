@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from bazaar_compute_node.core.command import InboxListResult
-from bazaar_compute_node.core.models import (
+from superai_node.core.command import InboxListResult
+from superai_node.core.models import (
     ChannelTargetKind,
     InboxTargetSummary,
     Message,
@@ -20,7 +20,7 @@ def make_outbound_message() -> Message:
         direction=MessageDirection.OUTBOUND,
         seq=0,
         message_id="outbound-1",
-        thread_id="bcn-1",
+        thread_id="superai-1",
         channel_session_id="channel-1",
         target="#test:message-1",
         body="hello",
@@ -33,7 +33,7 @@ def make_outbound_message() -> Message:
 def make_inbox_target() -> InboxTargetSummary:
     return InboxTargetSummary(
         target="dm:user-1",
-        thread_id="bcn-1",
+        thread_id="superai-1",
         target_kind=ChannelTargetKind.DM,
         pending_count=2,
         last_activity_at_ms=100,

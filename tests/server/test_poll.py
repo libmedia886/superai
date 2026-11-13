@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from bazaar_compute_server.clock import now_ms
-from bazaar_compute_server.permissions import Permission
-from bazaar_compute_server.protocol import Event
-from bazaar_compute_server.storage import Role
+from superai_server.clock import now_ms
+from superai_server.permissions import Permission
+from superai_server.protocol import Event
+from superai_server.storage import Role
 
 from ._serving import enrol, serving_app, signed_in
 from .test_pages import _event, _health, _short

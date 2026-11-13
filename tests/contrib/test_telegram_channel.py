@@ -5,15 +5,15 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from bcn_test_support import RecordingAudit
+from superai_test_support import RecordingAudit
 
-import bazaar_compute_node.contrib.telegram.channel as telegram_channel_module
-from bazaar_compute_node.app.attachments import AttachmentMaterializer
-from bazaar_compute_node.contrib.telegram.channel import TelegramChannel
-from bazaar_compute_node.core.audit import AuditRecorder
-from bazaar_compute_node.core.channel import ChannelContext, ChannelIdentity
-from bazaar_compute_node.core.lifecycle import TimeoutBudget
-from bazaar_compute_node.core.models import Message, SenderIdentity, SenderKind
+import superai_node.contrib.telegram.channel as telegram_channel_module
+from superai_node.app.attachments import AttachmentMaterializer
+from superai_node.contrib.telegram.channel import TelegramChannel
+from superai_node.core.audit import AuditRecorder
+from superai_node.core.channel import ChannelContext, ChannelIdentity
+from superai_node.core.lifecycle import TimeoutBudget
+from superai_node.core.models import Message, SenderIdentity, SenderKind
 
 TEST_BOT_ID = 1_000_000_001
 TEST_USER_ID = 1_000_000_002
@@ -410,8 +410,8 @@ async def test_a_private_chat_from_anyone_is_read(tmp_path: Path) -> None:
 
 
 def test_telegram_reads_the_chat_a_send_landed_in() -> None:
-    from bazaar_compute_node.contrib.telegram.identity import TelegramThreadIdentity
-    from bazaar_compute_node.contrib.telegram.outbound import TelegramOutboundChannel
+    from superai_node.contrib.telegram.identity import TelegramThreadIdentity
+    from superai_node.contrib.telegram.outbound import TelegramOutboundChannel
 
     # a chat opened by name answers under its own id, and the send
     # acknowledgement is where that id first appears
@@ -433,7 +433,7 @@ def test_telegram_reads_the_chat_a_send_landed_in() -> None:
 
 
 def test_telegram_identity_round_trips_numeric_and_username_chats() -> None:
-    from bazaar_compute_node.contrib.telegram.identity import (
+    from superai_node.contrib.telegram.identity import (
         TelegramThreadIdentity,
         parse_provider_thread_id,
     )

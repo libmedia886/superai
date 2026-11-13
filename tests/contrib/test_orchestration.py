@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock
 from uuid import NAMESPACE_URL, UUID, uuid5, uuid7
 
 import pytest
-from bcn_test_support import (
+from superai_test_support import (
     MemoryStorage,
     RecordingAudit,
     StaticChannelBuilder,
@@ -21,49 +21,49 @@ from bcn_test_support import (
     wait_for_turn_terminal,
 )
 
-from bazaar_compute_node.app.application import NodeApplication
-from bazaar_compute_node.app.attachments import AttachmentMaterializer
-from bazaar_compute_node.app.command import (
+from superai_node.app.application import NodeApplication
+from superai_node.app.attachments import AttachmentMaterializer
+from superai_node.app.command import (
     format_check_message,
     format_read_message,
     serialize_message,
 )
-from bazaar_compute_node.app.config import (
+from superai_node.app.config import (
     AgentConfiguration,
     ChannelConfiguration,
     NodeConfiguration,
     RuntimeConfiguration,
 )
-from bazaar_compute_node.app.registry import (
+from superai_node.app.registry import (
     AdapterRegistry,
     AgentAdapterFactories,
     SharedAdapterFactories,
 )
-from bazaar_compute_node.app.resource_dispatch import CommandDispatcher
-from bazaar_compute_node.app.upgrade import UpgradeService
-from bazaar_compute_node.contrib.lark.api import LarkApi
-from bazaar_compute_node.contrib.lark.channel import LarkChannel
-from bazaar_compute_node.contrib.lark.identity import LarkBotIdentity
-from bazaar_compute_node.contrib.sqlite import SqliteDatabase
-from bazaar_compute_node.contrib.telegram.channel import TelegramChannel
-from bazaar_compute_node.core.actor import Actors, Agent, Mode, Thread
-from bazaar_compute_node.core.agent import State
-from bazaar_compute_node.core.audit import AuditEvent, AuditRecorder, ErrorKind
-from bazaar_compute_node.core.channel import (
+from superai_node.app.resource_dispatch import CommandDispatcher
+from superai_node.app.upgrade import UpgradeService
+from superai_node.contrib.lark.api import LarkApi
+from superai_node.contrib.lark.channel import LarkChannel
+from superai_node.contrib.lark.identity import LarkBotIdentity
+from superai_node.contrib.sqlite import SqliteDatabase
+from superai_node.contrib.telegram.channel import TelegramChannel
+from superai_node.core.actor import Actors, Agent, Mode, Thread
+from superai_node.core.agent import State
+from superai_node.core.audit import AuditEvent, AuditRecorder, ErrorKind
+from superai_node.core.channel import (
     ChannelContext,
     ChannelDeliveryReceipt,
     ChannelIdentity,
     ChannelSendRequest,
     IChannel,
 )
-from bazaar_compute_node.core.command import (
+from superai_node.core.command import (
     ICommandService,
     MessageBroadcast,
     MessageSendFreshnessHold,
     MessageSendSuccess,
 )
-from bazaar_compute_node.core.lifecycle import TimeoutBudget
-from bazaar_compute_node.core.models import (
+from superai_node.core.lifecycle import TimeoutBudget
+from superai_node.core.models import (
     ApprovalDecision,
     ApprovalRequest,
     ChannelSession,
@@ -98,27 +98,27 @@ from bazaar_compute_node.core.models import (
     TurnUnknown,
     UsageUpdated,
 )
-from bazaar_compute_node.core.orchestration import AgentOrchestrator
-from bazaar_compute_node.core.orchestration.orchestrator import (
+from superai_node.core.orchestration import AgentOrchestrator
+from superai_node.core.orchestration.orchestrator import (
     _NOTICE_WINDOW,
     _RuntimeNotification,
 )
-from bazaar_compute_node.core.orchestration.turn import inbox_notice
-from bazaar_compute_node.core.outcomes import ProviderCallResult, ProviderCallStatus
-from bazaar_compute_node.core.review import ReviewPolicy
-from bazaar_compute_node.core.runtime import (
+from superai_node.core.orchestration.turn import inbox_notice
+from superai_node.core.outcomes import ProviderCallResult, ProviderCallStatus
+from superai_node.core.review import ReviewPolicy
+from superai_node.core.runtime import (
     IRuntime,
     Runtime,
     RuntimeCommandContext,
 )
-from bazaar_compute_node.core.storage import (
+from superai_node.core.storage import (
     AmbiguousInboxTargetError,
     InboxTargetResolutionError,
     IStorage,
 )
-from bazaar_compute_node.core.timerwheel import TimerWheel
-from bazaar_compute_node.core.utils.clock import now_ms
-from bazaar_compute_node.i18n import (
+from superai_node.core.timerwheel import TimerWheel
+from superai_node.core.utils.clock import now_ms
+from superai_node.i18n import (
     ENGLISH,
     SIMPLIFIED_CHINESE,
     Translator,
@@ -159,7 +159,7 @@ class _AcceptanceRegistry(AdapterRegistry):
 
 def make_message(
     *,
-    session_id: str = "bcn-1",
+    session_id: str = "superai-1",
     seq: int = 1,
     message_id: str | None = None,
     body: str | None = None,
@@ -267,9 +267,7 @@ def test_inbox_notice_carries_the_upgrade_line_inside_the_bracket() -> None:
     # case: the offer is the last thing before the notice closes
     lines = with_upgrade.splitlines()
     assert lines[-1] == "]"
-    assert lines[-2].startswith(
-        "Upgrade available: bazaar-compute-node 0.2.0 (installed 0.1.31)."
-    )
+    assert lines[-2].startswith("Upgrade available: superai 0.2.0 (installed 0.1.31).")
     # the offer names whatever the platform can actually act on
     assert ("`bcc node upgrade`") in lines[-2]
 
@@ -631,7 +629,7 @@ async def run_natural_conversation_contract(
         scoped_session_id = str(
             uuid5(
                 NAMESPACE_URL,
-                f"bcn:{ACCEPTANCE_AGENT_ID}:bcn-session:{session_id}",
+                f"superai:{ACCEPTANCE_AGENT_ID}:superai-session:{session_id}",
             )
         )
         storage = SqliteDatabase()
@@ -801,28 +799,28 @@ async def test_channel_storage_runtime_turn_path() -> None:
         await wait_until(
             lambda: any(
                 event.event_name == "runtime.turn.completed"
-                and event.correlation.turn_id == "turn-message-bcn-1-1"
+                and event.correlation.turn_id == "turn-message-superai-1-1"
                 for event in audit.events
             )
         )
 
         assert _stored_messages(
             storage,
-            "bcn-1",
+            "superai-1",
             direction=MessageDirection.INBOUND,
         ) == [message]
-        assert orchestrator.session_runtime_state(Thread("bcn-1")) is State.IDLE
+        assert orchestrator.session_runtime_state(Thread("superai-1")) is State.IDLE
         assert runtime.started_turns
         assert any(
-            event.correlation.thread_id == "bcn-1"
-            and event.correlation.turn_id == "turn-message-bcn-1-1"
+            event.correlation.thread_id == "superai-1"
+            and event.correlation.turn_id == "turn-message-superai-1-1"
             for event in audit.events
         )
         unfollowed = await orchestrator.command_service.unfollow_thread(
-            Thread("bcn-1"), raw_target="dm:channel-bcn-1"
+            Thread("superai-1"), raw_target="dm:channel-superai-1"
         )
         assert unfollowed.changed is False
-        assert storage.channel_sessions["channel-bcn-1"].following is True
+        assert storage.channel_sessions["channel-superai-1"].following is True
     finally:
         await orchestrator.stop(timeout=1)
 
@@ -858,7 +856,7 @@ async def test_turn_work_is_audited_with_the_message_bodies() -> None:
         by_name = {event.event_name: event for event in audit.events}
         inbound = by_name["channel.inbound.persisted"].metadata
         assert inbound["text"] == "看下仓库状态"
-        assert inbound["target"] == "dm:channel-bcn-1"
+        assert inbound["target"] == "dm:channel-superai-1"
         assert inbound["target_kind"] == "dm"
         assert inbound["target_name"] is None
         assert inbound["sender"] == {
@@ -873,7 +871,7 @@ async def test_turn_work_is_audited_with_the_message_bodies() -> None:
         assert started.metadata["call_id"] == "call-1"
         # what the tool was given and what it answered stay in the transcript
         assert "input" not in started.metadata and "output" not in started.metadata
-        assert started.correlation.turn_id == "turn-message-bcn-1-1"
+        assert started.correlation.turn_id == "turn-message-superai-1-1"
         completed = by_name["tool_call.completed"]
         assert completed.metadata["call_id"] == started.metadata["call_id"]
         assert "output" not in completed.metadata
@@ -911,7 +909,7 @@ async def test_stream_events() -> None:
         await wait_until(
             lambda: any(
                 event.event_name == "runtime.turn.completed"
-                and event.correlation.turn_id == "turn-message-bcn-1-1"
+                and event.correlation.turn_id == "turn-message-superai-1-1"
                 for event in audit.events
             )
         )
@@ -926,7 +924,9 @@ async def test_stream_events() -> None:
             TurnStarted,
             TurnCompleted,
         ]
-        assert {event.envelope.actor.id for event in channel.stream_events} == {"bcn-1"}
+        assert {event.envelope.actor.id for event in channel.stream_events} == {
+            "superai-1"
+        }
         first_delta = channel.stream_events[0].payload
         last_delta = channel.stream_events[-1].payload
         assert isinstance(first_delta, ContentDelta)
@@ -948,13 +948,13 @@ async def test_stream_events() -> None:
         await wait_until(
             lambda: any(
                 event.event_name == "runtime.turn.completed"
-                and event.correlation.turn_id == "turn-message-bcn-1-1"
+                and event.correlation.turn_id == "turn-message-superai-1-1"
                 for event in audit.events
             )
         )
 
         assert not channel.stream_events
-        assert orchestrator.session_runtime_state(Thread("bcn-1")) is State.IDLE
+        assert orchestrator.session_runtime_state(Thread("superai-1")) is State.IDLE
     finally:
         await orchestrator.stop(timeout=1)
 
@@ -968,7 +968,7 @@ async def test_stream_events() -> None:
         await wait_until(
             lambda: any(
                 event.event_name == "runtime.turn.completed"
-                and event.correlation.turn_id == "turn-message-bcn-1-1"
+                and event.correlation.turn_id == "turn-message-superai-1-1"
                 for event in audit.events
             )
         )
@@ -1015,7 +1015,7 @@ async def test_runtime_can_run_real_command_service_behavior() -> None:
             timeout=1,
         )
         assert len(channel.sent_messages) == 1
-        assert storage.cursors["bcn-1"].delivered_through_seq == 1
+        assert storage.cursors["superai-1"].delivered_through_seq == 1
         assert _stored_message_index(storage, direction=MessageDirection.OUTBOUND)
         tool_events = [
             event for event in audit.events if event.metadata.get("kind") == "tool_call"
@@ -1041,15 +1041,15 @@ async def test_runtime_can_run_real_command_service_behavior() -> None:
 @pytest.mark.asyncio
 async def test_a_conversation_reads_its_own_history_and_no_other() -> None:
     orchestrator, _, _, storage, _ = await make_sqlite_node()
-    caller_id = "bcn-caller"
-    target_thread_id = "bcn-target"
+    caller_id = "superai-caller"
+    target_thread_id = "superai-target"
     caller_message = make_message(session_id=caller_id)
     target_parent = make_message(session_id=target_thread_id)
     target_reply = replace(
         target_parent,
         seq=2,
-        message_id="message-bcn-target-2",
-        provider_message_id="provider-bcn-target-2",
+        message_id="message-superai-target-2",
+        provider_message_id="provider-superai-target-2",
         received_at_ms=2,
         body="target reply",
         reply_to_message_id=target_parent.message_id,
@@ -1091,22 +1091,22 @@ async def test_approval_is_routed_to_the_current_channel_session() -> None:
     try:
         first_turn = await orchestrator.handle_inbound(make_message(seq=1))
         assert first_turn is not None
-        runtime_session = orchestrator.runtime_session(Thread("bcn-1"))
+        runtime_session = orchestrator.runtime_session(Thread("superai-1"))
         assert runtime_session is not None
         request = ApprovalRequest(
             request_id="approval-1",
-            actor=Thread("bcn-1"),
+            actor=Thread("superai-1"),
             runtime_session_id=runtime_session.id,
             action="test-action",
             created_at_ms=1,
-            turn_id="turn-message-bcn-1-2",
+            turn_id="turn-message-superai-1-2",
         )
         runtime.queue_turn_plan(TestTurnPlan(approval_request=request))
         await channel.inject(make_message(seq=2))
         await wait_until(
             lambda: any(
                 event.event_name == "runtime.turn.completed"
-                and event.correlation.turn_id == "turn-message-bcn-1-2"
+                and event.correlation.turn_id == "turn-message-superai-1-2"
                 for event in audit.events
             )
         )
@@ -1116,8 +1116,8 @@ async def test_approval_is_routed_to_the_current_channel_session() -> None:
         channel_request = channel.channel_approval_requests[0]
         assert channel_request.approval == request
         assert channel_request.target_kind is ChannelTargetKind.DM
-        assert channel_request.provider_thread_id == "thread-bcn-1"
-        assert channel_request.provider_reply_to_message_id == "provider-bcn-1-2"
+        assert channel_request.provider_thread_id == "thread-superai-1"
+        assert channel_request.provider_reply_to_message_id == "provider-superai-1-2"
         assert channel_request.provider_sender_id == "sender-id"
         assert runtime.approval_results
         assert runtime.approval_results[0].request_id == request.request_id
@@ -1138,7 +1138,7 @@ async def test_an_individual_actor_allows_tool_use_without_asking_anyone() -> No
     agent = Agent("workspace-1")
     try:
         opening_turn = await orchestrator.handle_inbound(
-            make_message(session_id="bcn-a", seq=1)
+            make_message(session_id="superai-a", seq=1)
         )
         assert opening_turn is not None
         runtime_session = orchestrator.runtime_session(agent)
@@ -1149,14 +1149,14 @@ async def test_an_individual_actor_allows_tool_use_without_asking_anyone() -> No
             runtime_session_id=runtime_session.id,
             action="test-action",
             created_at_ms=1,
-            turn_id="turn-message-bcn-a-2",
+            turn_id="turn-message-superai-a-2",
         )
         runtime.queue_turn_plan(TestTurnPlan(approval_request=request))
-        await channel.inject(make_message(session_id="bcn-a", seq=2))
+        await channel.inject(make_message(session_id="superai-a", seq=2))
         await wait_until(
             lambda: any(
                 event.event_name == "runtime.turn.completed"
-                and event.correlation.turn_id == "turn-message-bcn-a-2"
+                and event.correlation.turn_id == "turn-message-superai-a-2"
                 for event in audit.events
             )
         )
@@ -1188,7 +1188,7 @@ async def test_approval_preserves_sender_id_after_sqlite_round_trip() -> None:
     try:
         first_turn = await orchestrator.handle_inbound(make_message(seq=1))
         assert first_turn is not None
-        runtime_session = orchestrator.runtime_session(Thread("bcn-1"))
+        runtime_session = orchestrator.runtime_session(Thread("superai-1"))
         assert runtime_session is not None
         context, message, created = await orchestrator._record_inbound(
             make_message(seq=2)
@@ -1334,15 +1334,15 @@ async def test_non_human_approval_is_rejected_before_channel_call(
             (_RuntimeNotification(message=first_message, context=context),)
         )
         assert first_turn is not None
-        runtime_session = orchestrator.runtime_session(Thread("bcn-1"))
+        runtime_session = orchestrator.runtime_session(Thread("superai-1"))
         assert runtime_session is not None
         request = ApprovalRequest(
             request_id=f"approval-{sender_kind}-1",
-            actor=Thread("bcn-1"),
+            actor=Thread("superai-1"),
             runtime_session_id=runtime_session.id,
             action="test-action",
             created_at_ms=1,
-            turn_id="turn-message-bcn-1-2",
+            turn_id="turn-message-superai-1-2",
         )
         runtime.queue_turn_plan(TestTurnPlan(approval_request=request))
         message = make_message(seq=2, sender_kind=sender_kind)
@@ -1357,7 +1357,7 @@ async def test_non_human_approval_is_rejected_before_channel_call(
             await wait_until(
                 lambda: any(
                     event.event_name == "runtime.turn.completed"
-                    and event.correlation.turn_id == "turn-message-bcn-1-2"
+                    and event.correlation.turn_id == "turn-message-superai-1-2"
                     for event in audit.events
                 )
             )
@@ -1393,7 +1393,7 @@ async def test_fresh_check_holds_draft_until_context_is_reviewed() -> None:
                 len(
                     _stored_messages(
                         storage,
-                        "bcn-1",
+                        "superai-1",
                         direction=MessageDirection.INBOUND,
                     )
                 )
@@ -1402,13 +1402,13 @@ async def test_fresh_check_holds_draft_until_context_is_reviewed() -> None:
         )
 
         held_without_snapshot = await orchestrator.command_service.send_message(
-            actor=Thread("bcn-1"),
-            raw_target="dm:channel-bcn-1",
+            actor=Thread("superai-1"),
+            raw_target="dm:channel-superai-1",
             body="reply",
             created_at_ms=2,
             reply_to_message_id=_stored_messages(
                 storage,
-                "bcn-1",
+                "superai-1",
                 direction=MessageDirection.INBOUND,
             )[0].message_id,
         )
@@ -1417,7 +1417,7 @@ async def test_fresh_check_holds_draft_until_context_is_reviewed() -> None:
         assert held_without_snapshot.messages == tuple(
             _stored_messages(
                 storage,
-                "bcn-1",
+                "superai-1",
                 direction=MessageDirection.INBOUND,
             )
         )
@@ -1428,11 +1428,13 @@ async def test_fresh_check_holds_draft_until_context_is_reviewed() -> None:
         )
         assert not channel.send_attempts
 
-        (checked,) = await orchestrator.command_service.check_messages(Thread("bcn-1"))
+        (checked,) = await orchestrator.command_service.check_messages(
+            Thread("superai-1")
+        )
         assert checked.messages
         delivered = await orchestrator.command_service.send_message(
-            actor=Thread("bcn-1"),
-            raw_target="dm:channel-bcn-1",
+            actor=Thread("superai-1"),
+            raw_target="dm:channel-superai-1",
             body="",
             created_at_ms=3,
             send_draft=True,
@@ -1444,15 +1446,15 @@ async def test_fresh_check_holds_draft_until_context_is_reviewed() -> None:
         assert channel.send_requests[0].provider_reply_to_message_id == (
             _stored_messages(
                 storage,
-                "bcn-1",
+                "superai-1",
                 direction=MessageDirection.INBOUND,
             )[0].provider_message_id
         )
         assert len(channel.send_attempts) == 1
         with pytest.raises(ValueError, match="no active draft"):
             await orchestrator.command_service.send_message(
-                actor=Thread("bcn-1"),
-                raw_target="dm:channel-bcn-1",
+                actor=Thread("superai-1"),
+                raw_target="dm:channel-superai-1",
                 body="",
                 created_at_ms=4,
                 send_draft=True,
@@ -1464,7 +1466,7 @@ async def test_fresh_check_holds_draft_until_context_is_reviewed() -> None:
                 len(
                     _stored_messages(
                         storage,
-                        "bcn-1",
+                        "superai-1",
                         direction=MessageDirection.INBOUND,
                     )
                 )
@@ -1472,16 +1474,16 @@ async def test_fresh_check_holds_draft_until_context_is_reviewed() -> None:
             )
         )
         stale = await orchestrator.command_service.send_message(
-            actor=Thread("bcn-1"),
-            raw_target="dm:channel-bcn-1",
+            actor=Thread("superai-1"),
+            raw_target="dm:channel-superai-1",
             body="stale draft",
             created_at_ms=5,
         )
         assert isinstance(stale, MessageSendFreshnessHold)
         assert stale.draft_replaced is False
         revised = await orchestrator.command_service.send_message(
-            actor=Thread("bcn-1"),
-            raw_target="dm:channel-bcn-1",
+            actor=Thread("superai-1"),
+            raw_target="dm:channel-superai-1",
             body="revised draft",
             created_at_ms=6,
         )
@@ -1501,8 +1503,8 @@ async def test_sqlite_freshness_hold_returns_latest_bounded_context() -> None:
             await orchestrator._record_inbound(make_message(seq=seq))
 
         held = await orchestrator.command_service.send_message(
-            actor=Thread("bcn-1"),
-            raw_target="dm:channel-bcn-1",
+            actor=Thread("superai-1"),
+            raw_target="dm:channel-superai-1",
             body="reply",
             created_at_ms=26,
         )
@@ -1909,36 +1911,36 @@ async def test_readable_target_contract(tmp_path: Path) -> None:
 async def test_active_drafts_are_isolated_by_resolved_session() -> None:
     orchestrator, channel, _, _, _ = await make_node()
     try:
-        await orchestrator._record_inbound(make_message(session_id="bcn-a"))
-        await orchestrator._record_inbound(make_message(session_id="bcn-b"))
+        await orchestrator._record_inbound(make_message(session_id="superai-a"))
+        await orchestrator._record_inbound(make_message(session_id="superai-b"))
 
         first_hold = await orchestrator.command_service.send_message(
-            actor=Thread("bcn-a"),
-            raw_target="dm:channel-bcn-a",
+            actor=Thread("superai-a"),
+            raw_target="dm:channel-superai-a",
             body="draft a",
             created_at_ms=2,
         )
         second_hold = await orchestrator.command_service.send_message(
-            actor=Thread("bcn-b"),
-            raw_target="dm:channel-bcn-b",
+            actor=Thread("superai-b"),
+            raw_target="dm:channel-superai-b",
             body="draft b",
             created_at_ms=2,
         )
         assert isinstance(first_hold, MessageSendFreshnessHold)
         assert isinstance(second_hold, MessageSendFreshnessHold)
 
-        await orchestrator.command_service.check_messages(Thread("bcn-a"))
-        await orchestrator.command_service.check_messages(Thread("bcn-b"))
+        await orchestrator.command_service.check_messages(Thread("superai-a"))
+        await orchestrator.command_service.check_messages(Thread("superai-b"))
         first_sent = await orchestrator.command_service.send_message(
-            actor=Thread("bcn-a"),
-            raw_target="dm:channel-bcn-a",
+            actor=Thread("superai-a"),
+            raw_target="dm:channel-superai-a",
             body="",
             created_at_ms=3,
             send_draft=True,
         )
         second_sent = await orchestrator.command_service.send_message(
-            actor=Thread("bcn-b"),
-            raw_target="dm:channel-bcn-b",
+            actor=Thread("superai-b"),
+            raw_target="dm:channel-superai-b",
             body="",
             created_at_ms=3,
             send_draft=True,
@@ -1970,18 +1972,18 @@ async def test_send_delivers_ordered_attachments_to_the_channel(
                 len(
                     _stored_messages(
                         storage,
-                        "bcn-1",
+                        "superai-1",
                         direction=MessageDirection.INBOUND,
                     )
                 )
                 == 1
             )
         )
-        await orchestrator.command_service.check_messages(Thread("bcn-1"))
+        await orchestrator.command_service.check_messages(Thread("superai-1"))
 
         delivered = await orchestrator.command_service.send_message(
-            actor=Thread("bcn-1"),
-            raw_target="dm:channel-bcn-1",
+            actor=Thread("superai-1"),
+            raw_target="dm:channel-superai-1",
             body="Attached reports.",
             created_at_ms=2,
             attachment_paths=(str(first), str(second)),
@@ -2009,23 +2011,23 @@ async def test_send_preserves_provider_delivery_states() -> None:
                 len(
                     _stored_messages(
                         storage,
-                        "bcn-1",
+                        "superai-1",
                         direction=MessageDirection.INBOUND,
                     )
                 )
                 == 1
             )
         )
-        target_anchor = make_message(session_id="bcn-other")
+        target_anchor = make_message(session_id="superai-other")
         await orchestrator._record_inbound(target_anchor)
-        await orchestrator.command_service.check_messages(Thread("bcn-1"))
+        await orchestrator.command_service.check_messages(Thread("superai-1"))
 
         # another conversation is answered by another actor, and nothing here
         # reaches it
         with pytest.raises(InboxTargetResolutionError):
             await orchestrator.command_service.send_message(
-                actor=Thread("bcn-1"),
-                raw_target="dm:channel-bcn-other",
+                actor=Thread("superai-1"),
+                raw_target="dm:channel-superai-other",
                 body="reply",
                 created_at_ms=2,
                 reply_to_message_id=target_anchor.message_id,
@@ -2034,14 +2036,14 @@ async def test_send_preserves_provider_delivery_states() -> None:
             message
             for message in _stored_messages(
                 storage,
-                "bcn-other",
+                "superai-other",
                 direction=MessageDirection.OUTBOUND,
             )
         ]
 
         unusable_reply = await orchestrator.command_service.send_message(
-            actor=Thread("bcn-1"),
-            raw_target="dm:channel-bcn-1",
+            actor=Thread("superai-1"),
+            raw_target="dm:channel-superai-1",
             body="invalid reply",
             created_at_ms=3,
             reply_to_message_id=make_message(seq=9).message_id,
@@ -2064,8 +2066,8 @@ async def test_send_preserves_provider_delivery_states() -> None:
             )
         )
         failed = await orchestrator.command_service.send_message(
-            actor=Thread("bcn-1"),
-            raw_target="dm:channel-bcn-1",
+            actor=Thread("superai-1"),
+            raw_target="dm:channel-superai-1",
             body="failed reply",
             created_at_ms=3,
         )
@@ -2073,11 +2075,11 @@ async def test_send_preserves_provider_delivery_states() -> None:
         assert failed.message.delivery_state is OutboundDeliveryState.FAILED
         cross_session_attempt_count = len(channel.send_attempts)
 
-        await orchestrator.command_service.check_messages(Thread("bcn-1"))
+        await orchestrator.command_service.check_messages(Thread("superai-1"))
         with pytest.raises(ValueError, match="must not be empty"):
             await orchestrator.command_service.send_message(
-                actor=Thread("bcn-1"),
-                raw_target="dm:channel-bcn-1",
+                actor=Thread("superai-1"),
+                raw_target="dm:channel-superai-1",
                 body=" \t",
                 created_at_ms=3,
             )
@@ -2097,8 +2099,8 @@ async def test_send_preserves_provider_delivery_states() -> None:
             )
         )
         queued = await orchestrator.command_service.send_message(
-            actor=Thread("bcn-1"),
-            raw_target="dm:channel-bcn-1",
+            actor=Thread("superai-1"),
+            raw_target="dm:channel-superai-1",
             body="queued reply",
             created_at_ms=4,
         )
@@ -2117,8 +2119,8 @@ async def test_send_preserves_provider_delivery_states() -> None:
             )
         )
         unknown = await orchestrator.command_service.send_message(
-            actor=Thread("bcn-1"),
-            raw_target="dm:channel-bcn-1",
+            actor=Thread("superai-1"),
+            raw_target="dm:channel-superai-1",
             body="unknown reply",
             created_at_ms=5,
         )
@@ -2150,8 +2152,8 @@ async def test_send_preserves_provider_delivery_states() -> None:
             )
         )
         partial = await orchestrator.command_service.send_message(
-            actor=Thread("bcn-1"),
-            raw_target="dm:channel-bcn-1",
+            actor=Thread("superai-1"),
+            raw_target="dm:channel-superai-1",
             body="partial reply",
             created_at_ms=6,
         )
@@ -2183,8 +2185,8 @@ async def test_send_preserves_provider_delivery_states() -> None:
             )
         )
         failed = await orchestrator.command_service.send_message(
-            actor=Thread("bcn-1"),
-            raw_target="dm:channel-bcn-1",
+            actor=Thread("superai-1"),
+            raw_target="dm:channel-superai-1",
             body="failed reply",
             created_at_ms=7,
         )
@@ -2216,7 +2218,7 @@ async def test_graceful_stop_cancels_turn_and_closes_runtime_stream() -> None:
     runtime.queue_turn_plan(TestTurnPlan(block_until_release=True))
     task = orchestrator.dispatch_inbound(make_message())
     await wait_until(lambda: bool(runtime.active_streams))
-    assert orchestrator.session_runtime_state(Thread("bcn-1")) is State.WORKING
+    assert orchestrator.session_runtime_state(Thread("superai-1")) is State.WORKING
 
     await orchestrator.stop(timeout=1)
     result = await asyncio.gather(task, return_exceptions=True)
@@ -2224,14 +2226,14 @@ async def test_graceful_stop_cancels_turn_and_closes_runtime_stream() -> None:
     assert isinstance(result[0], asyncio.CancelledError)
     assert any(
         event.event_name == "runtime.turn.cancelled"
-        and event.correlation.turn_id == "turn-message-bcn-1-1"
+        and event.correlation.turn_id == "turn-message-superai-1-1"
         for event in audit.events
     )
     assert runtime.closed_streams
     assert runtime.stopped
     assert channel.stopped
     assert not storage.stopped
-    assert orchestrator.session_runtime_state(Thread("bcn-1")) is None
+    assert orchestrator.session_runtime_state(Thread("superai-1")) is None
 
 
 @pytest.mark.asyncio
@@ -2250,7 +2252,7 @@ async def test_channel_persists_next_inbound_while_turn_is_active() -> None:
             lambda: (
                 _stored_messages(
                     storage,
-                    "bcn-1",
+                    "superai-1",
                     direction=MessageDirection.INBOUND,
                 )
                 == [first, second]
@@ -2259,13 +2261,13 @@ async def test_channel_persists_next_inbound_while_turn_is_active() -> None:
         await wait_until(lambda: len(runtime.steered_turns) == 1)
         assert len(runtime.started_turns) == 1
         steered_session, steered_turn, steer_input = runtime.steered_turns[0]
-        assert steered_session.actor.id == "bcn-1"
-        assert steered_session == orchestrator.runtime_session(Thread("bcn-1"))
-        assert steered_turn.turn_id == "turn-message-bcn-1-1"
+        assert steered_session.actor.id == "superai-1"
+        assert steered_session == orchestrator.runtime_session(Thread("superai-1"))
+        assert steered_turn.turn_id == "turn-message-superai-1-1"
         assert steer_input == (
             "[inbox notice:\n"
             "Inbox update: 2 unread messages total; 1 changed target\n"
-            "dm:channel-bcn-1  pending: 1 message · first msg=message- · "
+            "dm:channel-superai-1  pending: 1 message · first msg=message- · "
             "latest sender @Sender · latest msg=message- · dm]"
         )
         second_body = second.body
@@ -2280,21 +2282,21 @@ async def test_channel_persists_next_inbound_while_turn_is_active() -> None:
         await wait_until(
             lambda: any(
                 event.event_name == "runtime.turn.completed"
-                and event.correlation.turn_id == "turn-message-bcn-1-2"
+                and event.correlation.turn_id == "turn-message-superai-1-2"
                 for event in audit.events
             )
         )
 
         assert any(
             event.event_name == "runtime.turn.completed"
-            and event.correlation.turn_id == "turn-message-bcn-1-1"
+            and event.correlation.turn_id == "turn-message-superai-1-1"
             for event in audit.events
         )
         assert len(runtime.started_turns) == 2
         assert runtime.started_turns[1][2] == (
             "[inbox notice:\n"
             "Inbox update: 2 unread messages total; 1 changed target\n"
-            "dm:channel-bcn-1  pending: 2 messages · first msg=message- · "
+            "dm:channel-superai-1  pending: 2 messages · first msg=message- · "
             "latest sender @Sender · latest msg=message- · dm\n"
             "]"
         )
@@ -2339,8 +2341,8 @@ async def test_one_actor_answers_every_conversation_on_one_runtime() -> None:
     agent = Agent("workspace-1")
     try:
         first, second = await asyncio.gather(
-            orchestrator.handle_inbound(make_message(session_id="bcn-a")),
-            orchestrator.handle_inbound(make_message(session_id="bcn-b")),
+            orchestrator.handle_inbound(make_message(session_id="superai-a")),
+            orchestrator.handle_inbound(make_message(session_id="superai-b")),
         )
 
         assert first is not None
@@ -2365,12 +2367,12 @@ async def test_one_actor_answers_every_conversation_on_one_runtime() -> None:
                 session_id,
                 direction=MessageDirection.INBOUND,
             )
-        } == {"bcn-a", "bcn-b"}
+        } == {"superai-a", "superai-b"}
         assert {
             event.correlation.thread_id
             for event in audit.events
             if event.correlation.turn_id is not None
-        } == {"bcn-a"}
+        } == {"superai-a"}
     finally:
         await orchestrator.stop(timeout=1)
 
@@ -2383,14 +2385,14 @@ async def test_a_turn_marks_every_conversation_steered_into_it() -> None:
     runtime.accepts_steer = True
     runtime.queue_turn_plan(TestTurnPlan(block_until_release=True))
     try:
-        await channel.inject(make_message(session_id="bcn-a"))
+        await channel.inject(make_message(session_id="superai-a"))
         await wait_until(lambda: bool(runtime.active_streams))
-        await channel.inject(make_message(session_id="bcn-b"))
+        await channel.inject(make_message(session_id="superai-b"))
         await wait_until(lambda: len(runtime.steered_turns) == 1)
 
         assert [session_id for session_id, _ in channel.turn_anchors] == [
-            "bcn-a",
-            "bcn-b",
+            "superai-a",
+            "superai-b",
         ]
 
         _, opened_turn, _ = runtime.started_turns[0]
@@ -2400,7 +2402,7 @@ async def test_a_turn_marks_every_conversation_steered_into_it() -> None:
         await wait_until(
             lambda: (
                 sorted(_turn_endings(channel, opened_turn.turn_id))
-                == ["bcn-a", "bcn-b"]
+                == ["superai-a", "superai-b"]
             )
         )
     finally:
@@ -2441,7 +2443,7 @@ async def test_what_a_turn_takes_by_steer_is_answered_by_that_turn() -> None:
     orchestrator, channel, runtime, _, _ = await make_node()
     runtime.accepts_steer = True
     runtime.queue_turn_plan(TestTurnPlan(block_until_release=True))
-    queue = orchestrator._runtime_queue_for_actor(Thread("bcn-1"))  # pyright: ignore[reportPrivateUsage]
+    queue = orchestrator._runtime_queue_for_actor(Thread("superai-1"))  # pyright: ignore[reportPrivateUsage]
     try:
         await channel.inject(make_message(seq=1))
         await wait_until(lambda: bool(runtime.active_streams))
@@ -2459,7 +2461,7 @@ async def test_what_a_turn_takes_by_steer_is_answered_by_that_turn() -> None:
         next(iter(runtime.active_streams)).release()
         async with asyncio.timeout(5):
             turn = await answered
-        assert turn is not None and turn.turn_id == "turn-message-bcn-1-1"
+        assert turn is not None and turn.turn_id == "turn-message-superai-1-1"
     finally:
         await orchestrator.stop(timeout=1)
 
@@ -2482,8 +2484,8 @@ async def test_a_turn_that_ends_before_the_quiet_takes_what_came_in_next() -> No
         # the next turn opens for them: nobody steered them in
         await wait_until(lambda: len(runtime.started_turns) == 2)
         _, opened_turn, opened = runtime.started_turns[1]
-        assert opened_turn.turn_id == "turn-message-bcn-1-2"
-        assert "dm:channel-bcn-1  pending:" in opened
+        assert opened_turn.turn_id == "turn-message-superai-1-2"
+        assert "dm:channel-superai-1  pending:" in opened
     finally:
         await orchestrator.stop(timeout=1)
 
@@ -2501,14 +2503,14 @@ async def test_a_conversation_steered_twice_is_marked_once() -> None:
         await channel.inject(make_message(seq=3))
         await wait_until(lambda: len(runtime.steered_turns) == 2)
 
-        assert [session_id for session_id, _ in channel.turn_anchors] == ["bcn-1"]
+        assert [session_id for session_id, _ in channel.turn_anchors] == ["superai-1"]
 
         _, opened_turn, _ = runtime.started_turns[0]
         runtime.queue_turn_plan(TestTurnPlan())
         next(iter(runtime.active_streams)).release()
 
         await wait_until(
-            lambda: _turn_endings(channel, opened_turn.turn_id) == ["bcn-1"]
+            lambda: _turn_endings(channel, opened_turn.turn_id) == ["superai-1"]
         )
     finally:
         await orchestrator.stop(timeout=1)
@@ -2528,12 +2530,12 @@ async def test_a_failed_turn_answers_every_conversation_it_took_a_message_from()
         TestTurnPlan(states=(RuntimeEventState.STARTED, RuntimeEventState.FAILED))
     )
     try:
-        for session_id in ("bcn-a", "bcn-b", "bcn-c"):
+        for session_id in ("superai-a", "superai-b", "superai-c"):
             context, message, _ = await orchestrator._record_inbound(  # pyright: ignore[reportPrivateUsage]
                 make_message(session_id=session_id)
             )
             assert context is not None
-            if session_id == "bcn-c":
+            if session_id == "superai-c":
                 continue
             completion: asyncio.Future[RuntimeTurn | None] = loop.create_future()
             completions.append(completion)
@@ -2546,8 +2548,8 @@ async def test_a_failed_turn_answers_every_conversation_it_took_a_message_from()
             RuntimeTurnState.FAILED
         }
         assert sorted(request.session_id for request in channel.send_attempts) == [
-            "bcn-a",
-            "bcn-b",
+            "superai-a",
+            "superai-b",
         ]
     finally:
         await orchestrator.stop(timeout=1)
@@ -2566,7 +2568,7 @@ async def test_one_held_error_receipt_does_not_hold_up_the_others() -> None:
         TestTurnPlan(states=(RuntimeEventState.STARTED, RuntimeEventState.FAILED))
     )
     try:
-        for session_id in ("bcn-a", "bcn-b"):
+        for session_id in ("superai-a", "superai-b"):
             context, message, _ = await orchestrator._record_inbound(  # pyright: ignore[reportPrivateUsage]
                 make_message(session_id=session_id)
             )
@@ -2580,8 +2582,8 @@ async def test_one_held_error_receipt_does_not_hold_up_the_others() -> None:
 
         await asyncio.gather(*completions)
         assert sorted(request.session_id for request in channel.send_attempts) == [
-            "bcn-a",
-            "bcn-b",
+            "superai-a",
+            "superai-b",
         ]
     finally:
         channel.send_gate.set()
@@ -2592,17 +2594,17 @@ async def test_one_held_error_receipt_does_not_hold_up_the_others() -> None:
 async def test_an_individual_notice_covers_every_conversation_in_reach() -> None:
     orchestrator, _, runtime, _, _ = await make_node(mode=Mode.DANGEROUS_INDIVIDUAL)
     try:
-        await orchestrator._record_inbound(make_message(session_id="bcn-b"))  # pyright: ignore[reportPrivateUsage]
+        await orchestrator._record_inbound(make_message(session_id="superai-b"))  # pyright: ignore[reportPrivateUsage]
 
-        result = await orchestrator.handle_inbound(make_message(session_id="bcn-a"))
+        result = await orchestrator.handle_inbound(make_message(session_id="superai-a"))
 
         assert result is not None
         assert runtime.started_turns[0][2] == (
             "[inbox notice:\n"
             "Inbox update: 2 unread messages total; 2 changed targets\n"
-            "dm:channel-bcn-a  pending: 1 message · first msg=message- · "
+            "dm:channel-superai-a  pending: 1 message · first msg=message- · "
             "latest sender @Sender · latest msg=message- · dm\n"
-            "dm:channel-bcn-b  pending: 1 message · first msg=message- · "
+            "dm:channel-superai-b  pending: 1 message · first msg=message- · "
             "latest sender @Sender · latest msg=message- · dm\n"
             "]"
         )
@@ -2617,7 +2619,7 @@ async def test_a_batch_notice_covers_every_conversation_it_batched() -> None:
     completions: list[asyncio.Future[RuntimeTurn | None]] = []
     queue = orchestrator._runtime_queue_for_actor(Agent("workspace-1"))  # pyright: ignore[reportPrivateUsage]
     try:
-        for session_id in ("bcn-a", "bcn-b"):
+        for session_id in ("superai-a", "superai-b"):
             context, message, _ = await orchestrator._record_inbound(  # pyright: ignore[reportPrivateUsage]
                 make_message(session_id=session_id)
             )
@@ -2632,9 +2634,9 @@ async def test_a_batch_notice_covers_every_conversation_it_batched() -> None:
         assert runtime.started_turns[0][2] == (
             "[inbox notice:\n"
             "Inbox update: 2 unread messages total; 2 changed targets\n"
-            "dm:channel-bcn-b  pending: 1 message · first msg=message- · "
+            "dm:channel-superai-b  pending: 1 message · first msg=message- · "
             "latest sender @Sender · latest msg=message- · dm\n"
-            "dm:channel-bcn-a  pending: 1 message · first msg=message- · "
+            "dm:channel-superai-a  pending: 1 message · first msg=message- · "
             "latest sender @Sender · latest msg=message- · dm\n"
             "]"
         )
@@ -2647,17 +2649,17 @@ async def test_reach_and_unread_count_cover_every_conversation() -> None:
     orchestrator, _, runtime, _, _ = await make_node(mode=Mode.DANGEROUS_INDIVIDUAL)
     agent = Agent("workspace-1")
     try:
-        for thread_id in ("bcn-a", "bcn-b", "bcn-c"):
+        for thread_id in ("superai-a", "superai-b", "superai-c"):
             await orchestrator._record_inbound(make_message(session_id=thread_id))  # pyright: ignore[reportPrivateUsage]
 
         pending = await orchestrator.command_service.check_inbox(agent)
         assert {summary.thread_id for summary in pending.targets} == {
-            "bcn-a",
-            "bcn-b",
-            "bcn-c",
+            "superai-a",
+            "superai-b",
+            "superai-c",
         }
 
-        result = await orchestrator.handle_inbound(make_message(session_id="bcn-d"))
+        result = await orchestrator.handle_inbound(make_message(session_id="superai-d"))
 
         assert result is not None
         assert (
@@ -2673,10 +2675,10 @@ async def test_a_check_returns_while_another_thread_holds_its_lock() -> None:
     orchestrator, _, _, _, _ = await make_node(mode=Mode.DANGEROUS_INDIVIDUAL)
     agent = Agent("workspace-1")
     try:
-        for thread_id in ("bcn-a", "bcn-b"):
+        for thread_id in ("superai-a", "superai-b"):
             await orchestrator._record_inbound(make_message(session_id=thread_id))  # pyright: ignore[reportPrivateUsage]
 
-        held = orchestrator._concurrency.for_thread("bcn-b")  # pyright: ignore[reportPrivateUsage]
+        held = orchestrator._concurrency.for_thread("superai-b")  # pyright: ignore[reportPrivateUsage]
         async with held:
             drained = await asyncio.wait_for(
                 orchestrator.command_service.check_messages(agent),
@@ -2685,7 +2687,7 @@ async def test_a_check_returns_while_another_thread_holds_its_lock() -> None:
 
         assert {
             message.thread_id for result in drained for message in result.messages
-        } == {"bcn-a", "bcn-b"}
+        } == {"superai-a", "superai-b"}
     finally:
         await orchestrator.stop(timeout=1)
 
@@ -2705,9 +2707,9 @@ async def test_a_check_returns_what_every_thread_brought_in_arrival_order() -> N
     dispatcher.start_accepting()
     try:
         for thread_id, seq, body in (
-            ("bcn-a", 1, "first"),
-            ("bcn-b", 2, "second"),
-            ("bcn-a", 3, "third"),
+            ("superai-a", 1, "first"),
+            ("superai-b", 2, "second"),
+            ("superai-a", 3, "third"),
         ):
             await orchestrator._record_inbound(  # pyright: ignore[reportPrivateUsage]
                 make_message(
@@ -2746,22 +2748,22 @@ async def test_an_individual_actor_drains_and_answers_every_conversation() -> No
     )
     agent = Agent("workspace-1")
     try:
-        await orchestrator._record_inbound(make_message(session_id="bcn-a"))
-        await orchestrator._record_inbound(make_message(session_id="bcn-b"))
+        await orchestrator._record_inbound(make_message(session_id="superai-a"))
+        await orchestrator._record_inbound(make_message(session_id="superai-b"))
 
         pending = await orchestrator.command_service.check_inbox(agent)
         assert {summary.thread_id for summary in pending.targets} == {
-            "bcn-a",
-            "bcn-b",
+            "superai-a",
+            "superai-b",
         }
 
         drained = await orchestrator.command_service.check_messages(agent)
         assert {
             message.thread_id for result in drained for message in result.messages
-        } == {"bcn-a", "bcn-b"}
+        } == {"superai-a", "superai-b"}
         # every conversation keeps its own cursor, and each one moved
-        assert storage.cursors["bcn-a"].delivered_through_seq > 0
-        assert storage.cursors["bcn-b"].delivered_through_seq > 0
+        assert storage.cursors["superai-a"].delivered_through_seq > 0
+        assert storage.cursors["superai-b"].delivered_through_seq > 0
         assert not (await orchestrator.command_service.check_inbox(agent)).targets
         # one check is one record, naming every conversation it looked in
         (checked,) = [
@@ -2770,22 +2772,22 @@ async def test_an_individual_actor_drains_and_answers_every_conversation() -> No
             if event.metadata.get("operation") == "bcc.message.check"
         ]
         arguments = cast(Mapping[str, list[str]], checked.metadata["arguments"])
-        assert set(arguments["thread_ids"]) == {"bcn-a", "bcn-b"}
+        assert set(arguments["thread_ids"]) == {"superai-a", "superai-b"}
 
         # unread somewhere else does not stand between the Agent and this target
-        await orchestrator._record_inbound(make_message(session_id="bcn-b", seq=2))
+        await orchestrator._record_inbound(make_message(session_id="superai-b", seq=2))
         sent = await orchestrator.command_service.send_message(
             actor=agent,
-            raw_target="dm:channel-bcn-a",
+            raw_target="dm:channel-superai-a",
             body="reply",
             created_at_ms=2,
         )
         assert isinstance(sent, MessageSendSuccess)
-        assert channel.send_attempts[-1].session_id == "bcn-a"
+        assert channel.send_attempts[-1].session_id == "superai-a"
 
         held = await orchestrator.command_service.send_message(
             actor=agent,
-            raw_target="dm:channel-bcn-b",
+            raw_target="dm:channel-superai-b",
             body="reply",
             created_at_ms=3,
         )
@@ -2799,16 +2801,16 @@ async def test_multiple_sessions_keep_workspace_and_correlation_isolated() -> No
     orchestrator, _, runtime, storage, audit = await make_node()
     try:
         first, second = await asyncio.gather(
-            orchestrator.handle_inbound(make_message(session_id="bcn-a")),
-            orchestrator.handle_inbound(make_message(session_id="bcn-b")),
+            orchestrator.handle_inbound(make_message(session_id="superai-a")),
+            orchestrator.handle_inbound(make_message(session_id="superai-b")),
         )
 
         assert first is not None
         assert second is not None
         assert first.state is RuntimeTurnState.COMPLETED
         assert second.state is RuntimeTurnState.COMPLETED
-        assert storage.threads["bcn-a"].workspace_id == "workspace-1"
-        assert storage.threads["bcn-b"].workspace_id == "workspace-1"
+        assert storage.threads["superai-a"].workspace_id == "workspace-1"
+        assert storage.threads["superai-b"].workspace_id == "workspace-1"
         assert {
             session_id
             for session_id in storage.messages
@@ -2817,18 +2819,18 @@ async def test_multiple_sessions_keep_workspace_and_correlation_isolated() -> No
                 session_id,
                 direction=MessageDirection.INBOUND,
             )
-        } == {"bcn-a", "bcn-b"}
+        } == {"superai-a", "superai-b"}
         assert {
             event.correlation.thread_id
             for event in audit.events
             if event.correlation.turn_id is not None
-        } == {"bcn-a", "bcn-b"}
+        } == {"superai-a", "superai-b"}
         assert {session.actor.id for session in runtime.started_sessions} == {
-            "bcn-a",
-            "bcn-b",
+            "superai-a",
+            "superai-b",
         }
-        first_runtime = orchestrator.runtime_session(Thread("bcn-a"))
-        second_runtime = orchestrator.runtime_session(Thread("bcn-b"))
+        first_runtime = orchestrator.runtime_session(Thread("superai-a"))
+        second_runtime = orchestrator.runtime_session(Thread("superai-b"))
         assert first_runtime is not None
         assert second_runtime is not None
         assert first_runtime.id != second_runtime.id
@@ -2843,7 +2845,7 @@ async def test_inbound_deduplication_uses_external_conversation_identity() -> No
     orchestrator, _, runtime, storage, _ = await make_node()
     try:
         first = replace(
-            make_message(session_id="bcn-a"),
+            make_message(session_id="superai-a"),
             provider_message_id="shared-provider-message",
         )
         first_turn = await orchestrator.handle_inbound(first)
@@ -2858,12 +2860,12 @@ async def test_inbound_deduplication_uses_external_conversation_identity() -> No
         assert await orchestrator.handle_inbound(replay) is None
         assert _stored_messages(
             storage,
-            "bcn-a",
+            "superai-a",
             direction=MessageDirection.INBOUND,
         ) == [replace(first, notifies_runtime=True)]
 
         other_conversation = replace(
-            make_message(session_id="bcn-b"),
+            make_message(session_id="superai-b"),
             provider_message_id=first.provider_message_id,
         )
         other_turn = await orchestrator.handle_inbound(other_conversation)
@@ -2872,7 +2874,7 @@ async def test_inbound_deduplication_uses_external_conversation_identity() -> No
             len(
                 _stored_messages(
                     storage,
-                    "bcn-b",
+                    "superai-b",
                     direction=MessageDirection.INBOUND,
                 )
             )
@@ -2893,13 +2895,15 @@ async def test_group_mention_starts_following_after_quiet_history() -> None:
             mentions_agent=False,
         )
         assert await orchestrator.handle_inbound(quiet) is None
-        assert storage.channel_sessions["channel-bcn-1"].following is False
-        assert orchestrator.runtime_session(Thread("bcn-1")) is None
+        assert storage.channel_sessions["channel-superai-1"].following is False
+        assert orchestrator.runtime_session(Thread("superai-1")) is None
         assert runtime.started_sessions == []
-        (checked,) = await orchestrator.command_service.check_messages(Thread("bcn-1"))
+        (checked,) = await orchestrator.command_service.check_messages(
+            Thread("superai-1")
+        )
         assert checked.messages == ()
         history = await orchestrator.command_service.read_messages(
-            Thread("bcn-1"), raw_target="#test:channel-bcn-1"
+            Thread("superai-1"), raw_target="#test:channel-superai-1"
         )
         assert len(history.messages) == 1
         assert history.messages[0].notifies_runtime is False
@@ -2912,7 +2916,7 @@ async def test_group_mention_starts_following_after_quiet_history() -> None:
         turn = await orchestrator.handle_inbound(mention)
         assert turn is not None
         assert turn.state is RuntimeTurnState.COMPLETED
-        assert storage.channel_sessions["channel-bcn-1"].following is True
+        assert storage.channel_sessions["channel-superai-1"].following is True
 
         follow_up = replace(
             make_message(seq=3),
@@ -2924,10 +2928,10 @@ async def test_group_mention_starts_following_after_quiet_history() -> None:
         assert follow_up_turn.state is RuntimeTurnState.COMPLETED
 
         unfollowed = await orchestrator.command_service.unfollow_thread(
-            Thread("bcn-1"), raw_target="#test:channel-bcn-1"
+            Thread("superai-1"), raw_target="#test:channel-superai-1"
         )
         assert unfollowed.changed is True
-        assert storage.channel_sessions["channel-bcn-1"].following is False
+        assert storage.channel_sessions["channel-superai-1"].following is False
         after_unfollow = replace(
             make_message(seq=4),
             target_kind=ChannelTargetKind.GROUP,
@@ -2937,7 +2941,7 @@ async def test_group_mention_starts_following_after_quiet_history() -> None:
         assert (
             _stored_messages(
                 storage,
-                "bcn-1",
+                "superai-1",
                 direction=MessageDirection.INBOUND,
             )[-1].notifies_runtime
             is False
@@ -2946,7 +2950,7 @@ async def test_group_mention_starts_following_after_quiet_history() -> None:
         assert await orchestrator.handle_inbound(quiet) is None
         inbound = _stored_messages(
             storage,
-            "bcn-1",
+            "superai-1",
             direction=MessageDirection.INBOUND,
         )
         assert len(inbound) == 4
@@ -2971,7 +2975,7 @@ async def test_batched_notifications_collapse_into_one_turn() -> None:
     loop = asyncio.get_running_loop()
     first_completion: asyncio.Future[RuntimeTurn | None] = loop.create_future()
     second_completion: asyncio.Future[RuntimeTurn | None] = loop.create_future()
-    runtime_queue = orchestrator._runtime_queue_for_actor(Thread("bcn-1"))
+    runtime_queue = orchestrator._runtime_queue_for_actor(Thread("superai-1"))
     runtime_queue.put_nowait(
         _RuntimeNotification(
             first_message,
@@ -3040,7 +3044,7 @@ async def test_terminal_runtime_error_replies_on_original_route(
         assert len(channel.send_attempts) == 1
         request = channel.send_attempts[0]
         assert request.body == expected_body
-        assert request.session_id == "bcn-1"
+        assert request.session_id == "superai-1"
         assert request.target_kind is ChannelTargetKind.GROUP
         assert request.provider_thread_id == "provider-thread-7"
         assert request.provider_reply_to_message_id == "provider-message-7"
@@ -3149,7 +3153,7 @@ async def test_runtime_error_feedback() -> None:
     runtime.queue_turn_plan(
         TestTurnPlan(states=(RuntimeEventState.STARTED, RuntimeEventState.FAILED))
     )
-    runtime_queue = orchestrator._runtime_queue_for_actor(Thread("bcn-1"))
+    runtime_queue = orchestrator._runtime_queue_for_actor(Thread("superai-1"))
     runtime_queue.put_nowait(
         _RuntimeNotification(
             first_message,
@@ -3187,7 +3191,7 @@ async def test_runtime_error_feedback() -> None:
         assert initial_turn is not None
         canonical_anchor = _stored_messages(
             storage,
-            "bcn-1",
+            "superai-1",
             direction=MessageDirection.INBOUND,
         )[0]
         reminder = await storage.scope("workspace-1", "Test Agent").save_new_reminder(
@@ -3253,18 +3257,18 @@ async def test_reminder_wakes_use_ordinary_inbox_for_idle_active_and_duplicates(
     orchestrator, _, runtime, storage, _ = await make_node()
     runtime.queue_turn_plan(TestTurnPlan(block_until_release=True))
     active_task = orchestrator.dispatch_inbound(
-        make_message(session_id="bcn-active", seq=1)
+        make_message(session_id="superai-active", seq=1)
     )
     try:
         await runtime.turn_started.wait()
         idle_context, idle_anchor, created = await orchestrator._record_inbound(
-            make_message(session_id="bcn-idle", seq=2)
+            make_message(session_id="superai-idle", seq=2)
         )
         assert idle_context is not None
         assert created
         active_anchor = _stored_messages(
             storage,
-            "bcn-active",
+            "superai-active",
             direction=MessageDirection.INBOUND,
         )[0]
 
@@ -3322,7 +3326,7 @@ async def test_reminder_wakes_use_ordinary_inbox_for_idle_active_and_duplicates(
         assert "reminder notice" not in idle_notice + active_notice
 
         await cast(IStorage, storage).check_messages(
-            ("bcn-idle", "bcn-active"),
+            ("superai-idle", "superai-active"),
             checked_at_ms=5,
         )
         await orchestrator.publish_inbox_wake(idle_reminder)
@@ -3375,8 +3379,8 @@ async def test_runtime_start_failure_handling(monkeypatch: pytest.MonkeyPatch) -
 
         assert result is not None
         assert result.state is RuntimeTurnState.COMPLETED
-        assert orchestrator.session_runtime_state(Thread("bcn-1")) is State.IDLE
-        current_runtime = orchestrator.runtime_session(Thread("bcn-1"))
+        assert orchestrator.session_runtime_state(Thread("superai-1")) is State.IDLE
+        current_runtime = orchestrator.runtime_session(Thread("superai-1"))
         assert current_runtime is not None
         assert len(runtime.started_sessions) == 2
         assert runtime.started_sessions[0].id != current_runtime.id
@@ -3414,7 +3418,7 @@ async def test_runtime_start_failure_handling(monkeypatch: pytest.MonkeyPatch) -
         assert result is not None
         assert result.state is RuntimeTurnState.UNKNOWN
         await wait_until(lambda: runtime.stopped_sessions == runtime.started_sessions)
-        assert orchestrator.runtime_session(Thread("bcn-1")) is None
+        assert orchestrator.runtime_session(Thread("superai-1")) is None
     finally:
         release_stop.set()
         await orchestrator.stop(timeout=1)
@@ -3472,7 +3476,7 @@ async def test_provisional_unknown_waits_for_reconciliation_before_it_is_announc
         assert len(terminals) == 1
         terminal = terminals[0]
         assert isinstance(terminal.payload, TurnUnknown)
-        assert terminal.payload.event_name == "bcn.turn.unknown"
+        assert terminal.payload.event_name == "superai.turn.unknown"
         assert terminal.envelope.turn_id == turn.turn_id
     finally:
         await orchestrator.stop(timeout=1)
@@ -3505,8 +3509,8 @@ async def test_unconfirmed_reconcile_clears_session_before_next_inbound(
         first_turn = await orchestrator.handle_inbound(make_message(seq=1))
         assert first_turn is not None
         assert first_turn.state is RuntimeTurnState.UNKNOWN
-        assert orchestrator.runtime_session(Thread("bcn-1")) is None
-        assert orchestrator.session_runtime_state(Thread("bcn-1")) is None
+        assert orchestrator.runtime_session(Thread("superai-1")) is None
+        assert orchestrator.session_runtime_state(Thread("superai-1")) is None
         assert len(runtime.reconciled_sessions) == 1
         first_runtime = runtime.reconciled_sessions[0]
 
@@ -3514,7 +3518,7 @@ async def test_unconfirmed_reconcile_clears_session_before_next_inbound(
 
         assert second_turn is not None
         assert second_turn.state is RuntimeTurnState.COMPLETED
-        current_runtime = orchestrator.runtime_session(Thread("bcn-1"))
+        current_runtime = orchestrator.runtime_session(Thread("superai-1"))
         assert current_runtime is not None
         assert current_runtime.id != first_runtime.id
         assert runtime.reconciled_sessions == [first_runtime]
@@ -3535,9 +3539,9 @@ async def test_runtime_session_reconciliation() -> None:
 
         assert turn is not None
         assert turn.state is RuntimeTurnState.UNKNOWN
-        current_runtime = orchestrator.runtime_session(Thread("bcn-1"))
+        current_runtime = orchestrator.runtime_session(Thread("superai-1"))
         assert current_runtime is not None
-        assert orchestrator.session_runtime_state(Thread("bcn-1")) is State.IDLE
+        assert orchestrator.session_runtime_state(Thread("superai-1")) is State.IDLE
         assert runtime.reconciled_sessions == [current_runtime]
     finally:
         await orchestrator.stop(timeout=1)
@@ -3559,16 +3563,18 @@ async def test_runtime_session_reconciliation() -> None:
         await wait_until(
             lambda: bool(runtime.reconciled_sessions and runtime.active_streams)
         )
-        current_runtime = orchestrator.runtime_session(Thread("bcn-1"))
+        current_runtime = orchestrator.runtime_session(Thread("superai-1"))
         assert current_runtime is not None
-        assert orchestrator.session_runtime_state(Thread("bcn-1")) is State.WORKING
+        assert orchestrator.session_runtime_state(Thread("superai-1")) is State.WORKING
 
         second_task = orchestrator.dispatch_inbound(make_message(seq=2))
         await wait_until(lambda: len(runtime.steered_turns) == 1)
         steered_session, steered_turn, _ = runtime.steered_turns[0]
         assert steered_session == current_runtime
-        assert steered_turn.turn_id == "turn-message-bcn-1-1"
-        assert steered_turn.provider_turn_id == ("test-provider-turn-message-bcn-1-1")
+        assert steered_turn.turn_id == "turn-message-superai-1-1"
+        assert steered_turn.provider_turn_id == (
+            "test-provider-turn-message-superai-1-1"
+        )
 
         next(iter(runtime.active_streams)).release()
         first_turn, second_turn = await asyncio.gather(first_task, second_task)
@@ -3577,8 +3583,8 @@ async def test_runtime_session_reconciliation() -> None:
         assert first_turn.state is RuntimeTurnState.COMPLETED
         assert second_turn is not None
         assert second_turn.state is RuntimeTurnState.COMPLETED
-        assert orchestrator.runtime_session(Thread("bcn-1")) == current_runtime
-        assert orchestrator.session_runtime_state(Thread("bcn-1")) is State.IDLE
+        assert orchestrator.runtime_session(Thread("superai-1")) == current_runtime
+        assert orchestrator.session_runtime_state(Thread("superai-1")) is State.IDLE
         assert runtime.reconciled_sessions == [current_runtime]
         assert channel.send_attempts == []
     finally:
@@ -3591,16 +3597,16 @@ async def test_runtime_session_reconciliation() -> None:
     try:
         first_turn = await orchestrator.handle_inbound(make_message(seq=1))
         assert first_turn is not None
-        first_runtime = orchestrator.runtime_session(Thread("bcn-1"))
+        first_runtime = orchestrator.runtime_session(Thread("superai-1"))
         assert first_runtime is not None
 
         await orchestrator._stop_runtime_session(first_runtime, timeout=1)
 
-        assert orchestrator.runtime_session(Thread("bcn-1")) is None
-        assert orchestrator.session_runtime_state(Thread("bcn-1")) is None
+        assert orchestrator.runtime_session(Thread("superai-1")) is None
+        assert orchestrator.session_runtime_state(Thread("superai-1")) is None
         second_turn = await orchestrator.handle_inbound(make_message(seq=2))
         assert second_turn is not None
-        second_runtime = orchestrator.runtime_session(Thread("bcn-1"))
+        second_runtime = orchestrator.runtime_session(Thread("superai-1"))
         assert second_runtime is not None
         assert second_runtime.id != first_runtime.id
         assert UUID(second_runtime.id).version == 7
@@ -3637,13 +3643,13 @@ async def test_runtime_teardown_scheduling(monkeypatch: pytest.MonkeyPatch) -> N
     try:
         first_turn = await orchestrator.handle_inbound(make_message(seq=1))
         assert first_turn is not None
-        first_runtime = orchestrator.runtime_session(Thread("bcn-1"))
+        first_runtime = orchestrator.runtime_session(Thread("superai-1"))
         assert first_runtime is not None
 
         await orchestrator._stop_runtime_session(first_runtime, timeout=1)
         await stop_started.wait()
 
-        assert orchestrator.runtime_session(Thread("bcn-1")) is None
+        assert orchestrator.runtime_session(Thread("superai-1")) is None
         assert len(orchestrator._runtime_teardown_tasks) == 1
 
         second_turn = await asyncio.wait_for(
@@ -3651,7 +3657,7 @@ async def test_runtime_teardown_scheduling(monkeypatch: pytest.MonkeyPatch) -> N
             timeout=1,
         )
         assert second_turn is not None
-        second_runtime = orchestrator.runtime_session(Thread("bcn-1"))
+        second_runtime = orchestrator.runtime_session(Thread("superai-1"))
         assert second_runtime is not None
         assert second_runtime.id != first_runtime.id
         assert not release_stop.is_set()
@@ -3686,7 +3692,7 @@ async def test_runtime_teardown_scheduling(monkeypatch: pytest.MonkeyPatch) -> N
     try:
         first_turn = await orchestrator.handle_inbound(make_message(seq=1))
         assert first_turn is not None
-        runtime_session = orchestrator.runtime_session(Thread("bcn-1"))
+        runtime_session = orchestrator.runtime_session(Thread("superai-1"))
         assert runtime_session is not None
 
         await orchestrator._stop_runtime_session(runtime_session, timeout=1)
@@ -3719,7 +3725,7 @@ async def test_unconfirmed_stop_clears_runtime_session(
     try:
         first_turn = await orchestrator.handle_inbound(make_message(seq=1))
         assert first_turn is not None
-        first_runtime = orchestrator.runtime_session(Thread("bcn-1"))
+        first_runtime = orchestrator.runtime_session(Thread("superai-1"))
         assert first_runtime is not None
         runtime.queue_stop_result(
             ProviderCallResult(
@@ -3735,11 +3741,11 @@ async def test_unconfirmed_stop_clears_runtime_session(
 
         await orchestrator._stop_runtime_session(first_runtime, timeout=1)
 
-        assert orchestrator.runtime_session(Thread("bcn-1")) is None
-        assert orchestrator.session_runtime_state(Thread("bcn-1")) is None
+        assert orchestrator.runtime_session(Thread("superai-1")) is None
+        assert orchestrator.session_runtime_state(Thread("superai-1")) is None
         second_turn = await orchestrator.handle_inbound(make_message(seq=2))
         assert second_turn is not None
-        replacement = orchestrator.runtime_session(Thread("bcn-1"))
+        replacement = orchestrator.runtime_session(Thread("superai-1"))
         assert replacement is not None
         assert replacement.id != first_runtime.id
         assert runtime.started_sessions[-1].id == replacement.id
@@ -3755,7 +3761,7 @@ async def test_daemon_lifecycle_creates_a_new_runtime_session() -> None:
     try:
         first_turn = await first.handle_inbound(make_message(seq=1))
         assert first_turn is not None
-        first_runtime = first.runtime_session(Thread("bcn-1"))
+        first_runtime = first.runtime_session(Thread("superai-1"))
         assert first_runtime is not None
         first_runtime_id = first_runtime.id
     finally:
@@ -3784,7 +3790,7 @@ async def test_daemon_lifecycle_creates_a_new_runtime_session() -> None:
     try:
         second_turn = await second.handle_inbound(make_message(seq=2))
         assert second_turn is not None
-        second_runtime = second.runtime_session(Thread("bcn-1"))
+        second_runtime = second.runtime_session(Thread("superai-1"))
         assert second_runtime is not None
         assert first_runtime_id is not None
         assert second_runtime.id != first_runtime_id
@@ -3802,9 +3808,9 @@ async def test_quiet_inbound_does_not_create_runtime_state_or_cursor() -> None:
         )
 
         assert result is None
-        assert orchestrator.runtime_session(Thread("bcn-1")) is None
-        assert orchestrator.session_runtime_state(Thread("bcn-1")) is None
-        assert await storage.get_consumer_cursor("bcn-1") is None
+        assert orchestrator.runtime_session(Thread("superai-1")) is None
+        assert orchestrator.session_runtime_state(Thread("superai-1")) is None
+        assert await storage.get_consumer_cursor("superai-1") is None
     finally:
         await orchestrator.stop(timeout=1)
 
@@ -3815,11 +3821,11 @@ async def test_context_expiry() -> None:
     orchestrator, _, runtime, _, _ = await make_node()
     try:
         await asyncio.gather(
-            orchestrator.handle_inbound(make_message(session_id="bcn-a", seq=1)),
-            orchestrator.handle_inbound(make_message(session_id="bcn-b", seq=1)),
+            orchestrator.handle_inbound(make_message(session_id="superai-a", seq=1)),
+            orchestrator.handle_inbound(make_message(session_id="superai-b", seq=1)),
         )
-        first_a = orchestrator.runtime_session(Thread("bcn-a"))
-        first_b = orchestrator.runtime_session(Thread("bcn-b"))
+        first_a = orchestrator.runtime_session(Thread("superai-a"))
+        first_b = orchestrator.runtime_session(Thread("superai-b"))
         assert first_a is not None
         assert first_b is not None
 
@@ -3833,27 +3839,27 @@ async def test_context_expiry() -> None:
         )
 
         # marking alone changes nothing: both sessions keep serving
-        assert orchestrator.runtime_session(Thread("bcn-a")) is first_a
-        assert orchestrator.runtime_session(Thread("bcn-b")) is first_b
+        assert orchestrator.runtime_session(Thread("superai-a")) is first_a
+        assert orchestrator.runtime_session(Thread("superai-b")) is first_b
         assert runtime.stopped_sessions == []
         assert len(runtime.started_sessions) == 2
 
         # the next turn is what replaces the marked session it runs on
-        await orchestrator.handle_inbound(make_message(session_id="bcn-a", seq=2))
-        second_a = orchestrator.runtime_session(Thread("bcn-a"))
+        await orchestrator.handle_inbound(make_message(session_id="superai-a", seq=2))
+        second_a = orchestrator.runtime_session(Thread("superai-a"))
         assert second_a is not None
         assert second_a.id != first_a.id
         assert runtime.stopped_sessions == [first_a]
-        assert orchestrator.runtime_session(Thread("bcn-b")) is first_b
+        assert orchestrator.runtime_session(Thread("superai-b")) is first_b
 
         runtime.emit_expire(second_a.id)
         await wait_until(lambda: second_a.id in orchestrator._stale_context_ids)
-        await orchestrator.handle_inbound(make_message(session_id="bcn-a", seq=3))
-        third_a = orchestrator.runtime_session(Thread("bcn-a"))
+        await orchestrator.handle_inbound(make_message(session_id="superai-a", seq=3))
+        third_a = orchestrator.runtime_session(Thread("superai-a"))
         assert third_a is not None
         assert third_a.id != second_a.id
         assert runtime.stopped_sessions.count(second_a) == 1
-        # bcn-a started three times, bcn-b once and still running
+        # superai-a started three times, superai-b once and still running
         assert len(runtime.started_sessions) == 4
     finally:
         await orchestrator.stop(timeout=1)
@@ -3864,7 +3870,7 @@ async def test_context_expiry() -> None:
     first_task = orchestrator.dispatch_inbound(make_message(seq=1))
     try:
         await runtime.turn_started.wait()
-        first_runtime = orchestrator.runtime_session(Thread("bcn-1"))
+        first_runtime = orchestrator.runtime_session(Thread("superai-1"))
         assert first_runtime is not None
 
         runtime.emit_expire(first_runtime.id)
@@ -3877,7 +3883,7 @@ async def test_context_expiry() -> None:
         next(iter(runtime.active_streams)).release()
         first_turn, second_turn = await asyncio.gather(first_task, second_task)
 
-        second_runtime = orchestrator.runtime_session(Thread("bcn-1"))
+        second_runtime = orchestrator.runtime_session(Thread("superai-1"))
         assert first_turn is not None
         assert second_turn is not None
         assert second_runtime is not None
@@ -3902,7 +3908,7 @@ async def test_context_expiry_still_recycles_without_another_turn() -> None:
     task = orchestrator.dispatch_inbound(make_message(seq=1))
     try:
         await runtime.turn_started.wait()
-        runtime_session = orchestrator.runtime_session(Thread("bcn-1"))
+        runtime_session = orchestrator.runtime_session(Thread("superai-1"))
         assert runtime_session is not None
 
         runtime.emit_expire(runtime_session.id)
@@ -3912,7 +3918,7 @@ async def test_context_expiry_still_recycles_without_another_turn() -> None:
         assert await task is not None
 
         async with asyncio.timeout(1):
-            while orchestrator.runtime_session(Thread("bcn-1")) is not None:
+            while orchestrator.runtime_session(Thread("superai-1")) is not None:
                 await asyncio.sleep(0.01)
         assert runtime.stopped_sessions == [runtime_session]
         assert runtime_session.id not in orchestrator._stale_context_ids
@@ -3929,16 +3935,16 @@ async def test_repeated_context_expiry_reaches_sessions_created_since() -> None:
     # still have to reach whatever was created in the meantime
     orchestrator, _, runtime, _, _ = await make_node()
     try:
-        await orchestrator.handle_inbound(make_message(session_id="bcn-a", seq=1))
-        first_a = orchestrator.runtime_session(Thread("bcn-a"))
+        await orchestrator.handle_inbound(make_message(session_id="superai-a", seq=1))
+        first_a = orchestrator.runtime_session(Thread("superai-a"))
         assert first_a is not None
 
         runtime.background_job_present = True
         runtime.emit_expire(first_a.id)
         await wait_until(lambda: first_a.id in orchestrator._stale_context_ids)
 
-        await orchestrator.handle_inbound(make_message(session_id="bcn-b", seq=1))
-        first_b = orchestrator.runtime_session(Thread("bcn-b"))
+        await orchestrator.handle_inbound(make_message(session_id="superai-b", seq=1))
+        first_b = orchestrator.runtime_session(Thread("superai-b"))
         assert first_b is not None
         assert first_b.id not in orchestrator._stale_context_ids
 
@@ -3954,7 +3960,7 @@ async def test_context_expiry_waits_for_background_work() -> None:
     orchestrator, _, runtime, _, _ = await make_node()
     try:
         await orchestrator.handle_inbound(make_message(seq=1))
-        first = orchestrator.runtime_session(Thread("bcn-1"))
+        first = orchestrator.runtime_session(Thread("superai-1"))
         assert first is not None
 
         runtime.background_job_present = True
@@ -3962,14 +3968,14 @@ async def test_context_expiry_waits_for_background_work() -> None:
         await wait_until(lambda: first.id in orchestrator._stale_context_ids)
 
         await orchestrator.handle_inbound(make_message(seq=2))
-        assert orchestrator.runtime_session(Thread("bcn-1")) is first
+        assert orchestrator.runtime_session(Thread("superai-1")) is first
         assert runtime.stopped_sessions == []
         assert first.id in orchestrator._stale_context_ids
 
         # once the work is gone the next turn takes the replacement
         runtime.background_job_present = False
         await orchestrator.handle_inbound(make_message(seq=3))
-        second = orchestrator.runtime_session(Thread("bcn-1"))
+        second = orchestrator.runtime_session(Thread("superai-1"))
         assert second is not None
         assert second.id != first.id
         assert runtime.stopped_sessions == [first]
@@ -4033,7 +4039,7 @@ async def test_context_and_timer_expiry_stop_the_runtime_once(
     orchestrator, runtime, _, wheel = await make_idle_timeout_node(30)
     try:
         await orchestrator.handle_inbound(make_message(seq=1))
-        runtime_session = orchestrator.runtime_session(Thread("bcn-1"))
+        runtime_session = orchestrator.runtime_session(Thread("superai-1"))
         assert runtime_session is not None
 
         if context_first:
@@ -4042,7 +4048,7 @@ async def test_context_and_timer_expiry_stop_the_runtime_once(
                 lambda: runtime_session.id in orchestrator._stale_context_ids
             )
         async with asyncio.timeout(1):
-            while orchestrator.runtime_session(Thread("bcn-1")) is not None:
+            while orchestrator.runtime_session(Thread("superai-1")) is not None:
                 await asyncio.sleep(0.01)
 
         if not context_first:
@@ -4060,7 +4066,7 @@ async def test_runtime_idle_timeout() -> None:
     orchestrator, runtime, _, wheel = await make_idle_timeout_node(80)
     try:
         await orchestrator.handle_inbound(make_message(seq=1))
-        runtime_session = orchestrator.runtime_session(Thread("bcn-1"))
+        runtime_session = orchestrator.runtime_session(Thread("superai-1"))
         assert runtime_session is not None
 
         await asyncio.sleep(0.05)
@@ -4068,7 +4074,7 @@ async def test_runtime_idle_timeout() -> None:
             replace(make_message(seq=2), notifies_runtime=False)
         )
         async with asyncio.timeout(1):
-            while orchestrator.runtime_session(Thread("bcn-1")) is not None:
+            while orchestrator.runtime_session(Thread("superai-1")) is not None:
                 await asyncio.sleep(0.01)
         assert runtime.stopped_sessions == [runtime_session]
     finally:
@@ -4079,15 +4085,15 @@ async def test_runtime_idle_timeout() -> None:
     orchestrator, runtime, _, wheel = await make_idle_timeout_node(80)
     try:
         await orchestrator.handle_inbound(make_message(seq=1))
-        runtime_session = orchestrator.runtime_session(Thread("bcn-1"))
+        runtime_session = orchestrator.runtime_session(Thread("superai-1"))
         assert runtime_session is not None
 
         await asyncio.sleep(0.05)
         await orchestrator.handle_inbound(make_message(seq=2))
         await asyncio.sleep(0.05)
 
-        assert orchestrator.runtime_session(Thread("bcn-1")) is runtime_session
-        binding = orchestrator._runtime_timers.get(Thread("bcn-1"))
+        assert orchestrator.runtime_session(Thread("superai-1")) is runtime_session
+        binding = orchestrator._runtime_timers.get(Thread("superai-1"))
         assert binding is not None
         assert binding.timer.active
         assert len(runtime.started_sessions) == 1
@@ -4100,21 +4106,21 @@ async def test_runtime_idle_timeout() -> None:
     runtime.background_job_present = True
     try:
         await orchestrator.handle_inbound(make_message(seq=1))
-        runtime_session = orchestrator.runtime_session(Thread("bcn-1"))
+        runtime_session = orchestrator.runtime_session(Thread("superai-1"))
         assert runtime_session is not None
 
         async with asyncio.timeout(1):
             while runtime.background_job_checks < 2:
                 await asyncio.sleep(0.01)
-        assert orchestrator.runtime_session(Thread("bcn-1")) is runtime_session
+        assert orchestrator.runtime_session(Thread("superai-1")) is runtime_session
         assert runtime.stopped_sessions == []
-        binding = orchestrator._runtime_timers.get(Thread("bcn-1"))
+        binding = orchestrator._runtime_timers.get(Thread("superai-1"))
         assert binding is not None
         assert binding.timer.active
 
         runtime.background_job_present = False
         async with asyncio.timeout(1):
-            while orchestrator.runtime_session(Thread("bcn-1")) is not None:
+            while orchestrator.runtime_session(Thread("superai-1")) is not None:
                 await asyncio.sleep(0.01)
         assert runtime.stopped_sessions == [runtime_session]
     finally:
@@ -4125,14 +4131,14 @@ async def test_runtime_idle_timeout() -> None:
     orchestrator, runtime, _, wheel = await make_idle_timeout_node(30)
     try:
         await orchestrator.handle_inbound(make_message(seq=1))
-        first_runtime = orchestrator.runtime_session(Thread("bcn-1"))
+        first_runtime = orchestrator.runtime_session(Thread("superai-1"))
         assert first_runtime is not None
         async with asyncio.timeout(1):
-            while orchestrator.runtime_session(Thread("bcn-1")) is not None:
+            while orchestrator.runtime_session(Thread("superai-1")) is not None:
                 await asyncio.sleep(0.01)
 
         await orchestrator.handle_inbound(make_message(seq=2))
-        second_runtime = orchestrator.runtime_session(Thread("bcn-1"))
+        second_runtime = orchestrator.runtime_session(Thread("superai-1"))
 
         assert second_runtime is not None
         assert second_runtime.id != first_runtime.id
@@ -4149,23 +4155,23 @@ async def test_runtime_idle_timeout() -> None:
             orchestrator.handle_inbound(make_message(seq=1))
         )
         await runtime.turn_started.wait()
-        runtime_session = orchestrator.runtime_session(Thread("bcn-1"))
+        runtime_session = orchestrator.runtime_session(Thread("superai-1"))
         assert runtime_session is not None
         await asyncio.sleep(0.06)
 
-        assert orchestrator.runtime_session(Thread("bcn-1")) is runtime_session
+        assert orchestrator.runtime_session(Thread("superai-1")) is runtime_session
         assert orchestrator._runtime_timers == {}
         assert runtime.stopped_sessions == []
 
         stream = next(iter(runtime.active_streams))
         stream.release()
         await inbound_task
-        assert orchestrator.runtime_session(Thread("bcn-1")) is runtime_session
-        binding = orchestrator._runtime_timers.get(Thread("bcn-1"))
+        assert orchestrator.runtime_session(Thread("superai-1")) is runtime_session
+        binding = orchestrator._runtime_timers.get(Thread("superai-1"))
         assert binding is not None
         assert binding.timer.active
         async with asyncio.timeout(1):
-            while orchestrator.runtime_session(Thread("bcn-1")) is not None:
+            while orchestrator.runtime_session(Thread("superai-1")) is not None:
                 await asyncio.sleep(0.01)
         assert runtime.stopped_sessions == [runtime_session]
     finally:
@@ -4175,20 +4181,20 @@ async def test_runtime_idle_timeout() -> None:
     # independent sessions expire without interfering
     orchestrator, runtime, _, wheel = await make_idle_timeout_node(50)
     try:
-        await orchestrator.handle_inbound(make_message(session_id="bcn-a", seq=1))
+        await orchestrator.handle_inbound(make_message(session_id="superai-a", seq=1))
         await asyncio.sleep(0.03)
-        await orchestrator.handle_inbound(make_message(session_id="bcn-b", seq=1))
+        await orchestrator.handle_inbound(make_message(session_id="superai-b", seq=1))
         async with asyncio.timeout(1):
-            while orchestrator.runtime_session(Thread("bcn-a")) is not None:
+            while orchestrator.runtime_session(Thread("superai-a")) is not None:
                 await asyncio.sleep(0.01)
 
-        assert orchestrator.runtime_session(Thread("bcn-b")) is not None
+        assert orchestrator.runtime_session(Thread("superai-b")) is not None
         async with asyncio.timeout(1):
-            while orchestrator.runtime_session(Thread("bcn-b")) is not None:
+            while orchestrator.runtime_session(Thread("superai-b")) is not None:
                 await asyncio.sleep(0.01)
         assert {session.actor.id for session in runtime.stopped_sessions} == {
-            "bcn-a",
-            "bcn-b",
+            "superai-a",
+            "superai-b",
         }
     finally:
         await orchestrator.stop(timeout=1)
@@ -4198,15 +4204,15 @@ async def test_runtime_idle_timeout() -> None:
     orchestrator, _, _, wheel = await make_idle_timeout_node(1_000)
     try:
         await orchestrator.handle_inbound(make_message(seq=1))
-        first_runtime = orchestrator.runtime_session(Thread("bcn-1"))
-        first_binding = orchestrator._runtime_timers[Thread("bcn-1")]
+        first_runtime = orchestrator.runtime_session(Thread("superai-1"))
+        first_binding = orchestrator._runtime_timers[Thread("superai-1")]
         assert first_runtime is not None
         await orchestrator._discard_runtime_session(first_runtime)
 
         await orchestrator.handle_inbound(make_message(seq=2))
 
-        second_runtime = orchestrator.runtime_session(Thread("bcn-1"))
-        second_binding = orchestrator._runtime_timers[Thread("bcn-1")]
+        second_runtime = orchestrator.runtime_session(Thread("superai-1"))
+        second_binding = orchestrator._runtime_timers[Thread("superai-1")]
         assert second_runtime is not None
         assert second_runtime.id != first_runtime.id
         assert first_binding.timer.active is False
@@ -4240,7 +4246,7 @@ async def test_pre_start_failure_reconciles_and_retries_the_current_inbound() ->
 
         assert follow_up_turn is not None
         assert follow_up_turn.state is RuntimeTurnState.COMPLETED
-        assert orchestrator.session_runtime_state(Thread("bcn-1")) is State.IDLE
+        assert orchestrator.session_runtime_state(Thread("superai-1")) is State.IDLE
         assert len(runtime.reconciled_sessions) == 1
         assert runtime.reconciled_sessions[0].provider_thread_id is not None
         assert len(runtime.started_turns) == 2
@@ -4270,8 +4276,8 @@ async def test_repeated_pre_start_failure_stops_after_one_retry() -> None:
 
         assert follow_up_turn is not None
         assert follow_up_turn.state is RuntimeTurnState.FAILED
-        assert orchestrator.session_runtime_state(Thread("bcn-1")) is None
-        assert orchestrator.runtime_session(Thread("bcn-1")) is None
+        assert orchestrator.session_runtime_state(Thread("superai-1")) is None
+        assert orchestrator.runtime_session(Thread("superai-1")) is None
         assert len(runtime.reconciled_sessions) == 1
         assert len(runtime.started_turns) == 1
         assert len(storage.runtime_attempts) == 2
@@ -4333,8 +4339,8 @@ async def test_multi_runtime_agents(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("BCN_TEST_TOKEN_WORK", "work-token")
-    monkeypatch.setenv("BCN_TEST_TOKEN_PERSONAL", "personal-token")
+    monkeypatch.setenv("SUPERAI_TEST_TOKEN_WORK", "work-token")
+    monkeypatch.setenv("SUPERAI_TEST_TOKEN_PERSONAL", "personal-token")
     monkeypatch.setenv("SSH_AUTH_SOCK", "/run/agent.sock")
     monkeypatch.setenv("TEST_RUNTIME_HOME", "/home/test-runtime")
     monkeypatch.setenv("OTHER_RUNTIME_HOME", "/home/other-runtime")
@@ -4362,7 +4368,7 @@ async def test_multi_runtime_agents(
                             kind="test",
                             model="first-model",
                             env={
-                                "TEST_TOKEN": "BCN_TEST_TOKEN_WORK",
+                                "TEST_TOKEN": "SUPERAI_TEST_TOKEN_WORK",
                                 "SSH_AUTH_SOCK": "SSH_AUTH_SOCK",
                             },
                         ),
@@ -4370,8 +4376,10 @@ async def test_multi_runtime_agents(
                             kind="other",
                             model="second-model",
                             env={
-                                "TEST_TOKEN": "BCN_TEST_TOKEN_PERSONAL",
-                                "BCN_TEST_TOKEN_PERSONAL": ("BCN_TEST_TOKEN_PERSONAL"),
+                                "TEST_TOKEN": "SUPERAI_TEST_TOKEN_PERSONAL",
+                                "SUPERAI_TEST_TOKEN_PERSONAL": (
+                                    "SUPERAI_TEST_TOKEN_PERSONAL"
+                                ),
                             },
                         ),
                     ),
@@ -4427,12 +4435,12 @@ async def test_multi_runtime_agents(
         assert second["TEST_TOKEN"] == "personal-token"
 
         # case: a renamed credential reaches the child only under the child name
-        assert "BCN_TEST_TOKEN_WORK" not in first
-        assert "BCN_TEST_TOKEN_PERSONAL" not in first
-        assert "BCN_TEST_TOKEN_WORK" not in second
+        assert "SUPERAI_TEST_TOKEN_WORK" not in first
+        assert "SUPERAI_TEST_TOKEN_PERSONAL" not in first
+        assert "SUPERAI_TEST_TOKEN_WORK" not in second
 
         # case: a source name is only stripped when nothing else asked for it
-        assert second["BCN_TEST_TOKEN_PERSONAL"] == "personal-token"
+        assert second["SUPERAI_TEST_TOKEN_PERSONAL"] == "personal-token"
 
         # case: a name that is the same on both sides is passed straight through
         assert first["SSH_AUTH_SOCK"] == "/run/agent.sock"
@@ -4488,26 +4496,28 @@ async def test_multi_runtime_session_binding() -> None:
     # case: consecutive sessions take the runtimes in configuration order
     orchestrator, (first, second), wheel, _, _ = await make_multi_runtime_node()
     first.queue_turn_plan(TestTurnPlan(block_until_release=True))
-    first_task = orchestrator.dispatch_inbound(make_message(session_id="bcn-a", seq=1))
+    first_task = orchestrator.dispatch_inbound(
+        make_message(session_id="superai-a", seq=1)
+    )
     try:
         await first.turn_started.wait()
-        session_a = orchestrator.runtime_session(Thread("bcn-a"))
+        session_a = orchestrator.runtime_session(Thread("superai-a"))
         assert session_a is not None
         assert (session_a.runtime, session_a.runtime_index) == ("first", 0)
 
         # case: a steer for a live turn reaches the instance that started it
         first.queue_turn_plan(TestTurnPlan())
         second_task = orchestrator.dispatch_inbound(
-            make_message(session_id="bcn-a", seq=2)
+            make_message(session_id="superai-a", seq=2)
         )
         await wait_until(lambda: len(first.steered_turns) == 1)
         next(iter(first.active_streams)).release()
         await asyncio.gather(first_task, second_task)
 
-        # only a ban moves selection on, so bcn-b needs the first one banned
+        # only a ban moves selection on, so superai-b needs the first one banned
         orchestrator._runtimes.record_failure(0)
-        await orchestrator.handle_inbound(make_message(session_id="bcn-b", seq=1))
-        session_b = orchestrator.runtime_session(Thread("bcn-b"))
+        await orchestrator.handle_inbound(make_message(session_id="superai-b", seq=1))
+        session_b = orchestrator.runtime_session(Thread("superai-b"))
         assert session_b is not None
         assert (session_b.runtime, session_b.runtime_index) == ("second", 1)
 
@@ -4532,11 +4542,11 @@ async def test_multi_runtime_expiry_is_scoped_to_its_runtime() -> None:
     # case: an expire fans out only to the sessions of the runtime that sent it
     orchestrator, (first, second), wheel, _, _ = await make_multi_runtime_node()
     try:
-        await orchestrator.handle_inbound(make_message(session_id="bcn-a", seq=1))
+        await orchestrator.handle_inbound(make_message(session_id="superai-a", seq=1))
         orchestrator._runtimes.record_failure(0)
-        await orchestrator.handle_inbound(make_message(session_id="bcn-b", seq=1))
-        session_a = orchestrator.runtime_session(Thread("bcn-a"))
-        session_b = orchestrator.runtime_session(Thread("bcn-b"))
+        await orchestrator.handle_inbound(make_message(session_id="superai-b", seq=1))
+        session_a = orchestrator.runtime_session(Thread("superai-a"))
+        session_b = orchestrator.runtime_session(Thread("superai-b"))
         assert session_a is not None
         assert session_b is not None
         assert (session_a.runtime_index, session_b.runtime_index) == (0, 1)
@@ -4545,10 +4555,10 @@ async def test_multi_runtime_expiry_is_scoped_to_its_runtime() -> None:
         await wait_until(lambda: session_a.id in orchestrator._stale_context_ids)
         assert session_b.id not in orchestrator._stale_context_ids
 
-        await orchestrator.handle_inbound(make_message(session_id="bcn-a", seq=2))
+        await orchestrator.handle_inbound(make_message(session_id="superai-a", seq=2))
         await wait_until(lambda: len(first.stopped_sessions) == 1)
 
-        assert orchestrator.runtime_session(Thread("bcn-b")) is session_b
+        assert orchestrator.runtime_session(Thread("superai-b")) is session_b
         assert [session.id for session in first.stopped_sessions] == [session_a.id]
         assert second.stopped_sessions == []
     finally:
@@ -4637,7 +4647,7 @@ async def test_multi_runtime_hands_over_a_runtime_that_cannot_start_a_session() 
         first.queue_turn_plan(TestTurnPlan(pre_start_unavailable=True))
         first.queue_turn_plan(TestTurnPlan(pre_start_unavailable=True))
         result = await orchestrator.handle_inbound(
-            make_message(session_id="bcn-a", seq=1)
+            make_message(session_id="superai-a", seq=1)
         )
 
         assert result is not None
@@ -4647,8 +4657,8 @@ async def test_multi_runtime_hands_over_a_runtime_that_cannot_start_a_session() 
         assert ("runtime.pool.banned", 0, "first") in _pool_events(audit)
 
         # case: later sessions keep away from the banned runtime
-        await orchestrator.handle_inbound(make_message(session_id="bcn-b", seq=1))
-        session_b = orchestrator.runtime_session(Thread("bcn-b"))
+        await orchestrator.handle_inbound(make_message(session_id="superai-b", seq=1))
+        session_b = orchestrator.runtime_session(Thread("superai-b"))
         assert session_b is not None
         assert session_b.runtime_index == 1
     finally:
@@ -4672,14 +4682,14 @@ async def test_multi_runtime_failover_answers_before_reporting_an_error() -> Non
             TestTurnPlan(states=(RuntimeEventState.STARTED, RuntimeEventState.FAILED))
         )
         result = await orchestrator.handle_inbound(
-            make_message(session_id="bcn-a", seq=1)
+            make_message(session_id="superai-a", seq=1)
         )
 
         assert result is not None
         assert result.state is RuntimeTurnState.COMPLETED
         assert channel.send_attempts == []
         assert len(second.started_turns) == 1
-        session_a = orchestrator.runtime_session(Thread("bcn-a"))
+        session_a = orchestrator.runtime_session(Thread("superai-a"))
         assert session_a is not None
         assert session_a.runtime_index == 1
         assert ("runtime.pool.banned", 0, "first") in _pool_events(audit)
@@ -4706,7 +4716,7 @@ async def test_multi_runtime_reports_once_every_runtime_has_failed() -> None:
             TestTurnPlan(states=(RuntimeEventState.STARTED, RuntimeEventState.UNKNOWN))
         )
         result = await orchestrator.handle_inbound(
-            make_message(session_id="bcn-a", seq=1)
+            make_message(session_id="superai-a", seq=1)
         )
 
         assert result is not None
@@ -4722,8 +4732,8 @@ async def test_multi_runtime_reports_once_every_runtime_has_failed() -> None:
 
         # case: with every runtime banned the next turn probes the one banned
         # longest ago, and completing on it lifts that ban
-        await orchestrator.handle_inbound(make_message(session_id="bcn-b", seq=1))
-        session_b = orchestrator.runtime_session(Thread("bcn-b"))
+        await orchestrator.handle_inbound(make_message(session_id="superai-b", seq=1))
+        session_b = orchestrator.runtime_session(Thread("superai-b"))
         assert session_b is not None
         assert session_b.runtime_index == 0
         events = _pool_events(audit)
@@ -4747,7 +4757,7 @@ async def test_upgrade_is_offered_once_per_release() -> None:
         await wait_until(
             lambda: any(
                 event.event_name == "runtime.turn.completed"
-                and event.correlation.turn_id == "turn-message-bcn-1-1"
+                and event.correlation.turn_id == "turn-message-superai-1-1"
                 for event in audit.events
             )
         )
@@ -4756,7 +4766,7 @@ async def test_upgrade_is_offered_once_per_release() -> None:
         await wait_until(
             lambda: any(
                 event.event_name == "runtime.turn.completed"
-                and event.correlation.turn_id == "turn-message-bcn-1-2"
+                and event.correlation.turn_id == "turn-message-superai-1-2"
                 for event in audit.events
             )
         )
@@ -4764,10 +4774,7 @@ async def test_upgrade_is_offered_once_per_release() -> None:
         assert len(runtime.started_turns) == 2
 
         # case: the conversation hears of a release once
-        assert (
-            "Upgrade available: bazaar-compute-node 0.2.0"
-            in (runtime.started_turns[0][2])
-        )
+        assert "Upgrade available: superai 0.2.0" in (runtime.started_turns[0][2])
 
         # case: and is not told the same thing again on its next turn
         assert "Upgrade available" not in runtime.started_turns[1][2]
@@ -4778,17 +4785,14 @@ async def test_upgrade_is_offered_once_per_release() -> None:
         await wait_until(
             lambda: any(
                 event.event_name == "runtime.turn.completed"
-                and event.correlation.turn_id == "turn-message-bcn-1-3"
+                and event.correlation.turn_id == "turn-message-superai-1-3"
                 for event in audit.events
             )
         )
 
         # case: a release it has not heard of is worth saying, however long the
         # conversation has been going
-        assert (
-            "Upgrade available: bazaar-compute-node 0.3.0"
-            in (runtime.started_turns[2][2])
-        )
+        assert "Upgrade available: superai 0.3.0" in (runtime.started_turns[2][2])
     finally:
         await orchestrator.stop(timeout=1)
 
@@ -4830,7 +4834,7 @@ async def test_no_upgrade_leaves_the_opening_turn_untouched() -> None:
         await wait_until(
             lambda: any(
                 event.event_name == "runtime.turn.completed"
-                and event.correlation.turn_id == "turn-message-bcn-1-1"
+                and event.correlation.turn_id == "turn-message-superai-1-1"
                 for event in audit.events
             )
         )
@@ -4852,7 +4856,7 @@ async def test_a_dm_is_minted_for_a_sender_seen_in_a_group() -> None:
                 direction=MessageDirection.INBOUND,
                 seq=1,
                 message_id="message-group-1",
-                thread_id="bcn-group",
+                thread_id="superai-group",
                 channel_session_id="channel-group",
                 channel="test",
                 provider_thread_id="thread-group",
@@ -4870,7 +4874,7 @@ async def test_a_dm_is_minted_for_a_sender_seen_in_a_group() -> None:
             lambda: (
                 len(
                     _stored_messages(
-                        storage, "bcn-group", direction=MessageDirection.INBOUND
+                        storage, "superai-group", direction=MessageDirection.INBOUND
                     )
                 )
                 == 1
@@ -4913,7 +4917,7 @@ async def test_a_dm_is_minted_for_a_sender_seen_in_a_group() -> None:
                 direction=MessageDirection.INBOUND,
                 seq=2,
                 message_id="message-group-2",
-                thread_id="bcn-group",
+                thread_id="superai-group",
                 channel_session_id="channel-group",
                 channel="test",
                 provider_thread_id="thread-group",
@@ -4931,7 +4935,7 @@ async def test_a_dm_is_minted_for_a_sender_seen_in_a_group() -> None:
             lambda: (
                 len(
                     _stored_messages(
-                        storage, "bcn-group", direction=MessageDirection.INBOUND
+                        storage, "superai-group", direction=MessageDirection.INBOUND
                     )
                 )
                 == 2
@@ -4962,7 +4966,7 @@ async def test_a_sender_the_channel_cannot_address_stays_not_found() -> None:
                 direction=MessageDirection.INBOUND,
                 seq=1,
                 message_id="message-group-2",
-                thread_id="bcn-group",
+                thread_id="superai-group",
                 channel_session_id="channel-group",
                 channel="test",
                 provider_thread_id="thread-group",
@@ -4980,7 +4984,7 @@ async def test_a_sender_the_channel_cannot_address_stays_not_found() -> None:
             lambda: (
                 len(
                     _stored_messages(
-                        storage, "bcn-group", direction=MessageDirection.INBOUND
+                        storage, "superai-group", direction=MessageDirection.INBOUND
                     )
                 )
                 == 1
@@ -5012,7 +5016,7 @@ async def test_an_opened_dm_answers_to_the_conversation_it_was_delivered_into() 
                 direction=MessageDirection.INBOUND,
                 seq=1,
                 message_id="message-group-1",
-                thread_id="bcn-group",
+                thread_id="superai-group",
                 channel_session_id="channel-group",
                 channel="test",
                 provider_thread_id="thread-group",
@@ -5030,7 +5034,7 @@ async def test_an_opened_dm_answers_to_the_conversation_it_was_delivered_into() 
             lambda: (
                 len(
                     _stored_messages(
-                        storage, "bcn-group", direction=MessageDirection.INBOUND
+                        storage, "superai-group", direction=MessageDirection.INBOUND
                     )
                 )
                 == 1
@@ -5061,7 +5065,7 @@ async def test_an_opened_dm_answers_to_the_conversation_it_was_delivered_into() 
                 direction=MessageDirection.INBOUND,
                 seq=2,
                 message_id="message-dm-1",
-                thread_id="bcn-dm-inbound",
+                thread_id="superai-dm-inbound",
                 channel_session_id="channel-dm-inbound",
                 channel="test",
                 provider_thread_id="test:dm:chat-9",
@@ -5103,7 +5107,7 @@ async def test_a_handle_two_conversations_answer_to_stays_an_error() -> None:
                     direction=MessageDirection.INBOUND,
                     seq=index,
                     message_id=f"message-dm-{index}",
-                    thread_id=f"bcn-dm-{index}",
+                    thread_id=f"superai-dm-{index}",
                     channel_session_id=f"channel-dm-{index}",
                     channel="test",
                     provider_thread_id=f"test:dm:peer-{index}",
@@ -5264,7 +5268,7 @@ async def test_a_handle_held_on_two_bots_is_answered_on_both() -> None:
                     direction=MessageDirection.INBOUND,
                     seq=index,
                     message_id=f"message-dm-{index}",
-                    thread_id=f"bcn-dm-{index}",
+                    thread_id=f"superai-dm-{index}",
                     channel_session_id=f"channel-dm-{index}",
                     channel="test",
                     channel_identity=bot,
@@ -5288,7 +5292,7 @@ async def test_a_handle_held_on_two_bots_is_answered_on_both() -> None:
                 direction=MessageDirection.INBOUND,
                 seq=3,
                 message_id="message-dm-2-again",
-                thread_id="bcn-dm-2",
+                thread_id="superai-dm-2",
                 channel_session_id="channel-dm-2",
                 channel="test",
                 channel_identity="bot-2",
@@ -5307,7 +5311,7 @@ async def test_a_handle_held_on_two_bots_is_answered_on_both() -> None:
             lambda: (
                 len(
                     _stored_messages(
-                        storage, "bcn-dm-2", direction=MessageDirection.INBOUND
+                        storage, "superai-dm-2", direction=MessageDirection.INBOUND
                     )
                 )
                 == 2
@@ -5344,7 +5348,7 @@ async def test_a_handle_held_on_two_bots_is_answered_on_both() -> None:
         assert {request.body for request in channel.send_requests} == {"hi on both"}
         outbound = [
             message
-            for thread_id in ("bcn-dm-1", "bcn-dm-2")
+            for thread_id in ("superai-dm-1", "superai-dm-2")
             for message in _stored_messages(
                 storage, thread_id, direction=MessageDirection.OUTBOUND
             )
@@ -5367,7 +5371,7 @@ async def test_a_broadcast_is_stored_once_per_conversation() -> None:
                     direction=MessageDirection.INBOUND,
                     seq=index,
                     message_id=f"message-dm-{index}",
-                    thread_id=f"bcn-dm-{index}",
+                    thread_id=f"superai-dm-{index}",
                     channel_session_id=f"channel-dm-{index}",
                     channel="test",
                     channel_identity=bot,
@@ -5398,7 +5402,7 @@ async def test_a_broadcast_is_stored_once_per_conversation() -> None:
             "bot-2",
         }
         scope = storage.scope("workspace-1", "Test Agent")
-        for thread_id in ("bcn-dm-1", "bcn-dm-2"):
+        for thread_id in ("superai-dm-1", "superai-dm-2"):
             outbound = await scope.list_messages(
                 thread_id, direction=MessageDirection.OUTBOUND
             )

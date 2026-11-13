@@ -5,9 +5,9 @@ from datetime import UTC, datetime
 import click
 import pytest
 
-from bazaar_compute_node.cmd.bcc import bcc
-from bazaar_compute_node.cmd.bcc._client import BccCommandError
-from bazaar_compute_node.cmd.bcc._format import (
+from superai_node.cmd.bcc import bcc
+from superai_node.cmd.bcc._client import BccCommandError
+from superai_node.cmd.bcc._format import (
     print_error,
     serialize_check,
     serialize_read,

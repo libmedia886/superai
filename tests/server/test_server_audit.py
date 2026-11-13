@@ -9,11 +9,11 @@ from uuid import uuid7
 import aiosqlite
 import pytest
 
-from bazaar_compute_node.contrib.server.audit import BATCH_BYTES, ServerAudit
-from bazaar_compute_node.core.audit import AuditEvent
-from bazaar_compute_node.core.correlation import CorrelationContext
-from bazaar_compute_node.core.lifecycle import TimeoutBudget
-from bazaar_compute_node.core.models import RuntimeEventState
+from superai_node.contrib.server.audit import BATCH_BYTES, ServerAudit
+from superai_node.core.audit import AuditEvent
+from superai_node.core.correlation import CorrelationContext
+from superai_node.core.lifecycle import TimeoutBudget
+from superai_node.core.models import RuntimeEventState
 
 from ._serving import enrol, free_port, serving
 
@@ -50,7 +50,7 @@ async def _stored(path: Path) -> list[tuple[int, str]]:
 
 def _sink(url: object) -> ServerAudit:
     return ServerAudit(
-        {"url": url, "token_env": "BCN_SERVER_TOKEN"},
+        {"url": url, "token_env": "SUPERAI_SERVER_TOKEN"},
         timeout_budget=BUDGET,
     )
 
@@ -61,7 +61,7 @@ async def test_events_reach_the_server_in_order_under_the_node_identity(
 ) -> None:
     async with serving(tmp_path) as (base, storage):
         enrolment = await enrol(storage, "kana")
-        monkeypatch.setenv("BCN_SERVER_TOKEN", enrolment.token)
+        monkeypatch.setenv("SUPERAI_SERVER_TOKEN", enrolment.token)
         audit = _sink(base + "/")
         try:
             await audit.start(timeout=1)
@@ -76,7 +76,7 @@ async def test_events_reach_the_server_in_order_under_the_node_identity(
             await _wait_until(lambda: audit.health["sent"] == 4)
 
             # case: the server holds them in order, attributed to the agent
-            assert await _stored(tmp_path / "bcs.sqlite3") == [
+            assert await _stored(tmp_path / "superai-server.sqlite3") == [
                 (1, "event.0"),
                 (2, "event.1"),
                 (3, "event.2"),
@@ -98,7 +98,7 @@ async def test_what_the_server_cannot_take_is_dropped_and_the_node_goes_on(
     # the sink starts before the server exists: the first report goes nowhere
     async with serving(tmp_path) as (_, storage):
         enrolment = await enrol(storage, "kana")
-    monkeypatch.setenv("BCN_SERVER_TOKEN", enrolment.token)
+    monkeypatch.setenv("SUPERAI_SERVER_TOKEN", enrolment.token)
     audit = _sink(f"http://127.0.0.1:{port}")
     try:
         await audit.start(timeout=1)
@@ -112,7 +112,9 @@ async def test_what_the_server_cannot_take_is_dropped_and_the_node_goes_on(
             await audit.append(_event("event.second", at_ms=2), timeout=1)
             await _wait_until(lambda: audit.health["sent"] == 1)
             # case: once the server is there, what comes next arrives
-            assert await _stored(tmp_path / "bcs.sqlite3") == [(2, "event.second")]
+            assert await _stored(tmp_path / "superai-server.sqlite3") == [
+                (2, "event.second")
+            ]
             assert audit.health["last_error"] is None
     finally:
         await audit.stop(timeout=1)
@@ -124,7 +126,7 @@ async def test_what_the_server_refuses_is_let_go_not_retried(
 ) -> None:
     async with serving(tmp_path) as (base, storage):
         enrolment = await enrol(storage, "kana")
-        monkeypatch.setenv("BCN_SERVER_TOKEN", enrolment.token)
+        monkeypatch.setenv("SUPERAI_SERVER_TOKEN", enrolment.token)
         audit = _sink(base)
         try:
             await audit.start(timeout=1)
@@ -144,7 +146,9 @@ async def test_what_the_server_refuses_is_let_go_not_retried(
             await _wait_until(
                 lambda: audit.health["sent"] == 1 and audit.health["rejected"] == 1
             )
-            assert await _stored(tmp_path / "bcs.sqlite3") == [(3, "event.after")]
+            assert await _stored(tmp_path / "superai-server.sqlite3") == [
+                (3, "event.after")
+            ]
             assert audit.health["queued"] == 0 and audit.health["dropped"] == 1
 
             # case: the computer is removed while the node runs: its reports are refused, not kept
@@ -163,7 +167,7 @@ async def test_a_backlog_goes_over_in_requests_the_server_will_accept(
 ) -> None:
     async with serving(tmp_path) as (base, storage):
         enrolment = await enrol(storage, "kana")
-        monkeypatch.setenv("BCN_SERVER_TOKEN", enrolment.token)
+        monkeypatch.setenv("SUPERAI_SERVER_TOKEN", enrolment.token)
         audit = _sink(base)
         # each event is a fifth of a request; while nothing is being sent the
         # queue holds one request's worth and lets the rest go
@@ -181,7 +185,9 @@ async def test_a_backlog_goes_over_in_requests_the_server_will_accept(
             await _wait_until(lambda: audit.health["sent"] == queued)
 
             # case: what was kept arrives whole and in order, no request refused as too large
-            stored = [seq for seq, _ in await _stored(tmp_path / "bcs.sqlite3")]
+            stored = [
+                seq for seq, _ in await _stored(tmp_path / "superai-server.sqlite3")
+            ]
             assert stored == list(range(1, queued + 1))
             assert "http" not in str(audit.health["last_error"])
         finally:
@@ -192,7 +198,7 @@ async def test_a_backlog_goes_over_in_requests_the_server_will_accept(
 async def test_a_sink_that_cannot_report_says_so_and_lets_the_node_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("BCN_SERVER_TOKEN", "kana:secret")
+    monkeypatch.setenv("SUPERAI_SERVER_TOKEN", "kana:secret")
     # case: no address at all
     for url in ("", None):
         audit = _sink(url)
@@ -203,10 +209,10 @@ async def test_a_sink_that_cannot_report_says_so_and_lets_the_node_run(
         await audit.stop(timeout=1)
 
     # case: no token in the environment
-    monkeypatch.delenv("BCN_SERVER_TOKEN")
+    monkeypatch.delenv("SUPERAI_SERVER_TOKEN")
     audit = _sink("http://127.0.0.1:1")
     await audit.start(timeout=1)
     await audit.append(_event("event.lost", at_ms=1), timeout=1)
-    assert "BCN_SERVER_TOKEN" in str(audit.health["last_error"])
+    assert "SUPERAI_SERVER_TOKEN" in str(audit.health["last_error"])
     assert audit.health["dropped"] == 1
     await audit.stop(timeout=1)

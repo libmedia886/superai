@@ -10,33 +10,33 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-import bazaar_compute_node.app.upgrade as upgrade_module
-from bazaar_compute_node.app.application import NodeApplication
-from bazaar_compute_node.app.config import (
+import superai_node.app.upgrade as upgrade_module
+from superai_node.app.application import NodeApplication
+from superai_node.app.config import (
     AgentConfiguration,
     ChannelConfiguration,
     NodeConfiguration,
     RuntimeConfiguration,
 )
-from bazaar_compute_node.app.registry import AdapterRegistry
-from bazaar_compute_node.app.resource_dispatch import CommandDispatcher
-from bazaar_compute_node.app.upgrade import UpgradeService
-from bazaar_compute_node.core.actor import Actors, Mode
-from bazaar_compute_node.core.command import (
+from superai_node.app.registry import AdapterRegistry
+from superai_node.app.resource_dispatch import CommandDispatcher
+from superai_node.app.upgrade import UpgradeService
+from superai_node.core.actor import Actors, Mode
+from superai_node.core.command import (
     ICommandService,
     MessageBroadcast,
     MessageSendFreshnessHold,
     MessageSendSuccess,
 )
-from bazaar_compute_node.core.lifecycle import TimeoutBudget
-from bazaar_compute_node.core.models import (
+from superai_node.core.lifecycle import TimeoutBudget
+from superai_node.core.models import (
     ChannelTargetKind,
     InboxTargetSummary,
     Message,
     MessageDirection,
     OutboundDeliveryState,
 )
-from bazaar_compute_node.core.serialize import serialize_inbox_target
+from superai_node.core.serialize import serialize_inbox_target
 
 AGENT_ID = "0198d4e6-29c5-7465-b74b-88db31f0c118"
 
@@ -107,7 +107,7 @@ async def test_command_dispatch_requires_resource_and_rejects_collisions(
     node = NodeApplication(
         configuration=make_configuration(),
         shared_factories=shared_factories,
-        endpoint_path=tmp_path / "bcn.sock",
+        endpoint_path=tmp_path / "superai.sock",
         timeout_budget=make_budget(),
     )
     await node.start()
@@ -117,7 +117,7 @@ async def test_command_dispatch_requires_resource_and_rejects_collisions(
             {
                 "kind": "command",
                 "command": "check",
-                "actor_id": "bcn-a",
+                "actor_id": "superai-a",
             }
         )
         assert missing_resource["ok"] is False
@@ -128,7 +128,7 @@ async def test_command_dispatch_requires_resource_and_rejects_collisions(
                 "kind": "command",
                 "resource": "message",
                 "command": "unfollow",
-                "actor_id": "bcn-a",
+                "actor_id": "superai-a",
             }
         )
         assert message_collision["ok"] is False
@@ -139,7 +139,7 @@ async def test_command_dispatch_requires_resource_and_rejects_collisions(
                 "kind": "command",
                 "resource": "thread",
                 "command": "check",
-                "actor_id": "bcn-a",
+                "actor_id": "superai-a",
             }
         )
         assert thread_collision["ok"] is False
@@ -150,7 +150,7 @@ async def test_command_dispatch_requires_resource_and_rejects_collisions(
                 "kind": "command",
                 "resource": "inbox",
                 "command": "list",
-                "actor_id": "bcn-a",
+                "actor_id": "superai-a",
             }
         )
         assert inbox_collision["ok"] is False
@@ -161,7 +161,7 @@ async def test_command_dispatch_requires_resource_and_rejects_collisions(
                 "kind": "command",
                 "resource": "unknown",
                 "command": "list",
-                "actor_id": "bcn-a",
+                "actor_id": "superai-a",
             }
         )
         assert unknown_resource["ok"] is False

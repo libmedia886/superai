@@ -4,9 +4,9 @@ from typing import Any
 
 import pytest
 
-from bazaar_compute_node.contrib.sqlite import SqliteDatabase
-from bazaar_compute_node.core.inbox import InboxTargetPage
-from bazaar_compute_node.core.models import (
+from superai_node.contrib.sqlite import SqliteDatabase
+from superai_node.core.inbox import InboxTargetPage
+from superai_node.core.models import (
     ChannelSession,
     ChannelTargetKind,
     ChannelTargetPresentation,
@@ -18,7 +18,7 @@ from bazaar_compute_node.core.models import (
     SenderKind,
     Thread,
 )
-from bazaar_compute_node.core.storage import (
+from superai_node.core.storage import (
     AmbiguousInboxTargetError,
     InboxTargetResolutionError,
 )

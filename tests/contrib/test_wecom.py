@@ -9,13 +9,13 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 
-from bazaar_compute_node.app.attachments import AttachmentMaterializer
-from bazaar_compute_node.contrib.wecom.channel import (
+from superai_node.app.attachments import AttachmentMaterializer
+from superai_node.contrib.wecom.channel import (
     WeComChannel,
     _Delivery,
 )
-from bazaar_compute_node.contrib.wecom.identity import parse_provider_thread_id
-from bazaar_compute_node.contrib.wecom.outbound import (
+from superai_node.contrib.wecom.identity import parse_provider_thread_id
+from superai_node.contrib.wecom.outbound import (
     CHUNK_SIZE,
     AttachmentReader,
     encode_request,
@@ -23,14 +23,14 @@ from bazaar_compute_node.contrib.wecom.outbound import (
     prepare_attachments,
     visible_message_body,
 )
-from bazaar_compute_node.core.actor import Thread
-from bazaar_compute_node.core.channel import (
+from superai_node.core.actor import Thread
+from superai_node.core.channel import (
     ChannelApprovalRequest,
     ChannelContext,
     ChannelIdentity,
     ChannelSendRequest,
 )
-from bazaar_compute_node.core.models import (
+from superai_node.core.models import (
     ApprovalDecision,
     ApprovalRequest,
     ApprovalResult,
@@ -40,9 +40,9 @@ from bazaar_compute_node.core.models import (
     SenderIdentity,
     SenderKind,
 )
-from bazaar_compute_node.core.outcomes import ProviderCallStatus
-from bazaar_compute_node.core.timerwheel import TimerWheel
-from bazaar_compute_node.core.utils.markdown import split_markdown, utf8_bytes
+from superai_node.core.outcomes import ProviderCallStatus
+from superai_node.core.timerwheel import TimerWheel
+from superai_node.core.utils.markdown import split_markdown, utf8_bytes
 
 
 def test_wecom_exposes_provider_id_without_display_name(tmp_path: Path) -> None:
@@ -211,8 +211,8 @@ def test_wecom_filename_decodes_provider_content_disposition() -> None:
 @pytest.mark.parametrize(
     ("event_key", "decision", "status"),
     (
-        ("bcn_approve", ApprovalDecision.APPROVED, "Approved"),
-        ("bcn_reject", ApprovalDecision.REJECTED, "Rejected"),
+        ("superai_approve", ApprovalDecision.APPROVED, "Approved"),
+        ("superai_reject", ApprovalDecision.REJECTED, "Rejected"),
     ),
 )
 async def test_wecom_approval_card_event_updates_card_and_wakes_request(
@@ -316,8 +316,8 @@ async def test_wecom_approval_card_event_updates_card_and_wakes_request(
     assert main_title["desc"] == "command execution"
     assert card["sub_title_text"] == "Run the requested command."
     assert [button["key"] for button in buttons] == [
-        "bcn_approve",
-        "bcn_reject",
+        "superai_approve",
+        "superai_reject",
     ]
     assert result.request_id == approval.request_id
     assert result.decision is decision
@@ -367,7 +367,7 @@ async def test_wecom_slow_card_update_does_not_block_another_session(
                         "eventtype": "template_card_event",
                         "template_card_event": {
                             "card_type": "button_interaction",
-                            "event_key": "bcn_approve",
+                            "event_key": "superai_approve",
                             "task_id": task_id,
                         },
                     }
@@ -495,7 +495,7 @@ async def test_wecom_approval_cancellation_cleans_pending_request(
                         "eventtype": "template_card_event",
                         "template_card_event": {
                             "card_type": "button_interaction",
-                            "event_key": "bcn_approve",
+                            "event_key": "superai_approve",
                             "task_id": task_id,
                         },
                     }

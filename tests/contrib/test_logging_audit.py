@@ -6,16 +6,16 @@ import logging
 
 import pytest
 
-from bazaar_compute_node.contrib.logging import LoggingAudit
-from bazaar_compute_node.core.audit import AuditEvent
-from bazaar_compute_node.core.correlation import CorrelationContext
-from bazaar_compute_node.core.models import RuntimeEventState
+from superai_node.contrib.logging import LoggingAudit
+from superai_node.core.audit import AuditEvent
+from superai_node.core.correlation import CorrelationContext
+from superai_node.core.models import RuntimeEventState
 
 
 @pytest.mark.asyncio
 async def test_logging_audit_emits_structured_event() -> None:
     stream = io.StringIO()
-    logger = logging.getLogger("bazaar_compute_node.test.audit")
+    logger = logging.getLogger("superai_node.test.audit")
     logger.handlers.clear()
     logger.setLevel(logging.INFO)
     logger.propagate = False
@@ -29,7 +29,7 @@ async def test_logging_audit_emits_structured_event() -> None:
             created_at_ms=42,
             correlation=CorrelationContext(
                 node_id="node-1",
-                thread_id="bcn-1",
+                thread_id="superai-1",
                 turn_id="turn-1",
             ),
             metadata={"operation": "turn"},
@@ -40,7 +40,7 @@ async def test_logging_audit_emits_structured_event() -> None:
     payload = json.loads(stream.getvalue())
     assert payload == {
         "correlation": {
-            "thread_id": "bcn-1",
+            "thread_id": "superai-1",
             "node_id": "node-1",
             "turn_id": "turn-1",
         },

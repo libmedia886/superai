@@ -10,15 +10,15 @@ import aiosqlite
 import pytest
 import pytest_asyncio
 
-from bazaar_compute_node.contrib.sqlite import SqliteDatabase
-from bazaar_compute_node.contrib.sqlite.executor import (
+from superai_node.contrib.sqlite import SqliteDatabase
+from superai_node.contrib.sqlite.executor import (
     SqliteQueryTimeoutError,
     SqliteSession,
 )
-from bazaar_compute_node.contrib.sqlite.migrations import MIGRATIONS, apply_migrations
-from bazaar_compute_node.contrib.sqlite.repository import SqliteRepository
-from bazaar_compute_node.core.command import MessageSearchRequest
-from bazaar_compute_node.core.models import (
+from superai_node.contrib.sqlite.migrations import MIGRATIONS, apply_migrations
+from superai_node.contrib.sqlite.repository import SqliteRepository
+from superai_node.core.command import MessageSearchRequest
+from superai_node.core.models import (
     ChannelSession,
     ChannelTargetKind,
     ConsumerCursor,
@@ -30,7 +30,7 @@ from bazaar_compute_node.core.models import (
     SenderKind,
     Thread,
 )
-from bazaar_compute_node.core.storage import IStorageScope
+from superai_node.core.storage import IStorageScope
 
 
 async def _conversation(

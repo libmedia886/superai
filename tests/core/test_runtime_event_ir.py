@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from bcn_test_support import (
+from superai_test_support import (
     MemoryStorage,
     RecordingAudit,
     TestChannel,
@@ -11,10 +11,10 @@ from bcn_test_support import (
     TestTurnPlan,
 )
 
-from bazaar_compute_node.core.actor import Actors, Mode, Thread
-from bazaar_compute_node.core.audit import AuditRecorder
-from bazaar_compute_node.core.lifecycle import TimeoutBudget
-from bazaar_compute_node.core.models import (
+from superai_node.core.actor import Actors, Mode, Thread
+from superai_node.core.audit import AuditRecorder
+from superai_node.core.lifecycle import TimeoutBudget
+from superai_node.core.models import (
     Message,
     MessageDirection,
     RuntimeEventEnvelope,
@@ -28,11 +28,11 @@ from bazaar_compute_node.core.models import (
     TurnStarted,
     TurnUnknown,
 )
-from bazaar_compute_node.core.orchestration import AgentOrchestrator
-from bazaar_compute_node.core.orchestration.turn import _with_a_reason
-from bazaar_compute_node.core.timerwheel import TimerWheel
-from bazaar_compute_node.core.utils.clock import now_ms
-from bazaar_compute_node.i18n import ENGLISH, create_translator
+from superai_node.core.orchestration import AgentOrchestrator
+from superai_node.core.orchestration.turn import _with_a_reason
+from superai_node.core.timerwheel import TimerWheel
+from superai_node.core.utils.clock import now_ms
+from superai_node.i18n import ENGLISH, create_translator
 
 
 def _message() -> Message:
@@ -177,7 +177,7 @@ def test_core_names_a_failure_the_runtime_left_unexplained() -> None:
     # a provider can end a turn as failed without an error object; which runtime
     # it was is ours to know, so the reason comes from core, not the adapter
     envelope = RuntimeEventEnvelope(
-        actor=Thread("bcn-1"),
+        actor=Thread("superai-1"),
         runtime_session_id="runtime-1",
         turn_id="turn-1",
         occurred_at_ms=1,
@@ -189,7 +189,7 @@ def test_core_names_a_failure_the_runtime_left_unexplained() -> None:
             RuntimeOutputEvent(
                 envelope=envelope,
                 payload=TurnFailed(
-                    event_name="bcn.turn.failed",
+                    event_name="superai.turn.failed",
                     error_kind="provider_failed",
                     error_message=error_message,
                 ),
@@ -206,7 +206,7 @@ def test_core_names_a_failure_the_runtime_left_unexplained() -> None:
         RuntimeOutputEvent(
             envelope=envelope,
             payload=TurnUnknown(
-                event_name="bcn.turn.unknown", error_kind="provider_unknown"
+                event_name="superai.turn.unknown", error_kind="provider_unknown"
             ),
         )
     ).payload

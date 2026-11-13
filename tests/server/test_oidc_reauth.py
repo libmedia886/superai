@@ -13,10 +13,10 @@ from uuid import uuid4
 import httpx2
 import pytest
 
-from bazaar_compute_server.clock import now_ms
-from bazaar_compute_server.config import ServerConfiguration
-from bazaar_compute_server.permissions import Permission
-from bazaar_compute_server.storage import OIDCProvider, Role
+from superai_server.clock import now_ms
+from superai_server.config import ServerConfiguration
+from superai_server.permissions import Permission
+from superai_server.storage import OIDCProvider, Role
 
 from ._serving import free_port, serving_app
 
@@ -32,19 +32,19 @@ async def test_expired_oidc_session_resumes_once_with_existing_sso(
     expect = playwright.expect
     port, identity_port = free_port(), free_port()
     base = f"http://127.0.0.1:{port}"
-    issuer = f"http://127.0.0.1:{identity_port}/realms/bcs-test"
+    issuer = f"http://127.0.0.1:{identity_port}/realms/superai-server-test"
     provider_id = str(uuid4())
     callback = f"{base}/login/oidc/{provider_id}/callback"
     realm = tmp_path / "realm.json"
     realm.write_text(
         json.dumps(
             {
-                "realm": "bcs-test",
+                "realm": "superai-server-test",
                 "enabled": True,
                 "sslRequired": "none",
                 "clients": [
                     {
-                        "clientId": "bcs-test",
+                        "clientId": "superai-server-test",
                         "secret": "isolated-secret",
                         "protocol": "openid-connect",
                         "publicClient": False,
@@ -82,7 +82,7 @@ async def test_expired_oidc_session_resumes_once_with_existing_sso(
                 "--user",
                 str(os.getuid()),
                 "--name",
-                "bcs-reauth-" + uuid4().hex,
+                "superai-server-reauth-" + uuid4().hex,
                 "-p",
                 f"127.0.0.1:{identity_port}:8080",
                 "-v",
@@ -142,7 +142,7 @@ async def test_expired_oidc_session_resumes_once_with_existing_sso(
                         "Company SSO",
                         "",
                         issuer,
-                        "bcs-test",
+                        "superai-server-test",
                         "isolated-secret",
                         callback,
                         now_ms(),
