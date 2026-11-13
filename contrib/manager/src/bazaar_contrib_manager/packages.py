@@ -253,7 +253,9 @@ class Packages:
                 cwd=project.parent,
             )
 
-    async def resolve(self, plan: EnvironmentPlan) -> dict[str, str]:
+    async def resolve(
+        self, plan: EnvironmentPlan, *, refresh: tuple[str, ...] = ()
+    ) -> dict[str, str]:
         """Resolve the declared graph for this interpreter without installing it."""
         async with self.written(plan) as project:
             output = await self.command(
@@ -270,6 +272,11 @@ class Packages:
                 HOST,
                 "--refresh-package",
                 ALIAS,
+                *(
+                    argument
+                    for package in refresh
+                    for argument in ("--refresh-package", package)
+                ),
                 cwd=project.parent,
             )
         return {

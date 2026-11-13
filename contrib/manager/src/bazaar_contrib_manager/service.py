@@ -37,6 +37,7 @@ lazy from bazaar_core import Context, ContribEntry
 lazy from packaging.requirements import Requirement
 lazy from packaging.specifiers import SpecifierSet
 lazy from packaging.utils import canonicalize_name
+lazy from packaging.version import Version
 lazy from pydantic import TypeAdapter
 
 from .catalog import CONTRIB_CATALOG, ContribCatalog
@@ -241,19 +242,29 @@ class ContribManager:
         *,
         package: str | None = None,
         remote: bool = True,
+        wait: bool = True,
     ) -> Operation:
         operation = self._start(kind, action, package=package, remote=remote)
-        return await self.wait(operation.id)
+        return await self.wait(operation.id) if wait else operation
 
     async def wait(self, id: UUID) -> Operation:
         """An operation started here once it finishes; it goes on if the wait is cancelled."""
         return await asyncio.shield(self.executions[id])
 
     async def installed(self) -> tuple[InstalledPackage, ...]:
-        info = await self.packages.inspect()
+        async with AsyncFileLock(
+            str(self.packages.path / "environment.lock"), mode=0o600
+        ):
+            info = await self.packages.inspect()
         return tuple(package for package in info.packages if package.entries)
 
     async def detail(self, name: str) -> InstalledPackage:
+        async with AsyncFileLock(
+            str(self.packages.path / "environment.lock"), mode=0o600
+        ):
+            return await self._detail(name)
+
+    async def _detail(self, name: str) -> InstalledPackage:
         names = {
             str(canonicalize_name(name)),
             f"bazaar-contrib-{canonicalize_name(name)}",
@@ -387,11 +398,12 @@ class ContribManager:
         *,
         contrib: str | None = None,
         config: dict[str, Any] | None = None,
+        wait: bool = True,
     ) -> Operation:
         async def action(id: UUID) -> None:
-            await self._enable(id, await self.detail(package), contrib, config)
+            await self._enable(id, await self._detail(package), contrib, config)
 
-        return await self._submit("enable", action, package=package)
+        return await self._submit("enable", action, package=package, wait=wait)
 
     async def edit(self, index: int, config: dict[str, Any]) -> Operation:
         async def action(id: UUID) -> None:
@@ -423,7 +435,9 @@ class ContribManager:
 
         return await self._submit("edit", action)
 
-    async def disable(self, index: int, *, force: bool = False) -> Operation:
+    async def disable(
+        self, index: int, *, force: bool = False, wait: bool = True
+    ) -> Operation:
         async def action(id: UUID) -> None:
             candidate, snapshot = await self.configuration.read()
             document = ConfigDocument.model_validate(candidate.payload)
@@ -465,7 +479,7 @@ class ContribManager:
                     "cannot run until their required services are restored."
                 ) from error
 
-        return await self._submit("disable", action)
+        return await self._submit("disable", action, wait=wait)
 
     async def index(self, location: str, *, remove: bool = False) -> Operation:
         async def action(id: UUID) -> None:
@@ -671,12 +685,12 @@ class ContribManager:
             )
             if enable is not None:
                 await self._enable(
-                    id, await self.detail(package.package), enable or None, config
+                    id, await self._detail(package.package), enable or None, config
                 )
 
         return self._start("add", action, package=package.package)
 
-    async def remove(self, package: str) -> Operation:
+    async def remove(self, package: str, *, wait: bool = True) -> Operation:
         package = str(canonicalize_name(package))
 
         async def action(id: UUID) -> None:
@@ -723,7 +737,7 @@ class ContribManager:
                 )
             await self._install(id, plan, document, removed=package)
 
-        return await self._submit("remove", action, package=package)
+        return await self._submit("remove", action, package=package, wait=wait)
 
     async def latest_host(self) -> str | None:
         """The newest host release the configured contribs can be installed with."""
@@ -732,6 +746,27 @@ class ContribManager:
         document = ConfigDocument.model_validate(candidate.payload)
         plan = await self.packages.plan(document, self.configuration.environment)
         return await self.packages.latest(plan)
+
+    async def updates(self) -> dict[str, str]:
+        """Resolve compatible versions against this host's own declarations and sources."""
+        async with AsyncFileLock(
+            str(self.packages.path / "environment.lock"), mode=0o600
+        ):
+            await self.packages.initialize()
+            candidate, _ = await self.configuration.read()
+            document = ConfigDocument.model_validate(candidate.payload)
+            plan = await self.packages.plan(document, self.configuration.environment)
+            managed = {item.distribution for item in document.contribs if item.package}
+            resolved = await self.packages.resolve(plan, refresh=tuple(sorted(managed)))
+            installed = await self.packages.inspect(definitions=False)
+            return {
+                package.package: resolved[package.package]
+                for package in installed.packages
+                if package.entries
+                and package.package in managed
+                and package.package in resolved
+                and Version(resolved[package.package]) > Version(package.version)
+            }
 
     async def install_host(self, version: str) -> Operation:
         """Check the configured contribs against a host release, then install both."""
@@ -772,7 +807,7 @@ class ContribManager:
 
         return await self._submit("upgrade", action, package=HOST, remote=False)
 
-    async def upgrade(self, package: str) -> Operation:
+    async def upgrade(self, package: str, *, wait: bool = True) -> Operation:
         """Move one configured contrib package to its latest compatible version."""
         package = str(canonicalize_name(package))
 
@@ -793,12 +828,24 @@ class ContribManager:
             plan = await self.packages.plan(document, self.configuration.environment)
             await self._install(id, plan, document, upgrade=(package,))
 
-        return await self._submit("upgrade", action, package=package)
+        return await self._submit("upgrade", action, package=package, wait=wait)
 
 
 CONTRIB_MANAGER = ServiceKey[ContribManager]("contrib.manager")
 remote = RemoteEntry(
-    CONTRIB_MANAGER, ("add", "operation", "installed", "detail", "index")
+    CONTRIB_MANAGER,
+    (
+        "add",
+        "operation",
+        "installed",
+        "detail",
+        "index",
+        "updates",
+        "enable",
+        "disable",
+        "upgrade",
+        "remove",
+    ),
 )
 
 
