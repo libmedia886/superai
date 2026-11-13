@@ -1,4 +1,4 @@
-"""Sidecar contracts and an ordinary plugin serving installed remote entries."""
+"""Sidecar contracts and an ordinary Contrib serving installed remote entries."""
 
 from __future__ import annotations
 

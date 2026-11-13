@@ -1,4 +1,4 @@
-"""Install the command plugin and exercise its real configuration and review workflows."""
+"""Install the command Contrib and exercise its real configuration and review workflows."""
 
 from __future__ import annotations
 

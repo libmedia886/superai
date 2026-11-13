@@ -3,11 +3,11 @@
 ## 背景
 
 节点启动时读一次配置，把里面的智能体全部拉起来；此后配置怎么改，都要 `bcn restart` 才生效。`bcn agent add` /
-`bcn agent remove` 只改配置文件，改完提示重启；`bcn server connect` 也是。bcs 上看得到每台电脑上的智能体，但只是一列
+`bcn agent remove` 只改配置文件，改完提示重启；`bcn server connect` 也是。Bazaar Server 上看得到每台电脑上的智能体，但只是一列
 行，不能新建、不能看它的配置、也不能改。
 
 `plans/2026-09-15-bcs/plan.md` 的线框图第 ③ 张画了智能体资料页：五个标签——配置、技能、工作区、状态、活动——配置可以
-直接改；框架计划把「智能体管理」留到框架之上另行计划，就是这一支。要在 bcs 上新建与改配置，节点得先能在运行中
+直接改；框架计划把「智能体管理」留到框架之上另行计划，就是这一支。要在 Bazaar Server 上新建与改配置，节点得先能在运行中
 起一个新的智能体、停一个、把一个停了再起；这一支先把这层做出来，再把页面搭在上面。
 
 同一支顺带把列表的样子定下来：智能体行改成单行、状态点挂在头像角上、属性图标靠右；副标题里的图标和文字按中线
@@ -16,8 +16,8 @@
 ## 目标
 
 - 节点在运行中能新增、修改、删除一个智能体：配置与凭据落盘，进程内立即生效，不重启进程，其它智能体不受影响。
-- bcs 的电脑页能新建智能体；智能体有资料页，配置能看能改，技能、工作区、状态、活动能看；能从资料页删除智能体。
-- 凭据只从 bcs 送到节点一次，节点存进环境文件，不回显，不上报。
+- Bazaar Server 的电脑页能新建智能体；智能体有资料页，配置能看能改，技能、工作区、状态、活动能看；能从资料页删除智能体。
+- 凭据只从 Bazaar Server 送到节点一次，节点存进环境文件，不回显，不上报。
 - 列表与标题按定稿的样子重排。
 
 ## 设计
@@ -38,7 +38,7 @@
   操作者的事。
 
 `self.configuration` 从此是活的：`_health()` 已经按它列智能体，改完立刻反映；每次改动后 `health_reporter.report()`
-主动发一拍，bcs 不用等下一个 60 秒心跳。三个方法各记一条审计事件 `agent.added` / `agent.updated` / `agent.removed`
+主动发一拍，Bazaar Server 不用等下一个 60 秒心跳。三个方法各记一条审计事件 `agent.added` / `agent.updated` / `agent.removed`
 （`state = completed`，metadata 带 `agent_id`、`name`、channel 与 runtime 的种类），失败的带 `error`。
 
 配置写回复用 `app/config.py` 的 `_write_configuration`（序列化 + 原子替换）；环境文件复用 `server_management.py`
@@ -48,14 +48,14 @@
 凭据在配置里只以环境变量名出现（`token_env` / `app_secret_env` / `secret_env`），这一点不变。名字由节点起：
 `BCN_<完整 AGENT_ID，- 换成 _，大写>_CHANNEL<卡片序号>_<CHANNEL 大写>_<键>`，如
 `BCN_01A0C3EB_…_CHANNEL0_TELEGRAM_TOKEN`：id 用全的——UUIDv7 的前 8 位只是时间戳高位，一分钟内建的两个智能体会相同——
-再带卡片序号，同一智能体两张同种 channel 也分得开；改凭据就是覆盖同名的值。`secrets` 是 `{channel 序号: {选项键: 值}}`，只有 bcs 送来的那些；没送的保持原值。
+再带卡片序号，同一智能体两张同种 channel 也分得开；改凭据就是覆盖同名的值。`secrets` 是 `{channel 序号: {选项键: 值}}`，只有 Bazaar Server 送来的那些；没送的保持原值。
 runtime 的环境变量同理：页面上填的是变量名和值，值由节点存进 `BCN_<完整 AGENT_ID>_RUNTIME<序号>_<RUNTIME 大写>_ENV_<变量名，大小写不变>`（`TOKEN` 与 `token` 是两个变量），
 配置的 `env` 记下「变量名 → 这个存储用的名字」；`env` 是 `{runtime 序号: {变量名: 值}}`。名字先全部定下、配置先校验，
 变量名放不进配置（不是合法的环境变量名）就整单拒收，一个值都不写。环境文件由 systemd 读、launchd 下被 sh source、
 Windows 下被 PowerShell 点源，单引号字面量对三者都安全的前提是值里没有单引号、没有换行：含单引号、换行或 NUL 的值同样
 整单拒收，不做转义。
 
-`bcn agent add` / `remove` 的 CLI 不动：它们在节点没起来时也要能用，路径是改文件；节点起着的时候用 bcs。
+`bcn agent add` / `remove` 的 CLI 不动：它们在节点没起来时也要能用，路径是改文件；节点起着的时候用 Bazaar Server。
 
 ### 节点：下行的读与写
 
@@ -70,15 +70,15 @@ Windows 下被 PowerShell 点源，单引号字面量对三者都安全的前提
 - `{"write": "agent", "agent": {...}, "secrets": {...}, "env": {...}, "settings": {"review.reply": ...}}`：`agent` 是一份完整配置的 JSON（有 `id` 就是修改，没有就
   是新建，id 由节点给；带着节点没有的 `id`——表单打开后智能体已被删——回 `TARGET_NOT_FOUND`，不当新建）；pydantic 在边界校验形状，`AgentConfiguration` 的构造再校验值，错了回
   `INVALID_REQUEST`。应答是写回后的那份配置（同 `agents` 读的一项）。配置落盘即回答，智能体在回答之后才启动，
-  请求不等启动（启动可长达启动时限，不必让一次询问等它；bcs 的一次询问最多等一分钟，不跟着节点自己的时限走）：起没起来看它的状态，起不来时状态里有原因。
+  请求不等启动（启动可长达启动时限，不必让一次询问等它；Bazaar Server 的一次询问最多等一分钟，不跟着节点自己的时限走）：起没起来看它的状态，起不来时状态里有原因。
   启动进行中的智能体再来改动或删除一律拒收（「agent is starting」），不与启动并行。
   关停优先于一切：节点的整个关停在最外层只有一个时限（关停时限），不往各组件层层传，到点没做完的清理交给进程退出；
-  bcs 同样，uvicorn 的优雅关停给关停时限，不等还开着的连接。停一个智能体时被取消，收尾之后把取消原样抛出，不吞成普通
+  Bazaar Server 同样，uvicorn 的优雅关停给关停时限，不等还开着的连接。停一个智能体时被取消，收尾之后把取消原样抛出，不吞成普通
   失败。
 - `{"remove": "agent", "agent_id"}`。
 - `{"read": "skills", "agent_id"}`：智能体的技能，问它的 runtime 本人：有会话开着就问那个进程，没有就在它的工作区里起
   一个临时进程问完就关；节点级的探测（版本、模型）只带平台变量（HOME、PATH、LANG 等）与该 runtime 自己声明的变量名，
-  节点环境里各智能体的凭据与 bcs 的控制 token 一律不给；版本探测超时就杀掉子进程并等它退出。临时进程带这个 runtime 配的环境（`CODEX_HOME`、`CLAUDE_CONFIG_DIR` 这类决定个人技能在哪的
+  节点环境里各智能体的凭据与 Bazaar Server 的控制 token 一律不给；版本探测超时就杀掉子进程并等它退出。临时进程带这个 runtime 配的环境（`CODEX_HOME`、`CLAUDE_CONFIG_DIR` 这类决定个人技能在哪的
   变量），不带 bcc 的会话凭据（`RuntimeCommandContext.environment_for_probe`）。codex 发 `skills/list`
   （`{"cwds": [工作区]}`），应答 `data[]` 每项的 `skills[]`：name、description、interface.shortDescription、scope
   （repo / user / system / admin）、enabled，只取 enabled；scope repo 算工作区、user 算个人，其余算内置。claudecode
@@ -98,14 +98,14 @@ Windows 下被 PowerShell 点源，单引号字面量对三者都安全的前提
   `name`、`efforts`、`default_effort`、`default`）与 `error`（没列出来时的原因）。列出来的按种类留 60 秒，没列出来的
   不留，再问就再去问 runtime。没装的种类回 `TARGET_NOT_FOUND`。
 
-状态与活动不加读取：状态就是心跳里那个智能体的 `channel_health` / `orchestrator_health`，活动就是它的事件，bcs 都有。
+状态与活动不加读取：状态就是心跳里那个智能体的 `channel_health` / `orchestrator_health`，活动就是它的事件，Bazaar Server 都有。
 
 功能权限点按框架计划的规矩一项操作一个：新建 `agents.create`，改配置（含凭据、自动回复）`agents.update`，删除
 `agents.delete`；资料页各 tab 的读取、技能、工作区、状态、活动都归已有的 `agents.view`；审核仍是 `agents.approve`。
 root 一律为真，页面上按钮与路由各自带 `@allowed`，没有权限的按钮不画。数据权限点不变：能看这台电脑的账号才能
 在它上面新建，能看这个智能体的才能改与删（`@sees`）。
 
-### bcs：列表
+### Bazaar Server：列表
 
 - 智能体行（智能体模块的列表与电脑页的框）：单行——头像、名字、右侧属性图标（系统图标、runtime 图标、channel
   图标，6px 间距，`--muted`；电脑页的框里不放系统图标，框里的智能体都在这台电脑上，系统图标改放在电脑页标题里，
@@ -146,7 +146,7 @@ root 一律为真，页面上按钮与路由各自带 `@allowed`，没有权限�
 - 飞书的标志换成官方的飞鸟（theSVG 收录的 Lark 标志，MIT；取路径做单色，飞书蓝），原来那只是 IconPark 的纸飞机；
   全站只有 `icons/lark.svg` 一份。
 
-### bcs：新建智能体
+### Bazaar Server：新建智能体
 
 电脑页框下的 ➕ 打开一张 `.veil` 居中对话框，标题「新建智能体」，内容分四步：基础信息、渠道、运行时、确认。打开时
 不问节点：节点要答的只在表单用到的那一处、用到时才问，转圈也只在那一处。
@@ -173,7 +173,7 @@ root 一律为真，页面上按钮与路由各自带 `@allowed`，没有权限�
 - 确认：只读摘要，一张卡一块；凭据只显示「已填写」「未填写」，开关显示「开」「关」，环境变量只列变量名，值不回显。
 - 点「新建」时若有必填项没填，跳到它所在的那一步和那一张卡，再由那一栏自己提示。
 - 一个智能体至少要有一个渠道和一个运行时：渠道或运行时一步一张卡都没有时，这一步的点同样是红圈「!」，但不拦着往下走；
-  提交时 bcs 不下发，停在「确认」一步提示「至少添加一个渠道」或「至少添加一个运行时」。资料页保存同理，提示在按钮旁。
+  提交时 Bazaar Server 不下发，停在「确认」一步提示「至少添加一个渠道」或「至少添加一个运行时」。资料页保存同理，提示在按钮旁。
 
 提交 `POST /computers/<c>/agents`，请求在路上时「新建」按钮锁住（`hx-disable`）。处理器下发 `agent` 写，有自动回复时随同
 这一次写的 `settings` 一起下发——节点落盘时就把它写进这个智能体的存储，不等它启动，也就不是一条要单独问一个还在
@@ -181,7 +181,7 @@ root 一律为真，页面上按钮与路由各自带 `@allowed`，没有权限�
 留着、已填的内容保留、打开在「确认」一步，显示错误（`agents.offline` / `silent` / `refused`，节点拒绝的配置是
 `agents.invalid`，显示 `code`）。
 
-### bcs：资料页
+### Bazaar Server：资料页
 
 `/agents/<c>/<a>/profile`（`?tab=` 定位 tab），从智能体行最右的齿轮进入，整页在智能体模块里占右两栏的位置——左栏还是
 智能体列表，选中行不变。页头：头像（状态点挂在头像左下角，同列表）、名字、系统图标 runtime 图标 channel 图标；下面
@@ -192,7 +192,7 @@ root 一律为真，页面上按钮与路由各自带 `@allowed`，没有权限�
   回收，同新建）、自动回复（一句说明与多行框，留空就是不自动回复）、渠道、运行时。渠道与运行时是新建里的同一副卡叠
   （书签翻页、虚线空白卡添加、垃圾桶删卡），小标题已经说了是什么，卡上不再重复块名。已有的卡在表单里带着它在配置
   里的下标（`channel-N-was` / `runtime-N-was`），保存时改过的字段盖在原来那份上，页面上不显示的选项（如
-  `allowed_chats`）原样保留：接了 bcs 的节点由审核决定谁能进，名单是没接 bcs 时的兜底。凭据一栏在已有卡上显示
+  `allowed_chats`）原样保留：接了 Bazaar Server 的节点由审核决定谁能进，名单是没接 Bazaar Server 时的兜底。凭据一栏在已有卡上显示
   「已设置」小标签和「更换」，点了才出密码框，空着就是不改；新卡上照旧是必填的密码框。节点没装、但配置里用着的
   runtime 种类照样画卡，点开模型时说找不到。推理强度的下拉里是值本身（`low` / `high` / `max` …），不翻译，节点新出的
   取值不用等 locale。页面打开时只读 `agents` 与自动回复，卡叠的空白卡、模型下拉与新建里一样用到时才问；已有的卡只画配置里的种类，
@@ -237,7 +237,7 @@ root 一律为真，页面上按钮与路由各自带 `@allowed`，没有权限�
 
 `NodeCommands` 协议与 `ControlContext.node`，`_AgentsRead`（含 `kinds`）、`_AgentWrite`、`_AgentRemove`、
 `_SkillsRead`、`_WorkspaceRead`、`_RuntimesRead`，runtime 插件协议 `IRuntimeBuilder`（`build` / `inspect`）与两个插件的 `inspect`，pydantic 边界，`RESULT_TOO_LARGE` 照旧。
-测试用真实 bcs 与真实节点：下发新建后节点上多了一个智能体且应答里凭据只有「已设置」，下发修改后名字变了，下发
+测试用真实 Bazaar Server 与真实节点：下发新建后节点上多了一个智能体且应答里凭据只有「已设置」，下发修改后名字变了，下发
 删除后没了；工作区读得出；模型与技能列表归 e2e（要真的 codex / claude）。
 
 ### Task 3：列表
@@ -261,13 +261,13 @@ task 里 ➕ 先只画不接）、活动占位图标去掉、表单控件的统�
 
 ### Task 6：真实运行验证
 
-在 bcs 上给一台起着的电脑新建一个 Telegram 智能体（真 token），它立刻在线、能回私聊；在资料页改它的模型保存，
+在 Bazaar Server 上给一台起着的电脑新建一个 Telegram 智能体（真 token），它立刻在线、能回私聊；在资料页改它的模型保存，
 它继续在线且下一轮用新模型；删除它，bot 不再回复，配置文件里没有它，节点进程没重启过。
 
 ## 验收标准
 
 - 新建、修改、删除都不重启节点进程，别的智能体的会话不中断。
-- 凭据不出现在配置文件、审计事件、bcs 的库或页面里；只在环境文件和进程环境里。
+- 凭据不出现在配置文件、审计事件、Bazaar Server 的库或页面里；只在环境文件和进程环境里。
 - 资料页配置 tab 显示的就是节点配置文件里的那份，保存后两边一致。
 - 列表按定稿：单行、角标点、右侧图标、无「·」隔图标、系统图标代替电脑名、电脑页的框与 ➕。
 - 全站的输入框一个样、下拉一个样、开关一个样；亮色与暗色都对。

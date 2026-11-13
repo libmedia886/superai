@@ -674,7 +674,7 @@ entry = "logging"
 entry = "node-management"
 ```
 
-### 0.2 BCS 配置与数据源连续升级
+### 0.2 Bazaar Server 配置与数据源连续升级
 
 server 的设置、数据库与登录密钥都位于 BCN 的数据目录 ~/.bcn，见 [server.md](server.md)。
 server 的条目与节点的条目一样在配置顶层启用。bazaar-contrib-server-database 的 server-database 与节点 storage 的 database 条目对应，用 `ctx.enable(..., local=(STORAGE, backend_key(...), DB, SCHEMA))` 在私有绑定中启用 server 自己的 storage、所选后端、database 与 schema，
@@ -682,14 +682,14 @@ server 的条目与节点的条目一样在配置顶层启用。bazaar-contrib-s
 节点使用 DB 与 SCHEMA，server 的模块 accept SERVER_DB 与 SERVER_SCHEMA，两边可以选用不同的后端，公共审计事件共享。
 复用的 bazaar-contrib-config／bazaar-contrib-storage 与通用 sqlite 只负责读写，表结构与查询归 server 的业务 contrib。
 
-server 的设置写在各自所属条目的 config 里，结构与有效缺省值沿用原 BCS 的 Pydantic 模型。登录签名密钥为 ~/.bcn/session.key。
+server 的设置写在各自所属条目的 config 里，结构与有效缺省值沿用原 Bazaar Server 的 Pydantic 模型。登录签名密钥为 ~/.bcn/session.key。
 
 0.2 的设置在 server 的条目启动之前写入：还没有 ~/.bcn/config.toml 时，server-management 的默认配置读取 ~/.bcs/config.toml；
 已有 0.2 节点配置时，V4→V5 转换在 ~/.bcs 存在时声明 server 的包、启用其条目并写入这些设置。
 server-database 打开数据库之前，若 ~/.bcs 存在且 server 的数据库还不存在，把 session.key 与 ~/.bcs/bcs.sqlite3 复制到 ~/.bcn，数据库最后复制；
 之后由 server-migrations 按原 schema_migrations 的 v01–v07 接续迁移；~/.bcs 只读，原样保留。
 
-| 0.2 BCS 配置或原资源 | 0.3 中的位置与规则 |
+| 0.2 Bazaar Server 配置或原资源 | 0.3 中的位置与规则 |
 | --- | --- |
 | listen，缺省 127.0.0.1:8765 | http 条目的 listen，保持 host:port、IPv6 及原解析语义 |
 | storage，缺省 sqlite；同名后端参数表 | server-database 条目的存储选择及参数，由所选后端实现解析 |
@@ -714,7 +714,7 @@ schema 引擎为登记的业务 schema 接续缺少的版本，并把进度记�
 验证旧账户登录、未过期 cookie、角色／分享权限、历史与 refs 查询，~/.bcs 保持不变。
 节点协议不兼容 0.2；0.2 节点上报到 0.3 server 失败时只影响上报本身，不阻塞节点运行。
 升级后新事件写入 ~/.bcn 中导入的数据库，并能通过 server 的页面查询；重复启动不再导入，数据与迁移结果保持稳定。
-同进程使用另一份隔离节点配置与数据库，分别修改节点和 BCS 设置并写入各自业务数据，核对两边配置文件、数据库路径与实际查询结果。
+同进程使用另一份隔离节点配置与数据库，分别修改节点和 Bazaar Server 设置并写入各自业务数据，核对两边配置文件、数据库路径与实际查询结果。
 完整验收使用隔离环境的真实 V1／V2／V3／V4 文件，覆盖多 agent／provider、远端连接、凭据引用，并验证重复加载与迁移后真实运行结果。
 
 ### 默认配置生成与后端切换
@@ -726,7 +726,7 @@ manager 构建从 BCN uv.lock 的 contrib/ 工作区成员自动生成 package/s
 并明确写入 `database.config.backend="sqlite"`、默认 agent 的 `config.agents=[]`。必要包通过宿主发行依赖安装，启动按保存的配置发现入口和建立服务依赖。
 可选 server 包通过发行元数据导出节点入口，用户选择入口及参数后经节点配置管理服务校验并保存；
 节点已有存储选择、参数及停用选择继续保留。
-服务端自己的配置与业务组合由 server 的独立载体和发行资源管理，监听、登录及 storage 等 BCS 设置直接从原配置读取。
+服务端自己的配置与业务组合由 server 的独立载体和发行资源管理，监听、登录及 storage 等 Bazaar Server 设置直接从原配置读取。
 安装操作将包依赖声明写入配置并展示导出的入口；`add --enable ENTRY` 在安装后保存指定入口，`add --enable` 保存该包的全部入口。
 后续启动读取用户保存的配置，升级通过配置版本迁移保留停用条目、参数和后端选择。
 已有配置缺少 DB 选择入口或所选后端时，装配诊断列出缺失服务及消费方。
@@ -875,7 +875,7 @@ starlink 是独立发行包和普通节点插件，持有 listen 长轮询、ann
 starlink 提供私有的 sidecar SERVER 实现并在子组合中启用 sidecar 实例，调用只到达 contrib 以 RemoteEntry 声明的成员。
 业务通过 announce 独立发布公共审计事件，starlink 的 listen 处理器入队后经 report 上报，server-computer 收到后 announce，交给活动等模块投影。
 agent／harness 的行为事件、原始载荷、来源顺序及时间关联按[完整行为事件与 NodeAudit](roadmap.md#完整行为事件与-nodeaudit)发布和上报，
-agent 依赖 NodeAudit 始终发布，记录方按组合选择订阅；BCS 活动页、历史和网关分析各自决定消费范围及统计口径。
+agent 依赖 NodeAudit 始终发布，记录方按组合选择订阅；Bazaar Server 活动页、历史和网关分析各自决定消费范围及统计口径。
 审计事件处理和请求响应分别管理；announce 直接回传调用结果，审计记录由业务独立发布并经 report 上报。
 HTTP 输入模型、身份校验、传输和请求关联由 starlink 与 server-computer 管理，服务接口及业务规则仍归提供 offer 的功能包。
 包的 pyproject.toml 声明代码依赖并导出入口，节点配置保存所选入口及参数；运行时按 accepts 建图。
@@ -1618,7 +1618,7 @@ CLIENT 的依赖和消费由 Agent 所属 bcc 工具在自己的进程中声明�
 sidecar 只负责转发框架调用，Agent 所属工具通过连接所属的通用消费入口请求 `MESSAGES`；
 消息依赖由该调用方声明并由框架绑定，sidecar 的定义及发行依赖均不包含消息或配置业务。
 V4→V5 保留 `if old.agent`，只在旧配置存在 agent 时加入 messages-node 和 legacy-node-migrations；
-只有 BCS 等其他 contrib 的节点继续使用通用通信入口。
+只有 Bazaar Server 等其他 contrib 的节点继续使用通用通信入口。
 删除 `services` 配置模型、服务 key 字符串解析及全部默认／转换／测试用法。
 原 `resources/command/` 保留业务格式化与模板字节；bcc 的输出格式化、相关模板及 TextTemplate 随 Agent 工具发行。
 channel 公共契约按原发送链路补齐 DM 地址、目标显示及交付信息，消息服务消费实际 channel，不持有 provider 生命周期。
@@ -2011,7 +2011,7 @@ Agent 执行绑定使用零退出等待预算关闭 Messages／Reminder 命令�
 - [x] 复用 messages 已公开的 `Actor`／`Actors`：内部身份参数、业务调用与归属键全程使用 Actor，仅在边界与 `session_id`／`agent_id` 转换；保留两种 mode 的身份解析、按 Actor 归属的运行会话／状态／队列／ActorLoop／timer、业务可见范围和活跃命令绑定，分别验收各会话隔离及同 Agent 会话共享的原行为。
 - [x] 沿用 Task12.1 已交付的 developer instruction、bcc 工具入口与初始运行环境，补齐命令能力的活跃身份／会话绑定、上下文及通讯编排；按 [默认 agent 行为与替换](roadmap.md#默认-agent-行为与替换) 由 agent 选择提示词、工具及所需公共服务。
 - [x] agent 消费 channel／harness 公共包的输入、请求、输出／审批和生命周期契约，harness provider 执行 agent 提供的指令和工具环境；具体 provider 自身持有 SDK 和资源。
-- [x] 按[完整行为事件与 NodeAudit](roadmap.md#完整行为事件与-nodeaudit)接入 agent 构造输入及 harness 原始事件的完整发布，保留关联、顺序、时间、工具／技能／文件、原始 usage 和模型步骤来源；审计记录、两端上报及 BCS 消费随所属阶段接入。
+- [x] 按[完整行为事件与 NodeAudit](roadmap.md#完整行为事件与-nodeaudit)接入 agent 构造输入及 harness 原始事件的完整发布，保留关联、顺序、时间、工具／技能／文件、原始 usage 和模型步骤来源；审计记录、两端上报及 Bazaar Server 消费随所属阶段接入。
 - [x] agent 组合用普通 Python 函数从已校验配置构造具体条目及稳定绑定；配置候选预检显式调用同一构造逻辑，已知组合完整校验后由 lifespan 的 ctx.enable 管理。
 - [x] 公开 agent 入口拥有 config.agents 和 channel／harness 参数模型，明确创建执行与 provider 实例；私有服务和消息事件用 local 绑定，共享服务沿用外部绑定，依赖就绪后进入执行。
 - [x] 用真实自定义 agent 组合替换默认入口，验证其配置模型、实体装配、指令、工具环境、通讯行为、所选依赖与资源退出。
@@ -2088,7 +2088,7 @@ bcn agent review deny <thread-id>
 管理入口在 Contrib.accepts 声明 CLIENT；平台 sidecar 创建客户端时只持有传输资源，
 配置修改与审核首次调用才连接运行中的节点；审核经连接所属的框架 accept 消费 collaboration 公共服务。
 collaboration 持有准入规则、审核状态持久化及审计，sidecar 沿用通用转发。
-本机命令和 BCS 审核入口使用同一公共服务与同一份会话审核状态。
+本机命令和 Bazaar Server 审核入口使用同一公共服务与同一份会话审核状态。
 后续 TUI／GUI 界面由独立 contrib 消费同一公共协作服务。
 
 本任务交付本机审核入口，消费 Task 14 已提供的 collaboration 会话准入服务：新会话默认待审，
@@ -2110,7 +2110,7 @@ agent 的 loop contrib 用 listen 订阅，仅处理自身 Agent 的通过结果
 待审变为通过时恢复通知资格；recover 沿用现有通知序号与消费游标，节点重启继续恢复持久化未读。
 前半段沿用现有入站、落库和审核拦截：被拦截的原处理已结束，
 审批触发的通知只凭持久化会话和消息构造，节点在入站后、审批前重启也能完成。
-本机命令、BCS 和其他公共服务调用者通过同一个 review_contact 获得该行为。
+本机命令、Bazaar Server 和其他公共服务调用者通过同一个 review_contact 获得该行为。
 
 独立安装验收复用 Agent 的真实 workbench 包及 TCP TestChannel：该包的 DocumentHarness 支持 env 来源映射，
 在 start_session 将配置中的来源名解析到 SessionInput.environment，由已有文档子进程的 editor 报告字段验证实际传递。
@@ -2121,11 +2121,11 @@ agent 的 loop contrib 用 listen 订阅，仅处理自身 Agent 的通过结果
 - [x] 节点未运行时通过短生命周期命令入口完成 agent 管理，模块选择与业务参数统一保存在相应 contribs[].enabled[].config，默认 agent 的实体参数由其 config.agents 持有。
 - [x] 节点停止时，管理模式启用配置、命令及所需共享登记服务，完整业务候选只执行资源启动前校验；后续 bcn run 才创建 AGENT／CHANNEL／HARNESS 实例。
 - [x] 登记 `bcn agent review list <agent-id>`、`approve <thread-id>` 和 `deny <thread-id>`，经 sidecar 消费 Messages 公共查询确认归属及 collaboration 服务；状态更新持久化并发布原审核审计事件。
-- [x] 审核通过并持久化后，从数据库读取该会话及入站消息，触发一次正常入站通知，经 inbox notice 唤醒响应；本机命令、BCS 和公共服务调用共用实现。
+- [x] 审核通过并持久化后，从数据库读取该会话及入站消息，触发一次正常入站通知，经 inbox notice 唤醒响应；本机命令、Bazaar Server 和公共服务调用共用实现。
 - [x] 各子命令按实际操作选择依赖和生命周期：配置管理使用原短生命周期组合，会话审核连接运行中的节点及其协作服务。
 - [x] 配置增删改复用运行节点的 CONFIGURATION.commit／apply 即时更新；离线仅保存，并在独立 venv／tool 中验证运行中新增、修改、删除及输出流与列表格式。
 - [x] agent-command 使用普通 contrib 的安装与启用流程、命令元数据和公开服务声明，独立安装的命令树由既有通用分发消费；配置保存复用 CONFIGURATION，node-management 保持节点管理职责。
-- [x] 在未配置 BCS 的真实隔离节点上，通过 TestChannel 注入新会话，使用三个基础命令验证待审列表、本机通过后交互、拒绝后的状态变化和重启后审核结果；通过公共服务读回同一结果，并验证不同 agent 的会话归属。
+- [x] 在未配置 Bazaar Server 的真实隔离节点上，通过 TestChannel 注入新会话，使用三个基础命令验证待审列表、本机通过后交互、拒绝后的状态变化和重启后审核结果；通过公共服务读回同一结果，并验证不同 agent 的会话归属。
 - [x] 用 TestChannel 发送自然用户请求，待审拦截后重启隔离节点，再通过本机命令或公共服务批准；观察正常 inbox notice 和实际响应，全程只发送原请求。以相同控制面验证正常审批及两种 mode 的会话归属。
 - [x] 在隔离 tool／venv 和真实示例包中完成安装、add --enable、agent add、读取保存配置、bcn run 及退出流程，完成独立安装与检查，提交供 review。
 - [x] 统一 agent 命令帮助文案和参数占位符，使用 Click／Pydantic 原生校验并精简 --set 解析，通过真实独立安装的配置管理流程验收。
@@ -2515,7 +2515,7 @@ app 的普通 Python 入口提供启动输入和默认资源，core 的运行接
 - `bcn run` 就绪后输出各插件的状态与结果表格：插件、状态、结果；失败的插件以独立行展示，
   不再只输出单行 warning。数据取自生命周期快照。
 - `bcn agent list` 输出 Name、Channels、Harnesses、State、Today、Last event；多个 channel 与 harness
-  按配置顺序以逗号连接；失败原因单独一行，对齐 State 列。Today 为 `输入/输出/缓存/$费用`，口径与 bcs 的
+  按配置顺序以逗号连接；失败原因单独一行，对齐 State 列。Today 为 `输入/输出/缓存/$费用`，口径与 Bazaar Server 的
   当日用量一致，provider 未报费用时省略费用段。数据归 `agent` 包新增的 `agent-activity` 插件：
   订阅审计、只存内存，经 sidecar 开放只读查询，`agent-command` 只调用查询并渲染；节点未运行时 State 为 offline。
 - agent 配置要求至少一个 channel 与一个 harness；agent id 不强制 UUIDv7。

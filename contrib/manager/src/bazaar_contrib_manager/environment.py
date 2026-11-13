@@ -46,7 +46,7 @@ def inspect(*, definitions: bool = True) -> EnvironmentInfo:
                         ),
                     )
                 )
-            except Exception as error:  # noqa: BLE001 - Retain diagnostics from independent installed plugins.
+            except Exception as error:  # noqa: BLE001 - Retain diagnostics from independent installed Contribs.
                 entries.append(
                     EntryInfo(name=point.name, value=point.value, error=str(error))
                 )

@@ -329,7 +329,7 @@ app、core、公共接口和节点业务包留在 BCN 共同发行；默认组�
 config 载体和五版服务先于完整业务文档装配；storage 提供 storage 与 database 两个运行入口。
 server 保持可选安装；server 的数据位于 ~/.bcn，首次启动从 ~/.bcs 导入数据库、session.key 与设置，
 保留原数据结构、账户、权限、历史数据与已发布迁移；节点协议不兼容 0.2。
-完整升级规则见 [BCS 连续升级](framework.md#02-bcs-配置与数据源连续升级)。
+完整升级规则见 [Bazaar Server 连续升级](framework.md#02-bazaar-server-配置与数据源连续升级)。
 
 ### 发版工具与 CI
 

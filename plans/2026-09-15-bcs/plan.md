@@ -22,22 +22,22 @@ bcc 命令（`tool.bcc.*`）、runtime 进程启停、错误反馈。
 
 ## 目标
 
-新增 bazaar compute server（bcs）：一个独立进程，接收多个 bcn 节点主动上报的审计事件并持久化，以网页展示。
-节点与 bcs 可以部署在不同机器上。bcs 只存储事件和它自己的接入、登录、权限数据；节点的配置、凭据与会话状态仍只在
+新增 Bazaar Server：一个独立进程，接收多个 bcn 节点主动上报的审计事件并持久化，以网页展示。
+节点与 Bazaar Server 可以部署在不同机器上。Bazaar Server 只存储事件和它自己的接入、登录、权限数据；节点的配置、凭据与会话状态仍只在
 节点上。事件只用来看活动：任何「现在是什么」——聊天记录、定时器、联系人、配置——都在需要时通过下行通道向电脑
-下指令实时查，bcs 不从事件折算副本；电脑离线时这些就查不到，界面上离线的行置灰且不可点开。
+下指令实时查，Bazaar Server 不从事件折算副本；电脑离线时这些就查不到，界面上离线的行置灰且不可点开。
 
-节点侧是 `IAudit` 的一个实现，`[node] audit = "server"` 选用。它同时持有到 bcs 的下行通道：从 bcs 拉取指令，
+节点侧是 `IAudit` 的一个实现，`[node] audit = "server"` 选用。它同时持有到 Bazaar Server 的下行通道：从 Bazaar Server 拉取指令，
 以节点本地命令协议的语义在进程内执行（`NodeApplication._dispatch`，`app/application.py:386`，即 bcn.sock 背后
 的同一入口）；若要自建管理面，读写 bcn.sock 即可得到同样的控制能力。
 
-bcs 的界面是 IM 的形状：左侧图标模块栏（智能体、活动、设置，电脑在最下），主体是通讯录式的三栏——智能体列表、
+Bazaar Server 的界面是 IM 的形状：左侧图标模块栏（智能体、活动、设置，电脑在最下），主体是通讯录式的三栏——智能体列表、
 该智能体的联系人（线程与 DM）、选中联系人的聊天记录；智能体有资料页（配置、技能、工作区、状态、活动）；电脑模块
 列出每台电脑与其上的智能体。界面文案的对象词是「智能体」「电脑」「活动」。结构原型是 `plans/2026-09-15-bcs/wireframe.html`
 （五张粗块图：智能体三栏、联系人审核、智能体资料页、电脑、登录与权限），样式定稿是 `plans/2026-09-15-bcs/style.html`
 （智能体一屏的浅色与暗色完整渲染，含标识与悬停活动卡），两份都是独立 HTML，浏览器直接打开。
 
-本计划搭框架：审计出口补全、上行协议与鉴权、bcs 的接收与存储、界面壳子（模块栏、智能体列表与悬停活动卡、电脑
+本计划搭框架：审计出口补全、上行协议与鉴权、Bazaar Server 的接收与存储、界面壳子（模块栏、智能体列表与悬停活动卡、电脑
 列表与接入）、超级管理员的账号密码登录与改密。下行通道的协议形状在此定死，随第一个需要下发的指令实现；联系人、
 聊天记录、审核、第三方登录与角色权限、智能体管理在框架之上各自另行计划。
 
@@ -45,14 +45,14 @@ bcs 的界面是 IM 的形状：左侧图标模块栏（智能体、活动、设
 
 ### 部署形态
 
-bcs 与 bcn 同仓库、同发行物、同版本号。源码在 `src/bazaar_compute_server/`，与 `src/bazaar_compute_node/` 并列。
+Bazaar Server 与 bcn 同仓库、同发行物、同版本号。源码在 `src/bazaar_compute_server/`，与 `src/bazaar_compute_node/` 并列。
 `pyproject.toml` 的 `[tool.uv.build-backend]` 设 `module-name = ["bazaar_compute_node", "bazaar_compute_server"]`，
 `[project.scripts]` 增加 `bcs = "bazaar_compute_server.cli:main"`。`uv tool install bazaar-compute-node` 之后
 `bcn` 与 `bcs` 两个命令同时可用。
 
 两个模块之间没有 import 关系，只通过 HTTP 通信。协议两侧各自定义自己的 pydantic 模型，契约是 JSON 字段。
 
-bcs 使用 `starlette` + `uvicorn`（`uvloop`、`httptools`）作服务端，`pydantic`、`jinja2`、`aiosqlite` 是现有依赖；节点侧仍用 `aiohttp` 的客户端发送。
+Bazaar Server 使用 `starlette` + `uvicorn`（`uvloop`、`httptools`）作服务端，`pydantic`、`jinja2`、`aiosqlite` 是现有依赖；节点侧仍用 `aiohttp` 的客户端发送。
 
 ### 协议
 
@@ -63,22 +63,22 @@ bcs 使用 `starlette` + `uvicorn`（`uvloop`、`httptools`）作服务端，`py
 {"ok": false, "error_code": "unauthorized", "description": "...", "protocol": 1}
 ```
 
-`protocol` 是协议版本，与包版本无关，两侧各有一个常量。节点每个请求带 `X-BCS-Protocol: 1`；bcs 收到不认识的版本回
+`protocol` 是协议版本，与包版本无关，两侧各有一个常量。节点每个请求带 `X-BCS-Protocol: 1`；Bazaar Server 收到不认识的版本回
 `error_code = "unsupported_protocol"`。新增字段与新增方法不升版本，两侧对未知字段一律忽略（pydantic 模型默认
 `extra="ignore"`）；改变既有字段语义或删除字段才升版本。
 
-鉴权：节点持有一枚 token，格式 `<computer_id>:<secret>`，与 Telegram bot token 同形，由 bcs 在电脑接入时生成
+鉴权：节点持有一枚 token，格式 `<computer_id>:<secret>`，与 Telegram bot token 同形，由 Bazaar Server 在电脑接入时生成
 （`computer_id` 为 uuid，`secret` 为 32 字节随机数的 base64url），只在接入时显示一次。请求头
-`Authorization: Bearer <token>`，不放 URL。bcs 从 token 取出 `computer_id`，与库中该电脑的 secret 哈希做比较；
+`Authorization: Bearer <token>`，不放 URL。Bazaar Server 从 token 取出 `computer_id`，与库中该电脑的 secret 哈希做比较；
 不匹配回 `unauthorized`。
-节点不开任何入站端口，与 bcs 的所有交互都由节点发起。secret 泄露的影响面因此只是伪造该节点的事件。
+节点不开任何入站端口，与 Bazaar Server 的所有交互都由节点发起。secret 泄露的影响面因此只是伪造该节点的事件。
 
 方法：
 
 - `reportEvents`：请求体 `{"run_id": "...", "events": [...]}`。`run_id` 是节点进程启动时生成的 uuid；每个事件带节点内
-  单调递增的 `seq`。bcs 以 `(computer_id, run_id, seq)` 唯一，重复上报（请求超时后重试）静默去重。响应
+  单调递增的 `seq`。Bazaar Server 以 `(computer_id, run_id, seq)` 唯一，重复上报（请求超时后重试）静默去重。响应
   `result = {"accepted": <count>}`。
-- `getUpdates`：请求体 `{"offset": <int>}`，bcs 挂起直到有 `update_id > offset` 的指令或超时，响应
+- `getUpdates`：请求体 `{"offset": <int>}`，Bazaar Server 挂起直到有 `update_id > offset` 的指令或超时，响应
   `result = {"updates": [{"update_id": <int>, "request": {...}}]}`。`request` 是节点本地命令协议的一条请求
   （`app/application.py:386` `_dispatch` 接受的形状），节点执行后以 `reportEvents` 上报一条 `control.result`
   事件携带 `update_id` 与响应。下一次 `getUpdates` 的 `offset` 即确认。本计划只定义该方法，节点侧的轮询与执行
@@ -94,7 +94,7 @@ bcs 使用 `starlette` + `uvicorn`（`uvloop`、`httptools`）作服务端，`py
 agent 归属取 `correlation.node_id`：core 各处把 agent id 写在这个字段（`core/orchestration/turn.py:424`、
 `core/orchestration/orchestrator.py:914`），字段名保持。
 
-core 补四类审计事件，使这条出口覆盖 bcs 需要的全部信息：
+core 补四类审计事件，使这条出口覆盖 Bazaar Server 需要的全部信息：
 
 1. runtime 事件。`_consume_turn_stream`（`core/orchestration/turn.py:682`）在把事件交给 channel 的同一分支里追加审计：
    `tool_call.started` / `tool_call.completed` / `tool_call.failed`（metadata 为 `call_id`、`name`、`parent_call_id`；
@@ -108,7 +108,7 @@ core 补四类审计事件，使这条出口覆盖 bcs 需要的全部信息：
    logging 实现照常输出整条 payload，因此选用 logging 时正文会进入进程日志。
 3. 节点 health。`NodeApplication` 在就绪时写一条 `node.health` 审计事件，之后每隔一个启动预算
    （`TimeoutBudget.startup_seconds`，60 秒）再写一条，metadata 为 `_health()` 的返回值加 `version`、`python`、
-   `gil_enabled`、`system`（`platform.system()`）。间隔取启动预算的理由：节点允许自己沉默多久来启动，消费者就允许它沉默多久；bcs 以两个间隔内
+   `gil_enabled`、`system`（`platform.system()`）。间隔取启动预算的理由：节点允许自己沉默多久来启动，消费者就允许它沉默多久；Bazaar Server 以两个间隔内
    没有任何事件判定节点离线。实现无需回调即可得到 health。
 4. 定时器。定时器归属一个会话（`owner_thread_id`）并锚定一条入站消息，节点今天不为它写任何审计。补五个事件：
    `ReminderCommandService` 在写入后发 `reminder.scheduled` / `reminder.updated` / `reminder.snoozed` /
@@ -140,7 +140,7 @@ core 补四类审计事件，使这条出口覆盖 bcs 需要的全部信息：
 audit = "server"
 
 [node.server]
-url = "https://bcs.example.com"
+url = "https://server.example.com"
 token_env = "BCN_SERVER_TOKEN"
 ```
 
@@ -153,8 +153,8 @@ token_env = "BCN_SERVER_TOKEN"
 中途断掉不能把它写空。服务重启仍由用户执行。
 
 `ServerAudit(IAudit)`：`append()` 给事件赋 `seq` 后放入 `asyncio.Queue`，立即返回。`start()` 生成 `run_id`
-并启动发送任务：按顺序取已排队事件组成一批，一批的 JSON 不超过 512 KiB（bcs 只收 1 MiB 的请求，
-取一半留余量；装不下的那条领下一批），`POST reportEvents`，然后取下一批。一批只发一次：bcs 收下了就计入 `sent`，
+并启动发送任务：按顺序取已排队事件组成一批，一批的 JSON 不超过 512 KiB（Bazaar Server 只收 1 MiB 的请求，
+取一半留余量；装不下的那条领下一批），`POST reportEvents`，然后取下一批。一批只发一次：Bazaar Server 收下了就计入 `sent`，
 没收下（连不上、超时、非 200、`ok=false`）就整批丢掉计入 `dropped`，`last_error` 写明原因，不重试、不退避、不积压——
 事件是活动记录，不是不能丢的东西，节点不为它等待。请求超时用 `TimeoutBudget.command_seconds`。
 `stop()` 取消发送任务，未发出的事件随进程丢弃，`node.health` 事件已说明节点状态。
@@ -165,9 +165,9 @@ http(s) 地址的 `--url`。
 `health` 属性给出 `queued`、`sent`、`dropped`、`last_error`、`last_sent_at_ms`，`_health()` 以 `audit` 字段并入
 （`app/application.py:454` 处目前只有名字）。
 
-### bcs 存储
+### Bazaar Server 存储
 
-bcs 使用自己的数据目录 `~/.bcs`，sqlite 文件 `bcs.sqlite3`，`aiosqlite` 访问。三张表：
+Bazaar Server 使用自己的数据目录 `~/.bcs`，sqlite 文件 `bcs.sqlite3`，`aiosqlite` 访问。三张表：
 
 ```sql
 CREATE TABLE accounts (
@@ -214,7 +214,7 @@ CREATE INDEX relations_by_target ON relations (kind, target_id);
 secret 都以 scrypt（`cryptography`）哈希存储：每条记录各自生成 16 字节随机盐，参数 n=2^15、r=8、p=1，
 存储格式 `scrypt$<n>$<r>$<p>$<盐 base64url>$<哈希 base64url>`，校验时用记录里的盐和参数重算并做常量时间比较。
 一次派生占一个核与 128·n·r（32 MiB）内存，所有派生（登录校验、接入 token 校验、建哈希）都在一个线程数等于
-CPU 数的专用线程池上跑，同时算的不会多于机器能算的，多出来的登录请求排队等，不会把内存打满。bcs 只存事件与
+CPU 数的专用线程池上跑，同时算的不会多于机器能算的，多出来的登录请求排队等，不会把内存打满。Bazaar Server 只存事件与
 自己的接入、登录、权限数据，不存节点的配置、凭据或会话。
 
 `agent_id` 与 `thread_id` 从 payload 的 `correlation` 取出作为列，其余留在 `payload`。`agent_id` 会出现在地址、
@@ -256,13 +256,13 @@ owner 成为它的 `agent_owner`（智能体 id 是节点铸的 uuid，全局唯
 功能权限点对 root 一律为真；数据权限点只看 `*_owner`。多角色、`*_share*` 与解析 `ext` 里的权限都在这一层里加，页面不再
 改。目前 root 接入的一切都归它，看到的与现在无异。
 
-bcs 还没有发布过，全部建表都在唯一的初始迁移里，不留增量迁移；表结构改动直接改它，库文件重建。
+Bazaar Server 还没有发布过，全部建表都在唯一的初始迁移里，不留增量迁移；表结构改动直接改它，库文件重建。
 
 电脑与智能体的当前状态取自每台电脑最新的 `node.health` 事件；两个心跳间隔内没有任何事件的电脑显示为离线；
 是否处理中取该智能体最新的一条 turn 边界事件。这些读取按电脑、智能体、线程分组整批查（`MAX(id) … GROUP BY`），
 一个页面固定几条查询，不随电脑与智能体的数量增长；互不依赖的读取用 `asyncio.gather` 并行，各用自己的 reader。
 
-### bcs 界面
+### Bazaar Server 界面
 
 Starlette 应用，`jinja2` 服务端渲染，模板与静态资源在 `src/bazaar_compute_server/resources/`。界面文案全部经
 translator，中英文两份，与 bcn 的 i18n 同一机制。
@@ -317,7 +317,7 @@ Windows 的标志已从 Simple Icons 移除，用 Lucide 的四格代替。电�
   下一节，最新一条带实时点）、今日 token 与费用（token 数按 K / M / B / T 缩写；`usage.updated` 是各 runtime 会话的累计值，按 `runtime_session_id`
   取今日最新一条减去午夜前最后一条，跨午夜的会话只算它今天增长的部分。Claude Code 的 result 里 `usage` 是这一轮的、
   没有 `total_tokens`，`modelUsage` 与 `total_cost_usd` 才是会话累计：claude provider 把 `modelUsage` 各模型累加成
-  `total`，这一轮的 `usage` 作 `last`，`total_tokens` 都是各项之和；它不认识的模型费用按 0 报，bcs 无法补算）。
+  `total`，这一轮的 `usage` 作 `last`，`total_tokens` 都是各项之和；它不认识的模型费用按 0 报，Bazaar Server 无法补算）。
   活动卡是 `GET /agents/<computer_id>/<agent_id>/activity` 返回的片段，每 5 秒自刷新。
   卡上的时刻与「今天」按浏览器的时区算：壳子的 `<body>` 用 `hx-headers:inherited` 把 `Intl` 得到的 IANA 时区名放进
   每个请求的 `X-Timezone`，服务端认不出或没有时才用自己的本地时区。
@@ -331,7 +331,7 @@ Windows 的标志已从 Simple Icons 移除，用 Lucide 的四格代替。电�
   ```sh
   curl -LsSf https://astral.sh/uv/install.sh | sh      # Windows：powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
   uv tool install bazaar-compute-node
-  bcn server connect --url http://<bcs 地址> --token <computer_id>:<secret>
+  bcn server connect --url http://<Bazaar Server 地址> --token <computer_id>:<secret>
   # 首次接入这台电脑：注册并启动服务
   bcn system-service install
   bcn system-service start
@@ -347,7 +347,7 @@ Windows 的标志已从 Simple Icons 移除，用 Lucide 的四格代替。电�
   账号只有首次启动建的 root 一个，没有角色，也没有任何地方能建角色或账号。角色是后话，形状已定：不内置角色，root
   自建角色、名字自定，权限按模块给（某模块的浏览权，以及各项增删改查各是一个权限）；可把某个角色设为默认，
   新登录的人得到它；没有默认角色时接入任何 OIDC 都被灰色遮罩禁止，遮罩上提示先建一个默认角色。
-  退出登录是模块栏底部、电脑图标上方的一个图标。页面语言由账号的选择决定，未选则看浏览器的 `Accept-Language`；bcs 配置里没有语言项。
+  退出登录是模块栏底部、电脑图标上方的一个图标。页面语言由账号的选择决定，未选则看浏览器的 `Accept-Language`；Bazaar Server 配置里没有语言项。
 - 模块栏在换页的响应里以 `hx-swap-oob` 一起带回，当前模块的高亮才会跟着换；图标有 hover 态。
 - 列表滚动翻页：电脑按 id（uuid7，即接入顺序）键集分页，一页 50 台，智能体列表的一页是这 50 台的智能体。
   列表末尾有一个 `.edge` 元素记着已加载到的 id（`data-after`）；还有下一页时它带 `hx-get="…?after=<id>"`、
@@ -442,7 +442,7 @@ catalog 中有条目。
 
 ### 登录
 
-首次启动时 `accounts` 为空，bcs 生成超级管理员 `admin` 与一个 24 字节随机密码（base64url），密码只在启动日志里打印
+首次启动时 `accounts` 为空，Bazaar Server 生成超级管理员 `admin` 与一个 24 字节随机密码（base64url），密码只在启动日志里打印
 一次，并提示登录后修改。登录页是账号与密码两个输入框和「登录」按钮；登录成功后签发会话 cookie：`HttpOnly`、
 `SameSite=Lax`、请求经 https 到达（反代带 `X-Forwarded-Proto`）时加 `Secure`、内容为 `账号 id:签发时间:密码指纹:HMAC`（密钥在首次启动时生成，存 `~/.bcs/session.key`，0600），
 有效期 30 天。密码指纹是密码哈希摘要段的前 8 位。除登录页、静态资源与 `/node/*`（节点上报，走 token）之外的所有页面
@@ -453,7 +453,7 @@ catalog 中有条目。
 设置模块本计划只有「修改密码」（输入当前密码和新密码，新密码至少 8 个字符，取 NIST SP 800-63B 的下限）和「退出登录」。改密成功后其它会话失效：cookie 里的密码指纹
 不再匹配；当前会话则换发一枚新 cookie 继续。
 
-### bcs 配置与命令
+### Bazaar Server 配置与命令
 
 `~/.bcs/config.toml`：
 
@@ -479,9 +479,9 @@ tests/support 增加记录事件的 `TestAudit`，e2e 用它断言一次真实 t
 ### Task 2：`contrib/server`
 
 `ServerAudit`、`[node.server]` 配置、`bcn server connect`、发送任务、健康字段。
-测试起一个真实的 bcs（`tests/server/_serving.py`）接收 `reportEvents`，验证顺序送达、bcs 不在或拒收时丢弃且不阻碍后续、积压分批、配置不可用时节点照常运行与健康字段。
+测试起一个真实的 Bazaar Server（`tests/server/_serving.py`）接收 `reportEvents`，验证顺序送达、Bazaar Server 不在或拒收时丢弃且不阻碍后续、积压分批、配置不可用时节点照常运行与健康字段。
 
-### Task 3：bcs 服务端
+### Task 3：Bazaar Server
 
 `src/bazaar_compute_server/` 骨架、配置解析、`bcs run`、`reportEvents` 端点、鉴权与协议版本、
 sqlite 存储、留存清理。打包：`module-name` 列表、`bcs` script、Release workflow 的冒烟增加 `bcs --version`。
@@ -503,15 +503,15 @@ sqlite 存储、留存清理。打包：`module-name` 列表、`bcs` script、Re
 
 ### Task 7：真实运行验证
 
-本机启动 bcs，用启动日志里的密码登录，改一次密码，在界面上接入当前电脑拿到接入命令，在本机执行 `bcn server connect` 后重启；验证电脑上线、智能体
+本机启动 Bazaar Server，用启动日志里的密码登录，改一次密码，在界面上接入当前电脑拿到接入命令，在本机执行 `bcn server connect` 后重启；验证电脑上线、智能体
 列表与状态、悬停活动卡随一次真实 turn 更新且文案为中文、库中出现该 turn 的工具调用与两个 channel 的消息事件、
-bcs 停止期间节点照常工作、错误 token 被拒绝、暗色模式。
+Bazaar Server 停止期间节点照常工作、错误 token 被拒绝、暗色模式。
 
 ## 验收标准
 
 - `audit = "logging"` 的节点行为与改造前一致，日志中多出工具调用、用量、正文与 `node.health` 事件。
-- 节点上报的每条事件在 bcs 恰好存一次，请求重试不产生重复。
-- bcs 不可达期间节点的入站、出站与 turn 不受影响；那段时间的事件丢弃，恢复后新的事件照常到达。
+- 节点上报的每条事件在 Bazaar Server 恰好存一次，请求重试不产生重复。
+- Bazaar Server 不可达期间节点的入站、出站与 turn 不受影响；那段时间的事件丢弃，恢复后新的事件照常到达。
 - 界面上能看到电脑与智能体的当前状态，悬停活动卡显示最近活动与今日用量，文案不出现原始事件名。
 - 离线的电脑与智能体在列表里置灰且点不开。
 - 错误的 token 与不支持的协议版本得到明确的 `error_code`，并出现在节点 health 的 `audit` 字段里。

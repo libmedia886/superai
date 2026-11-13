@@ -2,7 +2,7 @@
 
 ## 背景
 
-`plans/2026-09-15-bcs/plan.md` 搭起了 bcs 的框架：节点把审计事件上报给 bcs，bcs 用它们展示电脑与智能体的活动。事件只用来看
+`plans/2026-09-15-bcs/plan.md` 搭起了 Bazaar Server 的框架：节点把审计事件上报给 Bazaar Server，Bazaar Server 用它们展示电脑与智能体的活动。事件只用来看
 活动；任何「现在是什么」——联系人、聊天记录——都要在需要时通过下行通道向电脑下指令实时查。上一计划把下行通道的
 协议形状定死（`getUpdates`、`control.result`），把实现留给第一条需要下发的指令。
 
@@ -10,10 +10,10 @@
 
 ## 目标
 
-- 节点侧：`contrib/server` 在上报之外多一条下行通道，从 bcs 拉取请求，直接调命令服务执行，结果作为
+- 节点侧：`contrib/server` 在上报之外多一条下行通道，从 Bazaar Server 拉取请求，直接调命令服务执行，结果作为
   `control.result` 事件走同一条上报出口回去。节点仍不开任何入站端口。
-- bcs 侧：`getUpdates` 端点、进程内等待结果的机制、联系人栏、聊天记录栏。电脑离线时这两栏查不到，界面置灰说明。
-- 节点不为 bcs 新增命令：联系人与聊天记录都是 `bcc inbox check` / `bcc message read` 背后的那两个服务方法，下行直接调。
+- Bazaar Server 侧：`getUpdates` 端点、进程内等待结果的机制、联系人栏、聊天记录栏。电脑离线时这两栏查不到，界面置灰说明。
+- 节点不为 Bazaar Server 新增命令：联系人与聊天记录都是 `bcc inbox check` / `bcc message read` 背后的那两个服务方法，下行直接调。
 
 ## 设计
 
@@ -21,17 +21,17 @@
 
 沿用上一计划的方法定义，方法都是节点发起的 POST，鉴权与协议版本头不变；`getUpdates` 是新增的方法，协议版本不变。
 
-- `getUpdates`：请求体 `{"offset": <int>}`，`offset` 是节点确认过的最大 `update_id`（首次为 0）。bcs 挂起直到该电脑
+- `getUpdates`：请求体 `{"offset": <int>}`，`offset` 是节点确认过的最大 `update_id`（首次为 0）。Bazaar Server 挂起直到该电脑
   有 `update_id > offset` 的指令，或 25 秒超时；响应 `result = {"updates": [{"update_id": <int>, "request": {...}}]}`，
   超时时 `updates` 为空数组。一次响应最多 20 条，按 `update_id` 升序。
 - `request` 是节点读取口接受的一次读取（见「节点读取口」）：`{"read": "contacts" | "history", "agent_id": ..., ...}`。
-  bcs 只负责排队与配对。
+  Bazaar Server 只负责排队与配对。
 - 请求的结果是一条 `control.result` 审计事件：`state = completed`，`correlation.node_id` 为 `agent_id`，`metadata`
   为 `{"update_id": <int>, "response": <JSON 文本>}`。响应是本地命令协议同样的信封（`ok` / `result` 或
   `code` / `error`）序列化成的文本——里面有消息正文，审计的字段检查不看文本；大小受上报请求上限约束（一批 1 MiB，
   单条事件不超过一批的一半），超过的响应由节点换成 `{"ok": false, "code": "RESULT_TOO_LARGE", "error": ...}` 再上报。
 - 确认即偏移：节点下一次 `getUpdates` 带的 `offset` 表示此前的指令都已取走。取走而未回结果（进程重启、执行异常）的
-  指令 bcs 不重发——等它的一方超时后按「电脑响应超时」处理。指令没有过期时间以外的状态。
+  指令 Bazaar Server 不重发——等它的一方超时后按「电脑响应超时」处理。指令没有过期时间以外的状态。
 
 ### 节点侧
 
@@ -42,7 +42,7 @@ timeout_budget、节点的 audit sink、`commands_of`——按 agent id 取该�
 control，节点不构造也不启停它。配置 `[node] control = "server"`，它的选项表是 `[node.server]`，与 audit 共用一张；
 `bcn server connect` 把 audit 和 control 一起指向 server。audit 不知道 control 的存在。
 
-`ServerControl` 自己持有 bcs 地址、token 与会话：启动后循环 `getUpdates`，对每条请求调用命令服务的方法，把响应
+`ServerControl` 自己持有 Bazaar Server 地址、token 与会话：启动后循环 `getUpdates`，对每条请求调用命令服务的方法，把响应
 序列化成 JSON 文本，作为 `control.result` 事件的 `response` 字段 `append` 进节点的 audit sink——响应里有消息正文，
 作为文本走，审计不看它。`NodeApplication.start` 在节点就绪、首条 health 发出之后启动它；
 `stop` 先停它再停其余。
@@ -50,13 +50,13 @@ control，节点不构造也不启停它。配置 `[node] control = "server"`，
 下行循环的规则与上行一致——不阻碍节点：
 
 - 每次 `getUpdates` 用独立的超时（长轮询 25 秒加 5 秒余量）；网络失败、非 200、`unauthorized` 都记进节点 health 的
-  `control` 字段（`name`、`served`、`last_error`、`last_polled_at_ms`），在定时器上退避一个健康间隔后再拉；bcs 不在时
+  `control` 字段（`name`、`served`、`last_error`、`last_polled_at_ms`），在定时器上退避一个健康间隔后再拉；Bazaar Server 不在时
   循环空转，不打日志刷屏。
 - 请求逐条执行，同一时刻只执行一条；执行直接调命令服务（见下），命令服务自己写的审计（`bcc.inbox.check`、
-  `bcc.message.read` 这类工具事件）照写——一次查看就是一次活动。读取抛出的意外异常作为 `READ_FAILED` 回给 bcs，
+  `bcc.message.read` 这类工具事件）照写——一次查看就是一次活动。读取抛出的意外异常作为 `READ_FAILED` 回给 Bazaar Server，
   循环不停，与 bcn.sock 上一次命令失败的处理一致。
-- `offset` 只在内存里：进程重启从 0 拉，bcs 会把这台电脑还有人等着的、未确认的请求再给一遍；等待方已超时的请求
-  bcs 早已丢掉，节点不会再见到。
+- `offset` 只在内存里：进程重启从 0 拉，Bazaar Server 会把这台电脑还有人等着的、未确认的请求再给一遍；等待方已超时的请求
+  Bazaar Server 早已丢掉，节点不会再见到。
 
 ### 节点读取口
 
@@ -75,20 +75,20 @@ control，节点不构造也不启停它。配置 `[node] control = "server"`，
   `target_kind`（`dm` / `group`）、`channel`、`pending_count`、`last_activity_at_ms`、`latest_message_id`、
   `latest_sender`、`latest_provider_time_ms`、`latest_received_at_ms`，以及 `total`、`shown`、`offset`、`has_more`。
   `InboxTargetSummary` 多一个 `channel` 字段，从 `channel_sessions.channel` 取；`actor_id` 是
-  `Actors.for_thread(thread_id).id`——谁替这个会话答话由节点的模式决定，bcs 不需要知道模式。
+  `Actors.for_thread(thread_id).id`——谁替这个会话答话由节点的模式决定，Bazaar Server 不需要知道模式。
 - `history` 调 `read(Actors.resolve(actor_id), raw_target=, around_message_id=, limit=)`——就是 `message.read` 背后的
   方法，可达校验与审计照旧。不带 `around_message_id` 它返回最早的一窗，所以初始页拿联系人项里的
-  `latest_message_id` 做 around；返回的 `messages[]` 已含发言人、方向、时间、正文与附件清单，bcs 直接渲染。
+  `latest_message_id` 做 around；返回的 `messages[]` 已含发言人、方向、时间、正文与附件清单，Bazaar Server 直接渲染。
 
 序列化用 `core/serialize.py` 的 `serialize_inbox_target` / `serialize_message`，与本地命令协议同一份。找不到智能体
 回 `AGENT_NOT_AVAILABLE`，请求不合法回 `INVALID_READ`，目标或 actor 不可达回 `TARGET_NOT_FOUND`。
 
-### bcs 侧
+### Bazaar Server 侧
 
-请求不落库：一条请求只在有人等它的十秒里有意义，bcs 重启后没人等，落库买不到任何东西。`Controls` 在进程内按电脑
+请求不落库：一条请求只在有人等它的十秒里有意义，Bazaar Server 重启后没人等，落库买不到任何东西。`Controls` 在进程内按电脑
 持有 `{update_id: (request, Future)}`；`getUpdates` 的长轮询按电脑挂在一个 `asyncio.Condition` 上，`ask` 放入后通知；
 `control.result` 到了把响应放进对应的 Future，条目随之删掉；等待方超时也删掉——没人等的请求不留，节点晚些答了
-就丢。`update_id` 取 `max(上一个 + 1, now_ms())`：随时钟单调，bcs 重启后仍大于节点手里的 `offset`。页面请求
+就丢。`update_id` 取 `max(上一个 + 1, now_ms())`：随时钟单调，Bazaar Server 重启后仍大于节点手里的 `offset`。页面请求
 `wait_for(future, 10s)`：超时就是「电脑响应超时」，页面照样返回。单进程假设与现有 `_owned_agents` 一致。
 `reportEvents` 里的事件按名字分发给注册的消费者（`Consumers.on(event_name, consumer)`），`control.result` 的消费者
 就是 `Controls`。
@@ -113,8 +113,8 @@ control，节点不构造也不启停它。配置 `[node] control = "server"`，
   再取一页：`around` 是它、`limit` 100，只留它之前的那一半。消息按发言人连续合并：头像 + 名字 + 时间一行，下面若干文本块；智能体自己的消息名字带 `Agent`
   标签、人带 `Human`；附件只列文件名。不做气泡，不按发言人上色，与 style.html 一致。
 - 指令什么时候下发：用户操作时（点开智能体、点开联系人、翻页），以及被通知时——像 epoll，不是定时去拉，也不是
-  等用户点刷新。通知来自 bcs 自己收到的事件：节点的入站与出站本来就上报（`channel.inbound.persisted`、
-  `channel.outbound.*`）。打开着的栏每 5 秒问 bcs（不是节点）`GET …/contacts?since=<事件 id>`：bcs 先查该智能体
+  等用户点刷新。通知来自 Bazaar Server 自己收到的事件：节点的入站与出站本来就上报（`channel.inbound.persisted`、
+  `channel.outbound.*`）。打开着的栏每 5 秒问 Bazaar Server（不是节点）`GET …/contacts?since=<事件 id>`：Bazaar Server 先查该智能体
   有没有 `id > since` 的消息事件（一条计数查询），没有就回 204、页面什么都不动；有才下发 `contacts` 读取并回新的栏，
   `since` 换成最新的事件 id。打开着的聊天记录同理：底部的 `#tail` 每 5 秒 `GET …/messages?since=&last=<最后一条>`，
   只在该会话有新消息事件时才下发一次 `history` 读取（`around` 是 `last`、`limit` 100，只留它之后的），接在底部并
@@ -135,14 +135,14 @@ control，节点不构造也不启停它。配置 `[node] control = "server"`，
 core `IControl` 与 `ControlContext`；registry 的 `controls` 组、`none` 与 `server` 两个适配器、`[node] control`
 配置与 `bcn server connect`；`ServerControl` 的长轮询、逐条执行、`control.result` 上报、健康字段；
 `NodeApplication` 就绪后启动它，停止时先停它；`commands_of` 与两种读取（`pending_targets` 的翻页与 `pending_only`
-参数，`read`），序列化搬到 core。bcs 侧进程内的 `Controls`、`getUpdates` 端点、事件消费者注册与
-`control.result` 的消费。测试起真实 bcs 与真实节点：请求拉到并回结果，同一请求在途共用一次；bcs 不在时节点空转且
+参数，`read`），序列化搬到 core。Bazaar Server 侧进程内的 `Controls`、`getUpdates` 端点、事件消费者注册与
+`control.result` 的消费。测试起真实 Bazaar Server 与真实节点：请求拉到并回结果，同一请求在途共用一次；Bazaar Server 不在时节点空转且
 不阻碍上报；超时无回应的等待方拿到「没有回应」，请求不再给后来的节点；有人等着时后起的节点拿到并回答。
 
 ### Task 3：联系人栏
 
-选中页改三栏；联系人行带 `actor`、`target`、`channel`、`latest` 指向聊天记录页；`contacts` 片段、翻页、离线与无回应的说明、`since` 驱动的被动刷新；文案。测试用真实 bcs 与真实节点存储
-（`tests/server/_serving.py` 起 bcs，节点侧用 `ServerAudit` 接上一个只有存储与命令服务的最小 dispatch）验证
+选中页改三栏；联系人行带 `actor`、`target`、`channel`、`latest` 指向聊天记录页；`contacts` 片段、翻页、离线与无回应的说明、`since` 驱动的被动刷新；文案。测试用真实 Bazaar Server 与真实节点存储
+（`tests/server/_serving.py` 起 Bazaar Server，节点侧用 `ServerAudit` 接上一个只有存储与命令服务的最小 dispatch）验证
 联系人按活动倒序出现、翻页、离线置灰。
 
 ### Task 4：聊天记录栏
@@ -152,7 +152,7 @@ core `IControl` 与 `ControlContext`；registry 的 `controls` 组、`none` 与 
 
 ### Task 5：真实运行验证
 
-本机 bcs 与本机节点：在界面上点开一个智能体，看到它的群与 DM，点开一个群看到最近的消息并向上翻一页；停掉节点
+本机 Bazaar Server 与本机节点：在界面上点开一个智能体，看到它的群与 DM，点开一个群看到最近的消息并向上翻一页；停掉节点
 后栏里显示离线说明；节点恢复后再点正常。
 
 ### Task 6：智能体消息按 Markdown 渲染
@@ -176,7 +176,7 @@ core `IControl` 与 `ControlContext`；registry 的 `controls` 组、`none` 与 
 
 ## 验收标准
 
-- 节点在 bcs 不可达时上报与下行都空转，入站、出站与 turn 不受影响。
+- 节点在 Bazaar Server 不可达时上报与下行都空转，入站、出站与 turn 不受影响。
 - 一条指令恰好执行一次，结果恰好配对一次；等待方超时不影响指令最终落库。
 - 联系人栏与聊天记录栏的内容与节点上 `bcc inbox check` / `bcc message read` 看到的一致。
 - 离线的电脑点开智能体时两栏是说明文字，不发指令。
