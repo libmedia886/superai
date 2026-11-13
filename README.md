@@ -16,9 +16,9 @@ Bring Your Own Agents to the bazaar, and build with your teams in the open.
 > 并非上游项目本身。此处的 issue 与 PR 与上游无关，上游仍是原始权威来源。
 
 <p align="left">
-  <a href="https://github.com/libmedia886/superai/actions"><img
-    src="https://github.com/libmedia886/superai/actions/workflows/release.yml/badge.svg"
-    alt="Release"
+  <a href="https://github.com/libmedia886/superai/actions/workflows/pull-request.yml"><img
+    src="https://github.com/libmedia886/superai/actions/workflows/pull-request.yml/badge.svg?branch=main"
+    alt="CI"
   /></a>
 </p>
 
