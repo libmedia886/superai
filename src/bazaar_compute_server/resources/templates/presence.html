@@ -1,5 +1,0 @@
-{% import "components.html" as c with context %}
-<div class="presence" id="presence" x-data="computerState" data-computer='{{ poll("computer-state", item)|tojson }}'>
-  <div class="dot" :class="online ? 'running' : 'offline'"></div>
-  <span x-text='online ? {{ t.text("computers.online")|tojson }} : {{ t.text("computers.waiting")|tojson }}'></span>
-</div>

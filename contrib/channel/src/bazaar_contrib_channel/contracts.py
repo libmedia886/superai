@@ -1,0 +1,45 @@
+"""A provider's connected channel, consumed through public models."""
+
+# The provider owns the approval deadline as part of the public call contract.
+# ruff: noqa: ASYNC109
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from typing import Protocol
+
+from bazaar_contrib_harness import ApprovalResult
+
+from .models import (
+    ChannelApprovalRequest,
+    ChannelIdentity,
+    ChannelSendRequest,
+    DmAddress,
+    DmRequest,
+    InboundMessage,
+)
+from .sending import ChannelSendPart
+
+
+class Channel(Protocol):
+    def get_identity(self) -> ChannelIdentity: ...
+
+    def backfill_provider_thread_id(
+        self, provider_thread_id: str, *, channel: str, channel_identity: str
+    ) -> str:
+        """Name a conversation written before this channel could tell bots apart."""
+        ...
+
+    def dm_address(self, request: DmRequest) -> DmAddress | None: ...
+
+    def receive(self) -> AsyncIterator[InboundMessage]: ...
+
+    async def prepare_send(
+        self, request: ChannelSendRequest
+    ) -> tuple[ChannelSendPart, ...]:
+        """Build single-operation callbacks; upstream I/O belongs in the callbacks."""
+        ...
+
+    async def request_approval(
+        self, request: ChannelApprovalRequest, *, timeout: float
+    ) -> ApprovalResult: ...

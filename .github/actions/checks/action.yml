@@ -1,25 +1,22 @@
 name: Checks
-description: Run the required project checks
+description: Run static checks for the selected workspace packages
+
+inputs:
+  packages:
+    description: Space-separated workspace package names
+    required: true
 
 runs:
   using: composite
   steps:
-    - name: Install locked dependencies
+    - name: Run static checks
       shell: bash
-      run: uv sync --locked
-
-    - name: Run tests
-      shell: bash
-      run: uv run --frozen pytest -m "not e2e"
-
-    - name: Check formatting
-      shell: bash
-      run: uv run --frozen ruff format --check .
-
-    - name: Run Ruff
-      shell: bash
-      run: uv run --frozen ruff check .
-
-    - name: Run Pyright
-      shell: bash
-      run: uv run --frozen scripts/pyright_lsp_check.py --outputjson .
+      env:
+        PACKAGES: ${{ inputs.packages }}
+      run: |
+        read -r -a packages <<<"$PACKAGES"
+        for package in "${packages[@]}"; do
+          echo "::group::$package"
+          uv run --no-sync scripts/ci.py check --package "$package"
+          echo "::endgroup::"
+        done

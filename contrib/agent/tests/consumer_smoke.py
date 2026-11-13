@@ -1,0 +1,187 @@
+"""Consume installed agent instances through local public compositions."""
+
+from __future__ import annotations
+
+import asyncio
+import os
+from contextlib import AsyncExitStack, asynccontextmanager
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+import aiofiles
+from aiofiles.threadpool.text import AsyncTextIOWrapper
+from bazaar_compute_node.boot import node
+from bazaar_core import (
+    Composition,
+    Context,
+    Contrib,
+    ContribEntry,
+    ContribSpec,
+    ServiceKey,
+    load,
+)
+from bcn_agent_journal import JOURNAL
+from bcn_agent_workbench import configured, started
+from blockbuster import blockbuster_ctx
+from custom_smoke import exercise as exercise_custom
+from provider_smoke import exercise as exercise_providers
+from recovery_smoke import exercise as exercise_recovery
+
+from bazaar_contrib_agent import (
+    AGENT,
+    Agent,
+    AgentConfig,
+    compose,
+)
+
+REPORT = ServiceKey[AsyncTextIOWrapper]("example.shared-report")
+
+
+async def exercise(path: Path):
+    workspaces = {
+        name: path / ".bcn" / "workspaces" / name for name in ("Cloud", "Tifa")
+    }
+    providers = {
+        "channel": [{"kind": "test-channel"}],
+        "harness": [{"kind": "document"}],
+    }
+    config = {
+        "agents": [
+            {"id": "Cloud", "name": "Cloud", **providers},
+            {"id": "Tifa", "name": "Tifa", **providers},
+        ]
+    }
+    # Run the installed entry itself before composing an independent consumer.
+    for _ in range(2):
+        composition = await asyncio.to_thread(
+            load,
+            [
+                ContribSpec(contrib="test-channel-builder"),
+                ContribSpec(contrib="document-builder"),
+                ContribSpec(contrib="agent", config=config),
+            ],
+        )
+        composition = await configured(path / "consumer.toml", composition)
+        async with node(
+            configer_options=(str(path / "consumer.toml"),),
+            start=lambda _, composition=composition: composition,
+        ) as hub:
+            await started(hub, ("Cloud", "Tifa"))
+            assert await asyncio.to_thread(workspaces["Cloud"].is_dir)
+
+    composition = await asyncio.to_thread(
+        load,
+        [
+            ContribSpec(contrib="agent"),
+        ],
+    )
+    composition = await configured(path / "consumer.toml", composition)
+    async with node(
+        configer_options=(str(path / "consumer.toml"),), start=lambda _: composition
+    ) as hub:
+        assert await asyncio.to_thread(workspaces["Cloud"].is_dir)
+
+    journals: dict[str, AsyncTextIOWrapper] = {}
+    instances: dict[str, Agent] = {}
+
+    @asynccontextmanager
+    async def shared(ctx: Context):
+        async with aiofiles.open(path / "shared.txt", "a") as stream:
+            ctx.offer(REPORT, stream)
+            yield
+            await stream.write("shared released\n")
+
+    @asynccontextmanager
+    async def observe(ctx: Context):
+        agent = ctx.accept(AGENT)
+        instances[agent.name] = agent
+        journals[agent.name] = ctx.accept(JOURNAL)
+        await journals[agent.name].write(f"identity {agent.id}\n")
+        await ctx.accept(REPORT).write(f"observed {agent.name}\n")
+        yield
+
+    @asynccontextmanager
+    async def control(ctx: Context):
+        async with AsyncExitStack() as first, AsyncExitStack() as second:
+            for stack, item in zip((first, second), config["agents"]):
+                composition = compose(
+                    AgentConfig.model_validate(item | {"channel": [], "harness": []})
+                )
+                journal = await asyncio.to_thread(
+                    load, [ContribSpec(contrib="agent-journal")]
+                )
+                composition = composition.model_copy(
+                    update={
+                        "entries": (
+                            *composition.entries,
+                            *journal.entries,
+                            ContribEntry(
+                                name="observer",
+                                definition=Contrib(
+                                    accepts=[AGENT, JOURNAL, REPORT], lifespan=observe
+                                ),
+                            ),
+                        )
+                    }
+                )
+                await stack.enter_async_context(
+                    ctx.enable(composition, local=(AGENT, JOURNAL))
+                )
+            await first.aclose()
+            assert journals["Cloud"].closed
+            await journals["Tifa"].write("continues after Cloud closes\n")
+            await ctx.accept(REPORT).write("shared continues\n")
+            yield
+
+    controlled = Composition(
+        entries=[
+            *composition.entries,
+            ContribEntry(
+                name="shared",
+                definition=Contrib(offers=[REPORT], lifespan=shared),
+            ),
+            ContribEntry(
+                name="controller",
+                definition=Contrib(accepts=[REPORT], lifespan=control),
+            ),
+        ]
+    )
+    async with node(
+        configer_options=(str(path / "consumer.toml"),), start=lambda _: controlled
+    ):
+        assert await asyncio.to_thread(
+            instances["Cloud"].workspace.samefile, workspaces["Cloud"]
+        )
+    for name, workspace in workspaces.items():
+        content = await asyncio.to_thread((workspace / "journal.txt").read_text)
+        assert f"identity {name}" in content
+        assert f"released {name}" in content
+        assert journals[name].closed
+        if os.name != "nt":
+            assert (await asyncio.to_thread(workspace.stat)).st_mode & 0o777 == 0o700
+    assert "continues after Cloud closes" in await asyncio.to_thread(
+        (workspaces["Tifa"] / "journal.txt").read_text
+    )
+    report = await asyncio.to_thread((path / "shared.txt").read_text)
+    assert "observed Cloud" in report and "observed Tifa" in report
+    assert "shared continues" in report and "shared released" in report
+    await asyncio.to_thread(print, "Exercise installed agent providers", flush=True)
+    await exercise_providers(path / "providers")
+    await asyncio.to_thread(print, "Exercise custom agent composition", flush=True)
+    await exercise_custom(path / "editor")
+    await asyncio.to_thread(print, "Exercise agent process recovery", flush=True)
+    await exercise_recovery(path / "recovery")
+
+
+if __name__ == "__main__":
+    with TemporaryDirectory(prefix="bcn-agent-") as directory:
+        directory = Path(directory)
+        if os.name != "nt":
+            (directory / "home").mkdir()
+            (directory / "alias").symlink_to(
+                directory / "home", target_is_directory=True
+            )
+            directory = directory / "alias"
+        os.environ["BCN_HOME"] = str(directory)
+        with blockbuster_ctx():
+            asyncio.run(exercise(directory))

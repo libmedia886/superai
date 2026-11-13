@@ -1,0 +1,76 @@
+"""Installed metadata inspection for the actual target interpreter."""
+
+from __future__ import annotations
+
+lazy import argparse
+lazy import json
+lazy import sys
+lazy from importlib import invalidate_caches
+lazy from importlib.metadata import distributions
+lazy from pathlib import Path
+
+lazy from bazaar_core import CONTRIB_GROUP, Contrib
+lazy from packaging.utils import canonicalize_name
+
+lazy from .contracts import EntryInfo, EnvironmentInfo, InstalledPackage
+
+
+def inspect(*, definitions: bool = True) -> EnvironmentInfo:
+    invalidate_caches()
+    packages: dict[str, InstalledPackage] = {}
+    for distribution in distributions():
+        name = str(canonicalize_name(distribution.metadata["Name"]))
+        # A site-packages reached through two sys.path entries, as Fedora's lib64
+        # and lib are, lists each distribution twice; imports use the first.
+        if name in packages:
+            continue
+        entries: list[EntryInfo] = []
+        for point in distribution.entry_points:
+            if point.group != CONTRIB_GROUP:
+                continue
+            if not definitions:
+                entries.append(EntryInfo(name=point.name, value=point.value))
+                continue
+            try:
+                definition = point.load()
+                if not isinstance(definition, Contrib):
+                    raise TypeError("entry point must export a Contrib definition")
+                entries.append(
+                    EntryInfo(
+                        name=point.name,
+                        value=point.value,
+                        config_schema=(
+                            definition.config.model_json_schema()
+                            if definition.config is not None
+                            else None
+                        ),
+                    )
+                )
+            except Exception as error:  # noqa: BLE001 - Retain diagnostics from independent installed Contribs.
+                entries.append(
+                    EntryInfo(name=point.name, value=point.value, error=str(error))
+                )
+                continue
+        packages[name] = InstalledPackage(
+            package=name,
+            version=distribution.version,
+            summary=distribution.metadata.get("Summary", ""),
+            url=json.loads(distribution.read_text("direct_url.json") or "{}").get(
+                "url"
+            ),
+            entries=tuple(entries),
+            requirements=tuple(distribution.requires or ()),
+        )
+    return EnvironmentInfo(
+        prefix=Path(sys.prefix),
+        python=Path(sys.executable),
+        base_python=Path(getattr(sys, "_base_executable", sys.executable)),
+        packages=tuple(packages.values()),
+    )
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--metadata-only", action="store_true")
+    arguments = parser.parse_args()
+    print(inspect(definitions=not arguments.metadata_only).model_dump_json())

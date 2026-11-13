@@ -1,0 +1,3038 @@
+# BCN 0.3 contrib 框架与首个模块
+
+## 目标
+
+在 `core/` 的 `bazaar-core` 包中提供统一的 Python 进程内 contrib 框架。Contrib 定义服务声明、生命周期函数和事件处理器，
+函数通过公共 Context 提供和使用服务、发送事件。core 是框架运行内核，负责自举阶段、入口发现、配置与依赖校验、服务绑定以及完整启动和停止。
+app 以普通 Python 调用提供启动输入与默认资源；具体功能由 contrib 接入。
+节点启动流程实际使用这套框架，配置载体与日志以独立发行包接入，完成安装、发现、启用和使用。
+
+新增业务服务的接口、查询、结果、调用入口和配置属于功能模块。宿主依据注册信息完成装配，
+新增模块无需向 Context 增加业务字段，也无需向中心分发器追加业务分支。
+
+本分支完整交付服务注册、依赖装配、本地绑定、事件和资源生命周期、独立状态查询模块、包发现、配置载体契约与默认 filesystem 模块、V5 配置及版本转换机制、
+节点启动接入、模块及 agent 管理、默认调用／存储／消息／协作／定时／Reminder 和可替换 agent 组合。后续能力依照
+[0.3 路线图](roadmap.md) 逐个交付新包。工程的分支与发行规则见 [总计划](README.md)。
+
+## 迁移实施与验收标准
+
+本计划全部 Task 以 main 主分支的原实现为迁移基线。提示词、运行行为、Actor 与文案保持一致；
+只调整已经讨论确认的包归属、依赖声明与公共接口边界。实现前先核对 main 对应源码、调用链与资源，迁入原实现。
+源码注释和 docstring 描述当前职责、行为及约束；迁移来源和主线对照记录在计划与验收资料中。
+本轮确认会话准入由 collaboration 持久化审核状态，调用方经 sidecar 查询、通过或拒绝；新会话默认待审。
+本轮另行确认 Task 17 在会话审核通过后触发一次正常入站通知，经 inbox notice 唤醒响应；具体接入和验收见该任务。
+
+WeCom 的嵌入引用由其 Channel 拆成安静入站消息；原 `_queue_quoted_message` 遗漏发送者，
+在后续独立 WeCom 插件迁移时，由该插件把当前消息发送者传入引用构造，随引用一同落库。
+通用 Channel 的 sender 必填，Agent 原样传递；此项 provider 修复按所属迁移阶段实现和验收。
+
+developer instruction 以 `src/bazaar_compute_node/core/instruction.py` 与 `resources/developer_instructions.md`
+的原始资源、渲染规则、mode 分支及注入时机为准。本次明确批准两处显示调整：删除 `- Agent ID: {{agent_id}}`，
+将 `- Runtime session ID: {{runtime_session_id}}` 改为 `- Session: {{runtime_session_id}}`。
+验收以 main 原模板应用这两处调整后的内容与渲染结果为基准，逐字比对。
+Actor 沿用 `src/bazaar_compute_node/core/actor.py` 的 `Agent`／`Thread`、`Actors` 与 `Mode`，
+作为内部流通的身份原语，类型保持 `Actor = Agent | Thread`。
+内部服务接口、编排调用、命令业务以及表示操作者归属的状态与容器键统一使用 Actor；
+业务内部直接传递和匹配 Actor，不传递 `session_id`／`agent_id` 等字符串代替 Actor，也不在各层重新根据 id 或 mode 推断身份。
+只有在入站、配置、进程协议及序列化等边界，才将 `session_id`／`agent_id` 与 Actor 相互转换：
+边界入口构造或解析 Actor 后传入内部，边界出口将 Actor 转为外部协议所需的 id。
+
+| mode | `Actors.for_thread(thread_id)` | 代表的业务范围与运行归属 |
+| --- | --- | --- |
+| `session` | `Thread(thread_id)` | 当前会话；不同会话具有不同 Actor，各自持有运行会话及调度状态 |
+| `dangerous_individual` | `Agent(agent_id)` | 整个 Agent；该 Agent 各会话映射到同一个 Actor，按该 Actor 持有运行会话及调度状态 |
+
+`Actors.for_thread(thread_id)` 在会话入站边界选择 Actor；`Actors.resolve(actor_id)` 在进程边界按当前 mode 恢复类型：`session` 恢复 `Thread(actor_id)`，
+`dangerous_individual` 校验 id 等于本 Agent 后恢复 `Agent(agent_id)`。
+main `core/runtime.py` 与 `core/orchestration/orchestrator.py` 以 Actor 为运行会话、runtime holder、状态、
+队列、worker 和 timer 的归属键；迁移保留两种模式下的会话复用、隔离、串行调度及释放语义。
+`core/orchestration/services.py` 与 `commands/base.py` 按该类型确定消息、未读与命令 target 范围：
+Thread 处理自己的会话，Agent 处理该 Agent 存储范围内的会话。
+跨进程传递的 actor id、当前 runtime session id 与会话 capability 沿 main `app/agent.py` 的活跃绑定进行校验，
+恢复后的业务调用继续传递有类型的 Actor，保留身份、会话及命令可见范围的关联。
+
+消息、调度、审批、提醒和命令沿各自 main 调用链迁移；bcc 与其他面向人或 agent 的文案沿用
+`src/bazaar_compute_node/cmd/bcc/`、`resources/` 的原格式化实现、模板、字段、措辞和输出行为。
+
+每个 Task 均以以上一致性要求作为验收标准，review 同时核对原源码与迁入实现；涉及模板时检查资源字节和实际渲染，
+涉及行为与 Actor 时通过已有真实场景验收身份、路由、时序、结果与生命周期。发现偏差时回到该能力的引入提交修正，
+满足标准后再完成该 Task 并交付 review。
+
+## 测试执行
+
+测试和独立安装验收直接等待场景、子进程及观察结果，校验功能结果并在取消时回收所属资源。
+完整运行由 GitHub CI 作业的超时或人工取消控制；功能契约本身的超时参数、到期处理和结果断言按原有要求验证。
+
+共享入口 `scripts/ci_pytest.py` 使用 `TemporaryDirectory` 为每次运行创建 `bcn-` 前缀的独立短目录，
+POSIX 固定在 `/tmp` 下，Windows 使用系统临时目录；作为默认 `--basetemp` 传给 pytest，退出时清理。
+本地与 CI 的 `scripts/ci.py test` 复用该入口，日志单独保存在验收产物目录。
+共享入口在调用 pytest 前强制把 `BCN_HOME` 指向本次内部创建的临时目录。测试支持包通过 pytest11 自动加载隔离插件，
+在初始 conftest 和测试模块加载前另行分配 `BCN_HOME`，覆盖外部传入值并在退出时清理；直接运行包内 pytest 同样生效，
+子进程继承该环境，各场景仍可在本次测试临时目录内选择独立配置。
+依据 [pytest 临时目录契约](https://docs.pytest.org/en/stable/how-to/tmp_path.html#temporary-directory-location-and-retention)，
+该目录只属于当前验收，避免工作区路径与测试名叠加超过 Unix socket 路径限制。
+
+## 首阶段的发行结构
+
+首个日志发行包固定为 `bazaar-contrib-logging`，Python 模块为 `bazaar_contrib_logging`，模块入口为 `logging`。
+它接收标准库 logging 记录，并纳入节点默认组合及可选 server 组合。
+公共配置契约归 `bazaar-contrib-config`，默认载体归 `bazaar-contrib-config-filesystem`，入口为 `config-filesystem`。
+配置版本服务归 `bazaar-contrib-config-versions`，提供 `config-v1` 至 `config-v5` 五个入口；载体与版本组合在完整配置读取前装配。
+状态查询服务归 `bazaar-contrib-status`，入口为 `status`；模块管理服务归 `bazaar-contrib-manager`，入口为 `contrib-manager`；各包的分包与内置归属见
+[路线图清单](roadmap.md#发行包模块入口与内置组合)。
+app、core 和上述功能包在 BCN 仓库内分别具有 `pyproject.toml`、src、wheel、资源与验证流程。
+app 发行名为 bazaar-compute-node，core 为 bazaar-core，必要包位于 contrib/<功能>/，随 BCN 使用同一版本；可选包在独立仓库发行并声明公共接口兼容范围。
+首阶段采用 [本地 workspace 开发](README.md#本地-workspace-开发)，未发布依赖从共享 workspace editable 安装。
+交付安装验证使用独立构建的 wheel，在 workspace 外的临时环境执行，并纳入 [版本发行清单](roadmap.md)。
+
+## 装配结构
+
+模块提供 typed 服务，消费者声明依赖，宿主按依赖进入 lifespan，并管理服务与事件监听的归属。
+资源的创建、后台任务的管理和退出清理由模块的上下文管理器完成。
+服务类型和共享 key 由功能契约包定义；框架通过通用 Context 完成注册和获取。
+已安装的发行依赖与运行时启用实例分别记录，包操作统一交给宿主自身的 uv。
+全部组合使用同一个 `ContribHub` 与 `bcn run`。`bazaar-contrib-server` 与各功能模块包一样按配置启用，
+服务端能力由 server 组合的模块提供；agent 可为空，也可与服务端模块同时运行。
+
+统一模块入口承担服务注册和依赖装配。各阶段在新成员中实现业务与调用者，按新契约组成独立的 app／core／contrib 组合。
+旧 src 与旧测试保留原样，全部新能力齐备、整体验收通过后统一切换并一次清理。各功能包独立持有实现与依赖。
+
+## 生命周期与任务管理
+
+core 要求 Python 3.15。ContribHub 是异步上下文管理器，拥有管理插件实例的 `asyncio.TaskGroup`；
+`async with ContribHub() as hub` 进入后才可启用插件，`run(bootstrap, load)` 自动进入该宿主上下文。
+每个实例在其独立 Task 中进入和退出完整 lifespan；实例内的 AsyncExitStack 与任务组按原任务、逆序退出。
+生命周期任务和事件分发任务 eager start，确保取消前已进入拥有者的异常与清理逻辑。
+发布事件只把值放入各监听器的队列后返回；每个监听器的分发任务在宿主任务组中按入队顺序调用处理函数，
+监听器异常记录日志后继续处理下一个事件。停止操作被取消时取消所属分发任务，
+用 `asyncio.shield` 等待清理任务完成后继续传播调用者取消，再按依赖逆序收回服务。
+正常关闭先将待退出实例标记为 Stopping。已经就绪、没有故障、仍在等待依赖者退出的监听器
+继续接收事件，使依赖者的收尾输出和审计可以完成。监听器自身的停止信号发出后停止接收新事件，
+处理完已入队的事件后退出 lifespan、释放资源。故障及其阻塞实例仍立即停止事件分发。
+初始化失败与运行故障按实例隔离。宿主沿已绑定的服务依赖计算传递闭包，停用这些实例的监听器、
+取消在途回调和启动中的任务，再按依赖逆序结束 lifespan；独立插件及同一定义的其他独立实例继续运行。
+并发故障及显式停止使用同一实例任务完成清理，消费者结束后才收回提供者的服务。
+TaskFailureSignal.observe 接受 awaitable，由拥有者的任务组运行 guard，异常与意外结束经信号交给所属实例。
+生命周期异常在进入宿主任务组的边界捕获；故障来源、实例位置、影响范围及清理错误通过标准 logging 记录。
+此处依据任务组的异常取消规则在实例边界处理错误，避免把独立插件放进同一个故障传播范围。
+core 的 SQLite、文件、TCP、子组合、故障和取消测试使用 pytest-asyncio；SQLite 资源使用 aiosqlite，
+文件资源使用 aiofiles，TCP 资源使用标准库 streams，包级 pytest 配置选择自身测试目录。
+
+## 框架契约
+
+### 模块与公共类型
+
+`bazaar-core` 导出 ContribHub、Contrib、ContribEntry、Composition、Candidate、Enablement、Context、ServiceKey、EventKey 与生命周期状态。
+ContribHub 直接管理具体实例、服务依赖图、事件索引与任务；启用条目每次生成一个实例。
+Contrib 声明 offers、accepts、可选参数模型、lifespan 和 listen；条目给出定义、参数及配置位置。
+未声明 config 时，lifespan 只接收 Context；声明 config 模型时，core 校验条目参数后调用 lifespan(ctx, config)。
+无配置模型的条目省略参数或使用空表，配置校验仍拒绝额外参数。
+Context 提供实例 id／name、声明后注入的服务、事件、组合校验与更新，以及受本次生命周期管理的子组合启用。
+app 持有命令、默认发行依赖与业务组合，普通插件管理自己的资源及子组合。
+
+```python
+@asynccontextmanager
+async def server_lifespan(ctx: Context, config: ServerConfig):
+    composition = Composition(
+        entries=[
+            ContribEntry(
+                name="database", definition=sqlite, config={"path": config.database}
+            ),
+            ContribEntry(name="history", definition=history),
+        ]
+    )
+    async with ctx.enable(composition, local=(DB,)):
+        yield
+```
+
+`ctx.enable(composition, local=())` 返回异步上下文管理器；Hub.enable 提供相同启用语义。
+进入前检查完整已声明目标，再按服务依赖启动；退出、异常或取消时等待回调并逆序释放资源。
+子组合在创建者的 lifespan 内持有，创建者停止或失败时其后代也释放；此归属由具体插件实例记录。
+嵌套启动允许子实例使用创建者已提供的声明服务，不等待创建者进入 yield；缺少尚未提供的创建者服务时报告启动依赖错误，防止父子互相等待。
+
+### 本地绑定与实例声明
+
+默认服务和事件直接以公共 key 作为绑定身份。local 接受 ServiceKey 和 EventKey，给指定 key 分配新的 UUID 身份；
+创建者的其他绑定继续沿用，提供者与消费者始终使用同一公开 typed key。
+本地 key 缺少提供者时报告缺失，同一绑定重复提供时报告冲突；绑定只查询选定身份。
+事件以相同身份匹配监听器：各 agent 的消息事件可分别本地化，CONTRIB_CHANGED 默认共享。
+业务插件代码继续通过 ctx.offer／ctx.accept／ctx.announce 与框架交互。
+
+ContribEntry.bindings 接受 typed key→BindingRef 引用，用于在一份静态组合或不同子组合之间连接具体服务。
+ContribEntry.local 为该条目及其后代声明私有 key，框架使用注册身份分配内部绑定；ctx.enable 的 local 则建立整个子组合的私有范围。
+条目声明的 entry.ref(KEY) 引用其所属组合内的具名声明，框架按 name 与 location 定位，候选校验时检查目标唯一且提供该服务；
+Enablement.ref(KEY) 引用启用句柄中的服务，框架在同一 Hub 的完整候选中选择该句柄所属的唯一提供者。事件引用沿用目标声明或组合的事件绑定。
+BindingRef 保留 typed key 与声明位置或启用句柄，Pydantic 边界校验引用与映射 key 一致；框架在根选择和建图前解析实际绑定，解析循环和缺失沿用声明诊断。
+组合作者只表达私有范围及提供者选择，UUID 由框架内部生成和维护；业务输入不携带装配标识。
+配置更新保留未变注册及子组合的绑定身份，服务引用重新解析到候选中的实际提供者，消费者仍通过 accepts 与 ctx.accept 访问服务。
+共享 DB、两个不同数据库后端及每个 agent 的执行实例都通过具体提供者与消费者的绑定表达。
+
+agent 插件拥有实体模型与 AGENT 服务，从 config.agents 构造每个实体的局部组合；
+所选 channel／harness 在对应接入 commit 中由 agent 组合按公共服务依赖与 provider 入口创建。
+顶层 contribs 统一启用一次；同一实现可以用不同参数生成多个实例，选中的 provider 和完整已知依赖在资源启动前展开并预检。
+动态 lifespan 创建的子组合在 ctx.enable 进入前检查其完整声明，校验结论只覆盖已经声明的输入。
+
+### 公共契约类型命名
+
+公共契约按能力命名：`TaskFailureSource`、`Audit`、`Channel`、`ApprovalHandler`、
+`HarnessTurnStream`、`Harness` 和 `ThreadConcurrency`。`Timer` 表示计时服务，
+`Timer.create()` 返回 `TimerHandle`；`ContribStatusQuery` 表示状态查询服务，
+core 的 `ContribStatus` 保持表示状态快照。公共 `ServiceKey` 继续携带相应契约类型，
+提供者通过 offer 发布实现，消费者通过 accepts 与 accept 取得有类型的实例。
+
+统一更新定义、公开转导出、泛型 key、函数签名和现有消费方的引用，沿用各能力的真实资源与独立安装验收。
+检查接口包、实现包、agent／messages 消费者与根目录类型检查，并在各能力的引入提交中完成签名修订。
+
+### Python 3.15 导入策略
+
+本分支新包与配套 Python 文件使用 Python 3.15 的显式模块级 `lazy import`／`lazy from`。
+首次使用名称才加载模块；公开包的转导出延迟到访问所需名称，CLI 的 run 依赖延迟到执行该命令。
+仅用于函数体或延迟注解的导入改为 lazy，类型专用导入直接在模块级声明。
+模块初始化需要的基类、装饰器、模型字段与默认值、typed key 和全局实例保持立即可用；同一 from 的名称按实际使用拆开。
+测试启动器的框架模型与资源在进入被监测的事件循环前解析，避免首次模型导入的文件访问发生在异步业务中。
+Pydantic 模型创建和校验继续执行原有 schema 构造；发行发现仍通过实际 entry point 加载选定定义。
+保留解释器支持的显式语法及逐模块声明；导入异常在真正使用依赖的位置进入现有加载诊断和资源清理流程。
+
+从 workspace 与独立 wheel 验证所有包的新测试、公开转导出、配置模型、CLI 帮助／版本／run、真实资源及退出，
+使用独立进程记录 core 与 CLI 的首次导入模块清单并对比实际延迟效果。各模块的修改归回首次引入它的 Task，
+后续 Task 新增的导入按同一规则适配；运行 Ruff、根目录 LSP 和独立 sdist→wheel 验收。
+
+### CI 支持平台
+
+各发行包在自己的 `pyproject.toml` 中通过 `[tool.bcn.ci].platforms` 声明测试平台，
+取值为 `linux`、`macos`、`windows`；未配置时仅运行 Linux，显式配置时严格按声明的平台生成测试项。
+`[tool.bcn.ci].skip = true` 手动跳过该包的测试、system 测试及发行安装验证任务；
+受影响包仍列入单个 `Checks` 任务的 Ruff 和 Pyright/LSP 检查。全部受影响包都跳过时，
+Plan 输出独立的 `has_tests=false`，工作流保留静态检查并跳过测试矩阵。
+接口包 harness、messages、storage、timer、sidecar、channel 显式设置 skip，不持有借助具体实现的验收入口；
+接口中若有独立纯逻辑测试，只对该逻辑安排 Linux 验证。config、audit 当前没有独立测试，沿用 skip，
+其发布、加载和业务行为由现有配置实现、manager、Agent 及协作消费者验收。静态检查继续覆盖全部受影响包。
+sidecar 的原生传输与安装验收归 sidecar-unix、sidecar-windows；两者直接复用 tests/support 中同一份
+真实安装夹具、外部消费者和工作流，不重复复制测试实现。channel 的 TCP 发送恢复验收归入已有 Agent 独立安装环境，
+复用其真实测试 Channel 和 wheel／sdist 构建与安装流程。
+平台声明随所属包首次引入相应实现的提交维护，各层分支沿用相同的默认规则。
+只为包自身拥有的平台差异增加任务，依赖跨平台库、文件 API 或其他包本身不增加平台：
+
+| 包 | 测试平台 | 验证依据 |
+| --- | --- | --- |
+| sidecar-unix | Linux／macOS | 真实 Unix socket 地址归属、分块读写、重连、崩溃恢复及退出 |
+| sidecar-windows | Windows | 真实 named pipe 分块读写、连接清理、重连、崩溃恢复及退出 |
+| agent | Linux／Windows | 自有 POSIX bcc 脚本与 Windows bcc.cmd 的真实子进程执行 |
+| agent-command | Linux | 配置管理与会话审核按通用业务流程验收，原生传输由相应实现包验收 |
+| manager | Linux／Windows | 自有虚拟环境的 bin/python 与 Scripts/python.exe 定位及独立安装升级 |
+| config-filesystem | Linux／Windows | 自有配置替换、POSIX 目录 fsync／权限与 Windows 保存路径 |
+| config-versions | Linux／Windows | POSIX endpoint 与 Windows named pipe 的配置转换 |
+
+其余实现包沿用 Linux 默认值；node-management 的 POSIX 信号测试在 Linux 执行，
+app、logging、messages-node、sqlite 的通用组合和业务行为不再逐包重复 macOS／Windows。
+workspace 成员读取并校验该配置，CI 规划器仅把未跳过的受影响包展开为允许的 package／runner 条目。
+工作流命名为 `CI`，规划任务命名为 `Plan`。单个 `Checks` 任务读取 Plan 输出的受影响包清单，
+在同一环境中逐包执行 Ruff 和 Pyright/LSP；测试、system 测试及发行验证使用展开后的平台矩阵。
+命名参考 [OpenDAL 的按职责划分工作流](https://github.com/apache/opendal/blob/main/.github/workflows/ci_check.yml)
+及 [组件／平台测试项](https://github.com/apache/opendal/blob/main/.github/workflows/test_behavior.yml)。
+矩阵提供成员目录名作为组件短名，测试任务显示为 `core / ubuntu-latest`、`sidecar-windows / windows-latest`。
+GitHub Actions 通过 `fromJSON` 接收完整的 `matrix.include`，逐条创建已声明的组合，依据
+[GitHub 动态矩阵文档](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/run-job-variations#using-an-output-to-define-two-matrices)。
+CI 按上述声明生成包与平台矩阵，仓库脚本作为开发工具维护。
+
+异步命令回调通过公共服务复用业务逻辑；在异步回调线程调用 Click Context.invoke／forward 时，
+invoke 在执行目标回调前抛出明确的 RuntimeError，禁止回到 Click 同步调用链阻塞事件循环。
+
+命令目录按入口记录导入、元数据校验及重复名称错误，健康命令继续可选；
+通过资源模板向 stderr 输出 uv 风格的 warning 与 Caused by 原因，包含命令名和所属发行包。
+选中失败命令时输出对应 error 并让该次调用失败，同一失败入口只报告一次。
+
+CLI 入口保留 Click 原生 Abort，由 Click 输出取消提示及退出状态。
+
+contrib add 接受没有 contrib 入口的普通发行包，是否启用入口由显式启用操作决定；
+包详情及 remove 从完整安装元数据中定位发行包，保留合法的仅安装声明管理流程。
+
+加载诊断在每次组合启用时复制独立记录并生成新 ID，parent 使用当前组合所属 contrib 的实例 ID；
+缺失与歧义插件的原始错误和位置保持随诊断记录发布，重复启用同一组合时按各自归属显示。
+
+### ContribHub 运行与组合更新
+
+ContribHub.run(bootstrap, load) 先启用自举条目，再启用提供 COMPOSITION 的普通配置加载器，并将其提供的组合绑定到该加载器。
+Hub 的异步上下文管理器持有一个任务组；应用在就绪后等待退出信号，业务退出后再释放加载器和自举资源。
+Context.accept 仅取得自己的服务和已经声明、绑定并注入的依赖；其他实例的内部记录及其 Context 由 ContribHub 管理。
+状态快照记录具体实例 id、name、配置 location 和父实例 id；日志保留发布实例及 Python 调用位置。
+
+首次启用、validate、保存预检和 update 使用同一个完整目标构造及 Diff。
+目标包含未修改的其他组合和实例；按已校验参数、定义、来源与绑定匹配既有注册，配置位置用于诊断。
+保留实例的绑定身份和未变资源；服务提供者变化时沿实际依赖重新绑定受影响消费者。
+保留既有实例时同时核对其生命周期状态，已停止或失败的实例在重新应用配置时重新创建；加载器保留调用方声明的 required_offers 并追加 COMPOSITION，隔离配置错误产生的状态同样记录所属父实例。
+创建者变化时撤销其动态子组合，新 lifespan 创建新的子实例；其他创建者拥有的组合继续保持。
+新增服务可恢复先前缺少依赖的消费者，实际故障仍保留 Failed／Blocked 及来源。
+
+Context.update 修改由该配置加载器产生的组合，Enablement.update 修改该启用句柄管理的组合。
+更新由 Hub 任务组串行协调，退出时取消并等待在途请求；候选应用前保护请求者自身的 lifespan，避免请求一边等待一边结束自己。
+图锁在应用变更和停止旧实例期间串行保护注册记录，等待新 lifespan 就绪时释放；子组合进入父实例的清理任务时只等待自己的后代，实例关闭状态支持重复加入。
+关闭前由当前 asyncio Task 和 CURRENT_CONTEXT 确认发起实例，禁止从组合内部关闭包含自身的组合或 Hub，直接报告应从外部发起；按启用句柄的父实例链判断归属，父实例仍可正常关闭自己创建的子组合。已停止的 Context 不再生成候选，顶层启用与子组合启用均校验候选所属父实例。
+
+### 生命周期、故障与事件
+
+每个实例在同一 Task 中进入和退出完整 lifespan，AsyncExitStack 按逆序清理资源。
+提供者到达 yield 时校验全部 offers；消费者等待其已绑定提供者就绪，然后接收具体对象。
+候选应用前将实际服务 ready 等待与 lifespan Task 正在等待子组合启用的边一起检查，跨层级或多层嵌套的等待环在资源获取前报错；已就绪服务和祖先服务的直接提供不构成等待边。后台 Task 启用子组合不会被当作父 lifespan 的等待。
+同批清理中，属于待停止实例的 Context 关闭子组合时只等待自己的子实例，避免后台 Task 等整批清理、父实例又等该 Task 的循环。
+实例内的后台任务故障通过现有 TaskFailureSignal 传播到依赖者和所属子组合，独立实例继续工作。
+停止前禁用监听器，等待已入队的事件处理完，取消时取消正在执行的处理并丢弃其余事件，再按依赖逆序退出；
+异常与取消等待资源清理后传给原调用者。
+事件监听按绑定身份建索引，每个监听器一条队列，派发在 ContribHub 的任务组中执行，发布者不等待处理结果；
+监听器异常由 Hub 记录日志，其他监听器及该监听器的后续事件照常处理。
+状态变化通过 CONTRIB_CHANGED 发布，私有事件由组合指定 local。
+
+### 状态查询模块
+
+`contrib/status/` 的 `bazaar-contrib-status` 独立发行包导出 `ContribStatusQuery`、`CONTRIB_STATUS` 和 `status` 定义，
+只依赖兼容范围内的 `bazaar-core`，首版为 `bazaar-core~=0.3.0`。`status` 在 `bazaar_compute_node.contribs` 登记入口，声明 `offers=[CONTRIB_STATUS]` 和空配置，通过普通 lifespan 提供查询服务。
+`ContribStatusQuery.snapshot()` 同步返回 `tuple[ContribStatus, ...]`，每次读取 `ctx.snapshots` 的状态记录；
+已返回的快照保留查询时的状态，包含仍被宿主保留的 failed、blocked 记录。
+core 持有状态记录、数据类型和变更事件；查询服务的协议、key 与插件实现由 status 包持有。
+app 默认组合启用 `status`，消费者声明 `accepts=[CONTRIB_STATUS]` 并通过 accept 查询，
+status 实例通过 ctx.snapshots 查询所在 ContribHub 的全部实例状态。状态通知仍订阅 core 的 `CONTRIB_CHANGED`。
+
+### 发现与配置
+
+公共 entry point group 为 `bazaar_compute_node.contribs`，入口返回上述 `Contrib` 定义。
+模块以功能名称导出 `Contrib` 定义，例如 `storage`、`database`、`recorder`；入口声明引用模块路径与对应的导出对象名。
+`core` 的宿主通过 `importlib.metadata` 读取当前 Python 环境中的发行包及其入口，建立
+`发行包 → 入口名 → 导入对象` 的对应关系。启动时以配置中的 `entry` 值查找入口，再调用 `EntryPoint.load()` 取得定义。
+管理服务可以在独立的目标解释器进程中加载定义，取得配置模型、API 兼容信息和服务声明。
+实例资源在宿主进入 lifespan 时创建；已安装列表通过元数据展示包和入口。
+包名、版本、入口名和导入对象来自发行元数据，安装源来自配置中的依赖声明。
+同名入口冲突在加载边界报告具体发行包、版本和入口，模块定义使用该入口名作为管理及诊断名称。
+
+入口分组与发现协议由 core 持有。`core/README.md` 提供登记、发现、加载和启动的简明示例；
+完整插件开发指南放在 `core/docs/plugin-development.md`，说明统一分组、可自取的发行包及入口名、
+多入口包、导出 `Contrib` 对象、配置模型、服务与事件声明、本地绑定和 lifespan 的资源清理。
+社区插件使用同一分组登记，并安装到运行宿主的 Python 环境；登记与 uv、pip 或具体构建工具无关，
+遵循 PyPA entry points 规范。
+后续站点发布安排见 [文档站点](README.md#文档站点)。
+
+```toml
+# 独立模块发行包
+[project.entry-points."bazaar_compute_node.contribs"]
+logging = "bazaar_contrib_logging:logging"
+```
+
+`entry` 选择 entry point 的名字，发行包名用于包管理。一个包可以提供多个入口，
+这些入口统一在顶层配置；组合按已校验的业务输入明确创建各实例，框架按服务绑定建立依赖。
+
+```toml
+# 节点 config.toml 的节选。
+version = "5"
+
+contrib_indexes = [
+    "/home/user/.bcn/contrib/catalog.json",
+]
+
+[[contribs]]
+[[contribs.enabled]]
+entry = "storage"
+
+[[contribs]]
+[[contribs.enabled]]
+entry = "sqlite"
+
+[contribs.enabled.config]
+path = "bcn.sqlite3"
+
+[[contribs]]
+[[contribs.enabled]]
+entry = "database"
+
+[contribs.enabled.config]
+backend = "sqlite"
+
+[[contribs]]
+[[contribs.enabled]]
+entry = "logging"
+
+[contribs.enabled.config]
+level = "info"
+
+[[contribs]]
+[[contribs.enabled]]
+entry = "recorder"
+
+[[contribs]]
+[[contribs.enabled]]
+entry = "agent"
+
+[[contribs.enabled.config.agents]]
+name = "A"
+
+[[contribs.enabled.config.agents]]
+name = "B"
+```
+
+示例为配置节选，完整 agent 字段及 channel／harness 选择和参数由 agent 插件与所选 provider 的模型定义，保存到该条目的 config.agents。
+storage、database 来自 bazaar-contrib-storage，
+SQLite、日志与 recorder 由各发行包声明入口。
+storage、sqlite、database 和 logging 各创建一个默认共享实例。agent 组合使用普通 Python 函数从 config.agents 生成具体执行与 provider 条目；每个 agent 的私有服务和消息事件使用稳定绑定，DB 和公共审计事件可以共享。
+组合的 lifespan 使用 `ctx.enable(composition, local=(...))` 管理需要动态创建的子资源；全部已知静态条目显式展开后交给候选校验，动态子组合在启用边界校验。
+provider 由业务 builder 根据输入选择，运行资源由被创建的具体实例管理。
+
+filesystem 用户可以直接编辑 config.toml；CLI／server 页面选择入口、填写参数后，调用同一配置管理服务，经当前 CONFIG_STORE 保存。
+启用配置统一存于顶层 contribs；agent 插件拥有 agent 列表及 channel／harness 参数。管理服务校验模型和已展开的完整依赖图，再条件提交配置。
+配置列表展示来源声明，运行列表展示它生成的实例及状态；编辑来源条目影响其派生实例。具体实例的启停由拥有它的组合管理。
+
+### 配置载体与启动自举
+
+`bazaar-contrib-config` 是公共配置契约包，导出 `ConfigStore`、`ConfigSnapshot`、`CONFIG_STORE`，
+`ConfigConverter`、`ConfigCandidate`、`CONFIG_CURRENT`、`CONFIG_V1` 至 `CONFIG_V5` 及
+`ConfigConflict`、`ConfigUnavailable`、`ConfigFormatError`、`ConfigCommitUnknown`。载体负责文档读写、序列化与条件提交；
+版本模块负责历史输入识别、逐版转换、字段映射和候选生成；配置包通过 `CONFIG_CURRENT` 指定与其文档模型一致的当前版本服务，普通加载器消费该服务，
+经 core 的通用模型／服务依赖校验后组织条件提交。载体只处理数据序列化与存储，不解释业务字段或格式版本。
+core 的运行接口执行自举与加载阶段，app 提供存储后端启动输入和业务默认资源，版本包提供 `VERSIONS` 装配清单。CLI、管理页面、组合导入和升级预检使用同一管理入口、版本服务与当前载体。
+
+```python
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Protocol
+
+from bazaar_core import ServiceKey
+
+
+@dataclass(frozen=True)
+class ConfigSnapshot:
+    payload: Mapping[str, object]
+    revision: str
+
+
+class ConfigStore(Protocol):
+    async def read(self) -> ConfigSnapshot | None: ...
+
+    async def write(
+        self, payload: Mapping[str, object], *, expected_revision: str | None
+    ) -> ConfigSnapshot: ...
+
+
+CONFIG_STORE = ServiceKey[ConfigStore]("config.store")
+```
+
+`read()` 仅在所选来源尚无配置时返回 None，连接或权限失败抛出 ConfigUnavailable，
+文档解码失败抛出 ConfigFormatError。快照内容是独立的配置文档数据，宿主复制它生成候选；
+revision 是载体返回的不透明修订标识，与文档的结构 version 分别管理。
+`write(expected_revision=None)` 仅在配置不存在时创建；传入修订标识时仅替换仍匹配该快照的配置。
+检查和提交由载体作为同一个条件操作完成，竞争失败抛出 ConfigConflict。
+普通启动按输入与目标结构版本判断是否需要迁移回写；版本相同时直接加载候选，旧版本经过候选检查后条件提交。
+依赖准备阶段保留原配置快照，先使用内存候选同步依赖并校验目标组合，再按原修订条件提交默认或迁移后的文档。
+加载、默认配置创建、迁移和组合导入遇到修订冲突时直接向调用者报错；调用者重新读取、校验后决定是否再次提交。
+提交成功返回实际提交后的快照；明确未提交的失败保持先前配置可读取。
+写入后响应丢失等结果未知的情况抛出 ConfigCommitUnknown，管理入口重新读取并核对当前内容与修订，
+显示已提交、冲突或仍无法确认的实际状态，后续操作依据该状态继续。
+宿主记录载体入口、旧／新修订和变更摘要。
+
+默认发行包为 `bazaar-contrib-config-filesystem`，模块为 `bazaar_contrib_config_filesystem`，
+入口为 `config-filesystem`，声明 offers=[CONFIG_STORE]，在 app 的默认配置中声明安装要求。
+所选载体为 filesystem 且入口尚未安装时，app 先使用 config 包提供的 `config-memory` 创建临时 Hub，
+直接构造包含 filesystem 安装要求及 commands、contrib-manager 条目的临时文档，
+装配版本服务、命令与 manager，并通过 manager 的 bootstrap 操作安装 filesystem。
+该操作复用环境锁与 uv 命令执行，临时文档中的安装要求只包含 filesystem。
+临时 Hub 完整退出后，app 重新发现入口，由 filesystem 读取真实配置并准备业务依赖。
+已有 filesystem 及其他 configer 沿用原有单 Hub 启动流程；默认选择和显式选择 filesystem 使用同一判断。
+`MemoryConfigStore` 只持有当前生命周期内的配置快照，读写复制文档数据，以独立 revision 实现条件提交。
+filesystem 使用自身的 FileConfig 模型将 options 校验为路径序列，使用最后一个路径；未指定时使用 `(BCN_HOME 或用户主目录)/.bcn/config.toml`。
+读取 TOML 并以原始字节摘要作为 revision；
+经该接口提交的写入在同一配置锁内复核当前摘要，
+以同目录临时文件、fsync 和原子替换提交 TOML。
+权限及父目录处理复用现有平台规则，POSIX 上配置权限为 0600。来源没有配置时，宿主生成 V5 默认候选并以条件创建提交。
+
+默认载体沿用统一模块生命周期，FileConfigStore 实现上述文件读写契约：
+
+```python
+import os
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from bazaar_contrib_config import CONFIG_STORE
+from bazaar_core import Context, Contrib
+from pydantic import BaseModel, ConfigDict
+
+
+class FileConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    options: tuple[Path, ...] = ()
+
+
+@asynccontextmanager
+async def lifespan(ctx: Context, config: FileConfig):
+    path = (
+        config.options[-1]
+        if config.options
+        else Path(os.environ.get("BCN_HOME") or Path.home()) / ".bcn" / "config.toml"
+    )
+    async with FileConfigStore(path) as store:
+        ctx.offer(CONFIG_STORE, store)
+        yield
+
+
+filesystem = Contrib(
+    config=FileConfig,
+    offers=[CONFIG_STORE],
+    lifespan=lifespan,
+)
+```
+
+```toml
+# bazaar-contrib-config-filesystem 的 pyproject.toml
+[project.entry-points."bazaar_compute_node.contribs"]
+config-filesystem = "bazaar_contrib_config_filesystem:filesystem"
+```
+
+自定义载体依赖 bazaar-contrib-config，在相同 entry point group 登记自己的入口，声明并实际提供 CONFIG_STORE。
+app 将按传入顺序收集的原始字符串序列绑定到载体模型的 options 输入；每项的格式、解析、校验和默认值由所选载体定义。
+其配置模型解析连接地址、配置标识、凭据环境变量引用等作者需要的参数；客户端库属于自己的发行依赖，
+连接由 lifespan 创建并在退出时关闭。配置中心载体按其后端实现条件写入和旧版本保留。
+宿主通过公共接口读写，实际协议与客户端实现由载体拥有。
+
+启动选择固定使用以下输入规则，配置命令与升级入口复用相同选择：
+
+- `--configer <entry>` 选择载体入口；缺省为 config-filesystem，缺失时按上述临时 memory 流程安装。
+- `--configer-options <option>` 可重复使用，按出现顺序提供所选入口的原始 options；缺省为空序列。
+  格式解析和 Pydantic 校验由该载体的模型在装配边界执行。
+- `--config <option>` 是 --configer-options 的别名，可重复使用并与其混用；帮助说明为 `Legacy alias for --configer-options.`。
+  filesystem 将每项解释为路径，最后一个路径生效；其默认路径也由 filesystem 处理。
+
+以下第三方入口示例采用该载体约定的 key=value 格式：
+
+```sh
+bcn run
+bcn run --config /srv/bcn/config.toml
+bcn run --configer acme-config --configer-options url=https://config.example.com --configer-options key=node-a --configer-options token_env=ACME_CONFIG_TOKEN
+```
+
+core 的 ContribHub 从 Python 发行元数据发现入口，检查 API、配置参数和期望服务。配置载体先提供 CONFIG_STORE，版本链提供 CONFIG_CURRENT，然后普通加载器读取并转换文档。
+载体的连接资源由自己的 lifespan 创建，所声明的依赖按当前完整图校验。加载器提供经校验的 `COMPOSITION`，在同一个 Hub 装配业务条目；业务和配置操作结束后按依赖逆序释放版本服务与载体。
+
+### 配置版本模块
+
+`bazaar-contrib-config-versions` 的模块为 `bazaar_contrib_config_versions`，由 app 以各自所需的三段式兼容范围安装，首版为 `~=0.3.0`。
+五个入口省略配置模型，lifespan 只接收 Context，分别提供公共包中唯一的 typed key。
+本次发行的自举组合选择 config-v5，按下表依赖先装配 V1，再逐个装配到 V5；
+载体选择来自启动输入，版本组合来自发行定义，二者都先于完整业务文档装配。
+版本包导出 `VERSIONS`，保存五个入口名及期望服务；`CONFIG_CURRENT` 当前引用 `CONFIG_V5`，由配置契约与模型共同维护。
+app 直接装配这份清单，宿主按已安装元数据取得定义并依据 accepts 建立依赖图。新增版本时更新配置模型、当前服务引用和版本包的清单。
+
+| 入口 | accepts | offers | 本版服务负责的行为 |
+| --- | --- | --- | --- |
+| config-v1 | 空 | CONFIG_V1 | 识别和解析 V1；BCN 文档缺省 version 作为 V1 输入 |
+| config-v2 | CONFIG_V1 | CONFIG_V2 | 将支持的旧输入转换到 V2，持有 V1→V2 转换 |
+| config-v3 | CONFIG_V2 | CONFIG_V3 | 将支持的旧输入转换到 V3，持有 V2→V3 转换 |
+| config-v4 | CONFIG_V3 | CONFIG_V4 | 将支持的旧输入转换到 V4，持有 V3→V4 转换 |
+| config-v5 | CONFIG_V4 | CONFIG_V5 | 将支持的旧输入转换到 V5，持有 V4→V5 字段映射及所需包生成 |
+
+各 key 的类型为 `ServiceKey[ConfigConverter]`，诊断名采用 config.version.1 至 config.version.5。
+`ConfigConverter.convert(payload: Mapping[str, object]) -> ConfigCandidate` 接收原 BCN 文档，返回目标版本内容、
+字段变更摘要与 required packages；候选模型和包需求类型由 bazaar-contrib-config 定义，包规格使用已确定的 package/source/版本范围。
+每版收到已是本版的输入时返回该版本候选；更早输入先调用前一版的 convert，再执行上一版到本版的转换，
+各步合并已有摘要及包需求。目标服务在文档读取边界诊断不支持的版本。
+例如宿主把 V3 文档交给 CONFIG_V5：V5 调 V4，V4 调 V3 取得原内容，然后只执行 V3→V4→V5。
+新版入口和已有入口都保持实际服务供给与 ContribHub 的就绪校验。
+
+V5 模块的完整登记方式如下；V2 至 V4 按相同方式取得上一版服务，V1 提供最初解析服务。
+V5Converter 的 convert 按上面的规则调用上一版，并执行本节的 V4→V5 映射。
+
+```python
+from contextlib import asynccontextmanager
+
+from bazaar_contrib_config import CONFIG_V4, CONFIG_V5
+from bazaar_core import Context, Contrib
+
+
+@asynccontextmanager
+async def v5_lifespan(ctx: Context):
+    ctx.offer(CONFIG_V5, V5Converter(ctx.accept(CONFIG_V4)))
+    yield
+
+
+v5 = Contrib(
+    accepts=[CONFIG_V4],
+    offers=[CONFIG_V5],
+    lifespan=v5_lifespan,
+)
+```
+
+```toml
+# bazaar-contrib-config-versions 的 pyproject.toml
+[project.entry-points."bazaar_compute_node.contribs"]
+config-v1 = "bazaar_contrib_config_versions:v1"
+config-v2 = "bazaar_contrib_config_versions:v2"
+config-v3 = "bazaar_contrib_config_versions:v3"
+config-v4 = "bazaar_contrib_config_versions:v4"
+config-v5 = "bazaar_contrib_config_versions:v5"
+```
+
+已发布的前三步转换内容及历史行为保留，分别由 V2／V3／V4 服务持有。
+下一版追加 config-v6、CONFIG_V6 和 V5→V6 转换，更新配置契约的 CONFIG_CURRENT、文档模型及版本包的 VERSIONS，前五版继续提供其原有转换服务。
+旧文档中的 version 标识输入格式，自举目标入口标识本次发行需要的输出格式。
+版本模块与载体的连接资源、服务归属及退出使用同一个 ContribHub；随本次宿主退出，在业务及在途配置操作结束后释放。
+
+### V5 配置与版本转换
+
+配置文档以顶层 `version="5"` 标识结构版本，与 BCN／模块的发行版本分别管理。
+顶层保存 `version`、`contrib_indexes` 和统一 `contribs`；默认 agent 的实体配置归 `entry="agent"` 条目的 `config.agents`。本地传输地址、数据库、
+审计等能力参数保存在其所属模块的 config。
+默认 agent 模型保留 id、name、mode、idle_timeout、channel 数组及 provider kind 和业务参数的实体含义；旧 runtime 数组映射到该模型的 harness 数组。
+运行实例由组合明确声明，内部标识由宿主生成，私有绑定由组合持有。
+
+版本服务沿 V1→V2→V3→V4→V5 推进，保留前三步的已发布转换，由 V5 服务追加 V4→V5 转换和目标版本候选。
+版本缺省的既有 BCN 文档沿 V1 入口处理，载体返回 None 时直接生成 V5 默认组合。
+V4→V5 在内存中生成候选配置和 required packages；
+用原字段的有效默认值补全输入，再根据以下映射形成对应入口及参数。
+官方旧 provider 的名称到新入口使用本节的明确映射表，转换在配置边界执行并接受相同 Pydantic 校验。
+额外旧 provider 没有既定映射时，保留原快照，列出其原入口、参数位置及目标模块配置需求，由用户选择对应的新入口。
+
+| V4 输入 | V5 结果 | 保留与默认规则 |
+| --- | --- | --- |
+| node.storage="sqlite"、node.database_name | storage、sqlite、database；database.config.backend="sqlite"，sqlite.config.path 为原数据库位置 | 缺省使用原 bcn.sqlite3；相对路径按原数据目录解析，保持同一数据库文件 |
+| node.audit="logging"、node.logging | logging 与对应 config | 保留日志参数；默认 audit 仍映射 logging |
+| 每个节点的本机通信 | commands、sidecar 及本机实现入口 | 承接 0.2 的 bcn.sock 通信，默认启用；与 node.control 的选择无关 |
+| node.endpoint | 所选 sidecar 实现的 config.endpoint | Unix 保留路径，Windows 按原路径身份生成原生管道地址；缺省由实现包提供本机地址 |
+| node.lang | — | V5 文案由所属功能包持有，默认使用英语 |
+| 原 agent、channel／runtime 配置 | agent.config.agents 及其 channel／harness 数组；对应公共登记与 provider 启用条目 | id、name、顺序、mode、超时、模型、effort、sandbox、env、凭据引用及 provider 参数逐项保留 |
+
+V4→V5 为 node-management 生成无参数入口。
+执行、消息、协作、Reminder 等原有固定能力写成顶层模块条目；channel／harness 注册按原有 provider 选择生成。
+server／starlink 相关字段随第 11 阶段交付对应功能时补充 V4→V5 映射；已有 V5 读取保留原启用列表。
+默认 agent 的配置整体写入 agent 启用条目的 config；原 runtime 字段转为 harness，按 provider 模型保留数组顺序和参数。
+Telegram、Lark、WeCom 分别映射到同名 builder 和运行入口；Codex 映射 codex-builder／codex，
+Claude Code 的原 kind="claudecode" 映射 claudecode-builder／claudecode。
+不同 agent 使用同一 provider 时复用相同定义，各输入保留自己的参数，由组合明确创建独立实例。
+node.server 被审计和控制共用时只生成一个 starlink 配置，原参数表中的每个字段明确归入该入口的连接、事件上报或请求设置。
+事件上报与远端请求独立选择；原 audit="logging" 的节点仍保留 logging，原 control="none" 的节点保持远端请求停用。
+未被原 audit／control 选择的 logging／server 参数表按原读取行为忽略。旧存储实现固定为 SQLite，迁移继续指向原数据库。
+已设置的自定义 provider 使用已确定的映射和目标入口，缺少对应关系时提示用户补齐该部分配置。
+
+每个被转换字段都记录目标配置位置；没有映射的非空字段或歧义返回具体位置及处理建议，原快照保持可恢复。
+凭据引用、环境映射、数据目录、工作区、数据库文件和 agent 身份继续指向原资源。
+转换产生新配置与包需求，数据迁移由相应 schema 模块按原 ledger 执行。
+版本读取、状态推进、V4→V5 映射和候选生成归配置版本模块；配置包的普通加载器经 `ctx.validate()` 校验候选后通过 CONFIG_STORE 条件提交，各能力阶段同步其字段映射及新配置模型。
+首阶段交付 V5 模型和版本链、候选及提交机制；数据库、provider、远程和管理阶段分别补齐映射和产物，
+通过真实已交付组合验证其转换。最终发行阶段使用全部正式模块完成完整旧配置升级。
+
+升级与首次加载使用以下顺序：
+
+1. 根据自举选择装配 CONFIG_STORE 和版本包的 VERSIONS 组合，读取原快照与修订，调用 CONFIG_CURRENT 服务在内存中推进到当前格式，生成候选配置、字段变更摘要及所需包清单。
+2. 升级使用含目标宿主、所选载体包和固定版本组合的隔离预检环境，转交同一自举参数，由目标解释器执行迁移预检，
+   将所需包和保存的默认／可选／第三方依赖一起交给自身 uv，
+   保持已有来源与版本固定；所需包在最终安装前加入同一个候选 pyproject 和 pylock。
+   额外 provider 使用其已有来源或用户选定来源。
+3. 安装完成后在目标解释器加载入口定义，以 Pydantic 校验配置，展开实例与 accepts 并检查完整依赖图。
+   直接 bcn run 加载旧文档时使用已安装环境完成同样检查；缺少包时报告所需包和安装操作，待安装后重试。
+4. 使用读取时的 revision 调用 CONFIG_STORE.write，条件提交由载体完成。
+   ConfigConflict 时重新读取，重新执行转换及全部候选校验后再提交；更新后的所需包一并重新解析。
+5. 记录转换结果、载体、旧／新修订、所需包与配置摘要；V5 后续读取使用已保存文档，
+   启用条目、停用选择和后端参数继续保留。
+
+配置并发保护由载体的条件提交完成，依赖解析和安装使用同一环境操作锁。
+版本推进和候选校验期间保留原快照，包安装失败保留原配置及声明并报告实际环境状态。
+未知未来版本在读取边界诊断；重复读取成功迁移后的 V5 得到相同启用配置。
+V5 手写文件、CLI、页面和显式配置导入使用同一模型与保存入口。
+默认组合用于新建，组合导入按已有条目保留参数、停用及 DB 选择。
+
+以下展示 V4 存储与管理配置及对应的 V5 节选，其余能力按映射表同步生成：
+
+```toml
+# 升级前的 V4 节选。
+version = "4"
+[node]
+storage = "sqlite"
+database_name = "bcn.sqlite3"
+audit = "logging"
+version_check = false
+```
+
+```toml
+# 升级后的 V5 节选。
+version = "5"
+
+[[contribs]]
+[[contribs.enabled]]
+entry = "storage"
+
+[[contribs]]
+[[contribs.enabled]]
+entry = "sqlite"
+[contribs.enabled.config]
+path = "bcn.sqlite3"
+
+[[contribs]]
+[[contribs.enabled]]
+entry = "database"
+[contribs.enabled.config]
+backend = "sqlite"
+
+[[contribs]]
+[[contribs.enabled]]
+entry = "logging"
+
+[[contribs]]
+[[contribs.enabled]]
+entry = "node-management"
+```
+
+### 0.2 Bazaar Server 配置与数据源连续升级
+
+server 的设置、数据库与登录密钥都位于 BCN 的数据目录 ~/.bcn，见 [server.md](server.md)。
+server 的条目与节点的条目一样在配置顶层启用。bazaar-contrib-server-database 的 server-database 与节点 storage 的 database 条目对应，用 `ctx.enable(..., local=(STORAGE, backend_key(...), DB, SCHEMA))` 在私有绑定中启用 server 自己的 storage、所选后端、database 与 schema，
+缺省为通用 sqlite 的私有实例，以 name 参数打开 ~/.bcn/bcs.sqlite3，与节点的 bcn.sqlite3 分开；再以 SERVER_DB 与 SERVER_SCHEMA 把这份数据库提供到顶层。
+节点使用 DB 与 SCHEMA，server 的模块 accept SERVER_DB 与 SERVER_SCHEMA，两边可以选用不同的后端，公共审计事件共享。
+复用的 bazaar-contrib-config／bazaar-contrib-storage 与通用 sqlite 只负责读写，表结构与查询归 server 的业务 contrib。
+
+server 的设置写在各自所属条目的 config 里，结构与有效缺省值沿用原 Bazaar Server 的 Pydantic 模型。登录签名密钥为 ~/.bcn/session.key。
+
+0.2 的设置在 server 的条目启动之前写入：还没有 ~/.bcn/config.toml 时，server-management 的默认配置读取 ~/.bcs/config.toml；
+已有 0.2 节点配置时，V4→V5 转换在 ~/.bcs 存在时声明 server 的包、启用其条目并写入这些设置。
+server-database 打开数据库之前，若 ~/.bcs 存在且 server 的数据库还不存在，把 session.key 与 ~/.bcs/bcs.sqlite3 复制到 ~/.bcn，数据库最后复制；
+之后由 server-migrations 按原 schema_migrations 的 v01–v07 接续迁移；~/.bcs 只读，原样保留。
+
+| 0.2 Bazaar Server 配置或原资源 | 0.3 中的位置与规则 |
+| --- | --- |
+| listen，缺省 127.0.0.1:8765 | http 条目的 listen，保持 host:port、IPv6 及原解析语义 |
+| storage，缺省 sqlite；同名后端参数表 | server-database 条目的存储选择及参数，由所选后端实现解析 |
+| ~/.bcs/bcs.sqlite3 | 导入为 ~/.bcn/bcs.sqlite3，由 server-database 中通用 sqlite 的私有实例打开 |
+| session_minutes，缺省 10 | server-access 条目的设置，保持本地登录有效时长 |
+| retention_days，缺省 30 | 活动模块条目的设置，保持原事件保留策略 |
+| ~/.bcs/session.key | 导入为 ~/.bcn/session.key，server-access 读取，保持签名和 cookie 语义，既有未过期登录继续校验 |
+| accounts、roles、account_roles、auth_settings、oidc_providers、oidc_identities、relations | server-access 使用导入后的原账户、密码哈希、角色、权限和分享；账户的 theme 与 language 由 server 本体按账户读取 |
+| computers、events、refs 等既有业务数据 | server-computer、活动模块与 server 本体分别使用导入后的 computers、events 与 refs，保持 computer 身份、secret_hash、事件顺序与关联 |
+
+包拆分完成后，业务查询直接使用上述数据布局，既有主键、凭据、事件关联和权限在事务内保留。
+Node 的 agent、messages-node、collaboration、reminder 及 Server 各自持有业务表的迁移定义，
+通过统一 schema 服务登记当前结构的初始基线和按版本表达的抽象操作／数据变更。
+已有数据库按原 schema_migrations 或统一账本的版本记录确定起点；业务包显式声明自己的历史身份及账本字段，
+schema 引擎为登记的业务 schema 接续缺少的版本，并把进度记录在统一的 contrib_schema_migrations 中。
+旧账本保留已有记录，初始化后以统一账本推进。版本进度与 checksum 无关，统一实现按版本判断执行进度。
+空库直接创建所选模块的基线结构并记下基线版本；后续依次执行新增版本。
+业务数据库服务同时依赖所选 DB 和对应迁移插件的就绪服务，确保业务读写发生在迁移完成后；Node 与 Server 可分别绑定数据源。
+
+升级验收从实际 0.2 发行环境生成隔离的 ~/.bcs，再以 0.3 候选宿主与实际模块 wheel 安装 bazaar-compute 与 server-management 启动：首次启动导入 ~/.bcn，
+覆盖有效缺省值及既有迁移版本，核对导入后的表结构、行数、历史 ledger 与业务身份，
+验证旧账户登录、未过期 cookie、角色／分享权限、历史与 refs 查询，~/.bcs 保持不变。
+节点协议不兼容 0.2；0.2 节点上报到 0.3 server 失败时只影响上报本身，不阻塞节点运行。
+升级后新事件写入 ~/.bcn 中导入的数据库，并能通过 server 的页面查询；重复启动不再导入，数据与迁移结果保持稳定。
+同进程使用另一份隔离节点配置与数据库，分别修改节点和 Bazaar Server 设置并写入各自业务数据，核对两边配置文件、数据库路径与实际查询结果。
+完整验收使用隔离环境的真实 V1／V2／V3／V4 文件，覆盖多 agent／provider、远端连接、凭据引用，并验证重复加载与迁移后真实运行结果。
+
+### 默认配置生成与后端切换
+
+`bazaar-compute-node` 的 `bazaar_compute_node/defaults.toml` 提供初始节点组合模板。
+manager 构建从 BCN uv.lock 的 contrib/ 工作区成员自动生成 package/source 条目，按包名排序形成官方索引；官方源使用 PyPI，未安装的包同样随 manager 索引资源发行。
+默认配置通过 `resource://bazaar_contrib_manager/catalog.json` 明确选择包内索引，由 manager 读取并管理缓存；配置中的索引列表继续支持追加和删除。
+初次创建配置时，经 CONFIG_STORE 将 V5 组合提交到所选来源，filesystem 默认写入 `config.toml`，包括 `commands`、`storage`、`sqlite`、`database` 等启用配置，
+并明确写入 `database.config.backend="sqlite"`、默认 agent 的 `config.agents=[]`。必要包通过宿主发行依赖安装，启动按保存的配置发现入口和建立服务依赖。
+可选 server 包通过发行元数据导出节点入口，用户选择入口及参数后经节点配置管理服务校验并保存；
+节点已有存储选择、参数及停用选择继续保留。
+服务端自己的配置与业务组合由 server 的独立载体和发行资源管理，监听、登录及 storage 等 Bazaar Server 设置直接从原配置读取。
+安装操作将包依赖声明写入配置并展示导出的入口；`add --enable ENTRY` 在安装后保存指定入口，`add --enable` 保存该包的全部入口。
+后续启动读取用户保存的配置，升级通过配置版本迁移保留停用条目、参数和后端选择。
+已有配置缺少 DB 选择入口或所选后端时，装配诊断列出缺失服务及消费方。
+
+切换 PG 的完整流程为：
+
+1. 从模块索引选中 PG 的发行包和包源，将其加入候选依赖组合并交给目标宿主 uv 安装。
+2. 安装成功后，从发行元数据取得 PG 入口；用户在目标宿主顶层 contribs 启用，并填写连接参数。
+3. 更新同一组合已有 `database` 条目的 `config.backend` 为 PG 注册的后端名，保存配置。
+4. 下次启动按 `storage → PG → database → 业务` 装配；业务仍使用 `ctx.accept(DB)`。
+5. 用户选择保留 SQLite 启用条目时，两后端各持有自己的连接；移除 SQLite 条目后，其连接随旧实例退出关闭。
+
+例如假设 `bazaar-contrib-pg` 的入口名和注册后端名均为 `pg`，保存后的存储配置如下：
+
+```toml
+# config.toml 的存储组合；SQLite 与 PG 同时启用，业务选择 PG。
+[[contribs]]
+[[contribs.enabled]]
+entry = "storage"
+
+[[contribs]]
+[[contribs.enabled]]
+entry = "sqlite"
+[contribs.enabled.config]
+path = "bcn.sqlite3"
+
+[[contribs]]
+[[contribs.enabled]]
+entry = "pg"
+[contribs.enabled.config]
+dsn = "postgresql://localhost/bcn"
+
+[[contribs]]
+[[contribs.enabled]]
+entry = "database"
+[contribs.enabled.config]
+backend = "pg"
+```
+
+`entry="pg"` 对应发行包声明的模块入口，`backend="pg"` 对应该入口登记的存储后端名。
+入口名和后端名分别由模块作者声明，package 名称、入口名、后端名之间的对应关系由元数据和服务声明建立。
+database 的配置模型编辑 `backend` 字段；用户修改已有选择条目，管理服务更新原条目。
+包安装操作提交配置中的依赖声明，启用和切换操作提交入口及其参数，管理页面分别提供这些操作。
+所选连接上的模型、schema 和业务查询继续由对应功能模块管理。
+
+### 模块索引与安装入口的关联
+
+`contrib_indexes` 是宿主配置中的本地文件路径、HTTP(S) 地址或 `resource://<package>/<path>` 包内资源地址列表，首次配置声明 manager 发布的官方包内索引，用户可以追加私有或其他维护者的索引。
+管理服务按位置类型读取文件、在线 JSON 或包内资源，分别记录缓存与读取状态；来源读取失败显示原因及已有缓存，节点继续启动。
+索引是已登记模块包的安装清单，每个条目包含 `package` 和 `source`，例如：
+
+```json
+{
+  "contribs": [
+    {
+      "package": "bazaar-contrib-logging",
+      "source": "https://pypi.org/simple/"
+    }
+  ]
+}
+```
+
+`source` 是 uv 使用的 Python 包源 URL，与读取这份模块索引的本地路径或 HTTP(S) 地址分别保存。
+contrib 市场展示各索引中登记的包，用户按包名和来源选择安装目标；包版本、依赖和下载交给 uv。
+安装后通过发行元数据展示该包的入口，用户再选择入口和参数，生成上面的运行配置。
+完整对应关系为：
+
+```text
+模块索引(package, source)
+    → uv 安装发行包
+    → 发行元数据(package, version, entry point, import target)
+    → 配置文档的 contribs(contrib, config)，由所选 CONFIG_STORE 保存
+    → 按服务依赖进入 lifespan、登记服务
+```
+
+同一包和包源在多个索引中出现时合并条目并保留索引来源；同名包的不同包源分别展示，安装时显式选择。
+同一宿主的一个发行包名对应一个已安装来源，改选其他来源时更新该包的候选依赖声明，再解析完整组合。
+包依赖规格和所选包源写入目标宿主的配置，升级沿用该记录。索引位置被移除或暂时不可用时，
+已安装模块仍依据配置中的依赖声明及入口参数管理。
+索引发布、缓存、详情展示与市场页面的操作流程见 [contrib 市场计划](bazaar.md)。
+
+## 统一宿主与可选 server
+
+启动入口统一为 `bcn run --config <path>`，模块统一配置在顶层 contribs，具体实例按组合展开和服务绑定创建，默认 agent 的 config.agents 可以为空。
+普通节点按默认资源生成的配置运行；与 bazaar-compute 一起安装 server-management 后，它的默认配置在顶层启用 server-database、
+server 本体、server-access 与已交付的功能模块。同一个进程可以同时运行 agent。
+
+```toml
+# bazaar-contrib-server-migrations 的 pyproject.toml
+[project.entry-points."bazaar_compute_node.contribs"]
+server-migrations = "bazaar_contrib_server_migrations:migrations"
+```
+
+```toml
+# bazaar-contrib-server 的 pyproject.toml
+[project.entry-points."bazaar_compute_node.contribs"]
+server = "bazaar_contrib_server:server"
+server-theme-night = "bazaar_contrib_server:night"
+server-theme-day = "bazaar_contrib_server:day"
+```
+
+```toml
+# bazaar-contrib-server-access 的 pyproject.toml
+[project.entry-points."bazaar_compute_node.contribs"]
+server-access = "bazaar_contrib_server_access:access"
+```
+
+```toml
+# bazaar-contrib-server-github 的 pyproject.toml
+[project.entry-points."bazaar_compute_node.contribs"]
+server-github = "bazaar_contrib_server_github:github"
+```
+
+```toml
+# bazaar-contrib-server-computer 的 pyproject.toml
+[project.entry-points."bazaar_compute_node.contribs"]
+server-computer = "bazaar_contrib_server_computer:computer"
+server-relay-memory = "bazaar_contrib_server_computer:relay_memory"
+```
+
+```toml
+# bazaar-contrib-server-database 的 pyproject.toml
+[project.entry-points."bazaar_compute_node.contribs"]
+server-database = "bazaar_contrib_server_database:server_database"
+```
+
+```toml
+# bazaar-contrib-server-management 的 pyproject.toml
+[project.entry-points."bazaar_compute_node.defaults"]
+server = "bazaar_contrib_server_management:defaults"
+```
+
+```toml
+# bazaar-contrib-starlink 的 pyproject.toml
+[project.entry-points."bazaar_compute_node.contribs"]
+starlink = "bazaar_contrib_starlink:starlink"
+```
+
+server-database 以私有绑定装配 server 自己的数据库，以 SERVER_DB 与 SERVER_SCHEMA 提供；server 的其余条目在顶层启用，设置写在各自的条目里。
+server 本体接受 HTTP，挂载外壳与嵌入工具，提供侧边栏、权限点与主题的登记入口；server-overview 提供概览内容的登记；server-access 提供登录与权限；功能模块在同源 iframe 中提供各自的页面。
+server-computer 注册与节点 starlink 通信的三个 HTTP 接口，持有电脑身份、中转契约与 call。
+starlink 是独立发行包和普通节点插件，持有 listen 长轮询、announce 结果回传、report 事件上报、身份、请求关联及退避重试资源。
+新建节点默认不启用 starlink；用户配置目标 server 后启用其入口。第 12 阶段完成 starlink 后，再按原 audit／control 选择补充 V4 的事件上报和远端请求迁移。
+节点通过 listen 主动收取 server 的调用，通过 announce 独立回传对应结果与错误；请求响应的推进由 starlink 自身生命周期管理。
+调用沿用 sidecar 的 Request（service、method、args、kwargs），结果沿用 Result／Failure，并附带同一调用编号；协议见 [server.md](server.md)，遵循该协议的实现都可作为对端。
+starlink 提供私有的 sidecar SERVER 实现并在子组合中启用 sidecar 实例，调用只到达 contrib 以 RemoteEntry 声明的成员。
+业务通过 announce 独立发布公共审计事件，starlink 的 listen 处理器入队后经 report 上报，server-computer 收到后 announce，交给活动等模块投影。
+agent／harness 的行为事件、原始载荷、来源顺序及时间关联按[完整行为事件与 NodeAudit](roadmap.md#完整行为事件与-nodeaudit)发布和上报，
+agent 依赖 NodeAudit 始终发布，记录方按组合选择订阅；Bazaar Server 活动页、历史和网关分析各自决定消费范围及统计口径。
+审计事件处理和请求响应分别管理；announce 直接回传调用结果，审计记录由业务独立发布并经 report 上报。
+HTTP 输入模型、身份校验、传输和请求关联由 starlink 与 server-computer 管理，服务接口及业务规则仍归提供 offer 的功能包。
+包的 pyproject.toml 声明代码依赖并导出入口，节点配置保存所选入口及参数；运行时按 accepts 建图。
+这两种依赖分别管理：server 本体先提供登记入口，功能模块再登记页面、权限点与概览内容，避免组合与业务之间形成运行循环。
+HTTP 与页面框架的公共类型分别由 bazaar-contrib-http 与 bazaar-contrib-server 导出，功能包导入公共契约；server-management 的默认配置选择功能模块。
+完整包清单、运行依赖、用户安装流程及各阶段验收见 [统一组合计划](roadmap.md#统一宿主与-server-组合)。
+
+### 并行运行与资源清理
+
+lifespan 完成初始化并确认就绪后到达 yield，宿主继续装配其他模块。
+持续服务循环由模块管理的后台任务或子进程执行，应用入口统一等待退出信号。
+各模块根据自身实现选择异步任务、线程或子进程，确保 HTTP 服务、连接等待与 agent 执行可以各自推进。
+任务故障接入既定通知契约，退出时停止新工作、完成在途操作、结束并等待所属任务或进程，最后释放资源。
+
+server 本体的生命周期在 yield 前挂载外壳与静态资源并提供登记入口，在退出时撤销挂载：
+
+```python
+from contextlib import asynccontextmanager
+
+from bazaar_core import Context
+
+
+@asynccontextmanager
+async def server_lifespan(ctx: Context):
+    web = ctx.accept(HTTP)
+    shell = Shell()
+    async with (
+        web.mount("/static/server", shell.assets),
+        web.route("/{module}/{path:path}", shell.page, methods=["GET"]),
+    ):
+        ctx.offer(SERVER, shell)
+        yield
+```
+
+HTTP 包提供共用的路由、挂载和监听能力；server 本体登记外壳、静态资源与统一总线，功能模块登记各自的界面，server-computer 登记两端协议的接口。
+每项登记在 async with 退出时撤销，并等待在途请求结束。登记入口的归属由同一 ContribHub 的 server 实例管理，功能模块退出后才退出 server 本体的 lifespan 并撤销服务。
+
+分开部署时使用独立配置分别执行 bcn run，各进程拥有自己的数据库、socket、端口和运行目录。
+混合组合与分进程组合都通过实际 HTTP 请求、agent turn、长连接和退出验证：一个服务等待期间另一个仍有进展，
+所属资源随模块生命周期结束。bcn run 依据声明装配和管理模块，具体执行方式属于模块实现。
+
+## 启动接入与首个日志模块
+
+`bcn run --config <path>` 在 app 中收集启动输入，读取随包默认资源，装配版本包的 VERSIONS 并绑定配置加载器，
+直接创建 ContribHub，进入 core 的统一 run 异步上下文管理器；node-management 的 run 命令激活配置并等待退出信号。
+core 发现入口、装配所选载体及发行版本组合，启用提供 `COMPOSITION` 的配置加载器后校验并装配业务依赖；
+组合管理 agent 实例的创建、更新和停止。启动完成后，健康状态显示实例标识、创建者与运行状态。
+外部控制入口开放前，需要的模块服务已经就绪；退出时先结束请求与 agent，再清理模块和共享资源。
+
+日志模块在 lifespan 中按自身配置创建 QueueHandler／QueueListener 和输出 handler，接收标准库 logging 记录。
+记录保留发生时间、级别、Python 调用位置、CURRENT_CONTEXT 中的 contrib 与实例 id，以及异常堆栈。
+日志定义在顶层启用一次，退出时排空队列并释放自己的线程、文件和 handler；多个宿主分别持有自己的资源。
+实例启动与运行异常由 core 直接通过标准 logging 报告；当前状态通过 ctx.snapshots 查询，变化由所需功能订阅 CONTRIB_CHANGED。
+
+日志包通过公共模块入口接入，公共框架和包发现代码均不写日志专用分支。
+测试从独立包的 wheel 元数据发现入口，启动真实节点、产生日志及资源异常、观察日志，再结束进程验证清理。
+
+## 模块管理与自身 uv
+
+`bcn contrib` 提供索引列表与增删、索引条目列表、安装、卸载、启用、停用、已安装列表和详情。
+`bcn contrib add <name>` 接受短名或完整发行包名，短名通过已配置索引中的 `bazaar-contrib-<name>` 条目确定包名与来源。
+例如 `bcn contrib add codex --enable codex` 安装 bazaar-contrib-codex，并在安装确认后启用其 codex 入口。
+包安装将完整依赖规格保存到顶层 contribs；enable 保存所选入口及参数，disable 移除入口并保留包声明，同时校验剩余依赖。
+安装状态与启用状态独立记录；不传 `--enable` 只安装，`--enable ENTRY` 启用指定入口，单独 `--enable` 启用该包导出的全部入口。
+入口清单直接读取发行元数据，管理入口展示各入口与配置模型，所选条目经配置校验后保存；结果分别显示实际安装版本与配置保存状态。
+模块通用参数由各入口的 Pydantic 模型校验并保存到对应 contribs[].enabled[].config；编辑更新所选已有条目，保留未修改的参数与其他组合选择。
+agent 的连接／执行参数和凭据引用由 provider 实体模型校验，保存到 agent 条目 config.agents 中相应实体的 channel／harness 配置。
+命令定义、帮助、提示与输出由登记命令的功能包持有；功能包选择自己的文案及渲染方式。同步 Click 命令树构造在工作线程完成。
+命令名沿用常见的操作词，命令与选项帮助采用 uv／pip 的“动作＋对象”英语短语，直接说明用户操作；功能统一称为 contrib，安装包称为 package。
+管理 CLI 参照 uv 的实际文本输出：包列表和索引使用对齐列，详情逐行展示字段及入口选项，操作分别显示包变更、配置保存、运行应用和需要重启的结果。
+manager 自持 Jinja 依赖与随包发行的 resources/*.tpl 文本模板，沿用主分支的资源命名，以 PackageLoader 加载并启用 StrictUndefined；Python 整理展示数据、计算表格列宽，模板持有文案及排版，操作查询复用结果模板。模板加载与渲染在工作线程执行。
+查询结果写入 stdout，操作提示和错误写入 stderr；失败时保留已完成步骤、操作 ID 与恢复提示，并返回失败退出码。
+卸载失败说明具体包名与实际阻塞条件：配置中没有该包时指向 `contrib configured`；仍有该包的 contrib 时列出名称，说明用 `contrib configured` 查看编号、`contrib disable INDEX` 停用后重试卸载。
+输出依据本机 uv 0.12.2 的实际安装、列表、详情、重复安装和卸载行为，以及 [uv 环境检查文档](https://docs.astral.sh/uv/pip/inspection/) 的列格式约定。
+索引读取与安装管理提供独立的 typed 服务契约，CLI 与后续 contrib 市场页面消费同一实现。
+管理请求明确目标宿主、包规格和模块入口；已有配置与实例由管理列表提供选择目标及操作句柄。
+实例句柄由宿主返回，管理界面和调用入口使用它完成操作。服务提供自动生成的操作 ID、进度与终态查询，
+结果包含安装版本、配置状态和下次启动生效状态。市场页面及远端调用入口在第 15 阶段接入。
+
+本地 `contrib add`、模块配置编辑和后续 `agent add` 在节点未运行时使用短生命周期管理组合。
+app 调用 core 装配所选配置载体及版本服务，并按操作进入配置、命令登记、模块管理及所选 agent 管理服务；首次管理操作经当前载体提交 app 默认配置，默认 agent 的 config.agents 为空。
+配置编辑复用 CONFIGURATION 的 prepare／commit，以完整候选的模型及依赖校验和修订条件提交保存结果。
+管理命令退出时释放本次资源；channel 连接、harness 进程与 agent 执行实例由后续 `bcn run` 按已保存实体配置创建。
+首次使用流程见 [总计划](README.md#全新安装与默认运行组合)，本分支用真实示例包完成默认基础组合、安装及 agent 配置管理，完整 Codex／Telegram 流程随具体 provider 阶段交付。
+
+公共命令服务由 `bazaar-contrib-invoke` 的 `commands` 入口提供：`COMMANDS` 的值是本次组合拥有的 Click 命令组 `Commands`。
+功能包声明 `accepts=[COMMANDS, 所需公共服务]`，在 lifespan 中通过 `Commands.register()` 登记自己的 Click 命令；
+登记边界报告同名冲突，退出时只撤销本次登记的对象。manager 持有 `contrib` 的完整命令树和管理服务绑定。
+
+invoke 自持 `bazaar_compute_node.commands` 扩展分组，发行包按顶层命令名称导出 `CommandEntry(contrib=...)`。
+该描述只指向负责登记的 contrib；命令参数、回调和服务仍由该 contrib 在 lifespan 内登记。
+命令发现先按已启用入口所属发行包筛选，再核对命令归属；仅展示和执行已启用 contrib 的命令。
+所有命令插件按保存的入口及参数加载；安装包后仍须 enable 才能使用其命令。
+node-management 以同一扩展协议声明 `run`，app 消费通用命令发现与分发接口。入口发现与选择归 invoke，core 只接受通用插件根。
+`run` 保留原有运行节点、为全部已配置 Agent 提供服务直到停止的完整英语说明；入口列表与实际命令复用同一文案，保留完整 short_help。
+
+启动依次完成 boot、load、选择入口、启动所选依赖、执行回调、资源清理。外层由原生 Click 解析配置载体参数，
+配置参数写在命令前，例如 `bcn --config /tmp/node.toml contrib list`。invoke 用 Click 的原生命令解析定位扩展名；
+配置和定义已读取，未进入所有业务 lifespan。配置服务根据该次选择产生根插件组合。
+core 的 Composition.roots 按插件名称指定根，复用现有参数展开、服务绑定及依赖顺序，只启用根及其所需提供者。
+局部绑定按具体实例计算，已有自举实例继续复用；无关分支不获取资源。所选根缺失、服务冲突或循环保留正常诊断。
+所选根及其已选依赖显式引用的声明继续参与诊断筛选；沿声明引用保留传递依赖的配置字段错误，即使提供者尚未成功创建实例，也能显示实际配置位置与原因。
+core 不读取命令元数据，不导入 Click，也不解释 CLI 或 GUI。其他功能插件可以拥有自己的扩展协议。
+app 的 defaults.toml 提供新节点的初始配置，并显式声明 manager 包内官方索引的 resource:// 地址。
+
+随后所选 contrib 及其依赖进入 lifespan 并登记实际命令，Commands.dispatch 在工作线程内完成原生 Click 的参数、帮助和回调分发，
+将回调返回的 awaitable 交回事件循环。回调结束或取消后退出组合；只有需要常驻的回调自行等待。
+dispatch 复制本次原生命令树，以本次 Context.invoke 将异步回调通过 asyncio.run_coroutine_threadsafe 交回原事件循环，工作线程等待回调完成后才退出各级 Click Context；异步回调使用 scope(cleanup=False) 保留当前 Click Context，资源由原工作线程的上下文退出统一关闭。同一 Commands 串行分派，避免 Click 的线程本地 Context 在异步等待期间交错。取消分派先取消回调任务并等待清理，再等待工作线程退出，之后传播取消。
+依据：[Click 资源生命周期](https://click.palletsprojects.com/en/stable/advanced/#managing-resources)、[Context.scope](https://click.palletsprojects.com/en/stable/api/#click.Context.scope) 与 [asyncio 跨线程提交](https://docs.python.org/3/library/asyncio-task.html#asyncio.run_coroutine_threadsafe)。现有文件命令与取消验收使用 Click 管理的文件、嵌套命令和 with_resource，核对 await 及取消清理期间资源仍可用、分派完成后资源已释放。
+应用入口将 KeyboardInterrupt 交回原生 Click 处理，在异步取消清理完成后按中断退出，保留非零退出码。
+根帮助从入口描述列出可选命令；单条命令帮助启动它所必需的服务。未选中的命令插件及业务分支保持未启动。
+
+管理根从已启用的 contrib-manager 及保存参数构造。首次配置创建、迁移和后续保存复用 CONFIGURATION。
+`run` 在同一 Hub 内消费 CONFIGURATION.activate()，保留命令根并通过已有 Context.update 启用完整已保存组合，
+随后等待退出信号；配置载体、版本服务及未变共享实例继续复用。管理命令完成即退出，保留原来的待重启语义。
+
+依据 `src/bazaar_compute_node/app/upgrade.py` 的 uv 定位和执行行为，在 `bazaar-contrib-manager` 实现新组合共用的宿主升级及包管理能力。
+uv 由宿主进程的 PATH 解析为具体执行文件；目标环境明确对应运行该节点的 Python。
+实际执行使用参数数组，安装结果、发行清单和启用配置之间有明确提交顺序。
+
+运行配置是依赖声明的唯一来源。`contribs` 每项保存一个包的 `package`、可选 `source` 和 `enabled` 数组；每个启用项保存 `entry` 与自己的 `config`。
+本次自举由 `--configer` 和版本入口选定的发行包同时参与环境计划；manager 从已安装入口元数据取得所属包，
+保留直接引用或当前版本，宿主已有依赖和文档中适用于当前平台的包声明沿用各自规格。这些自举依赖不另写入用户文档。
+仅将当前平台适用的声明计入已保留的自举包，其余平台声明继续保存在配置中。
+`package` 使用与 `pyproject.toml` 的 `project.dependencies` 相同的完整 PEP 508 字符串，保留 extras、版本范围、URL 和 marker；
+`enabled = []` 表示只安装包。同一发行包的多个入口归入同一个数组，包规格和来源只声明一次；编辑参数保留依赖规格，停用最后一个入口保留只安装声明。
+TOML 可使用内联数组，也可用 `[[contribs.enabled]]` 展开启用项，再以 `[contribs.enabled.config]` 填写各入口的参数。
+索引条目只声明包名和来源，契约、缓存与列表均使用这两个字段；索引不声明或兼容版本要求。
+`add` 的 `--version` 由用户选择安装要求；未指定时由 uv 解析。保存实际安装版本或用户所选版本范围及来源。
+`--enable` 将声明带到该包提供的入口。迁移只需复制配置。
+启用入口时仅选择当前平台适用的同名发行包声明，适用声明多于一条时明确报告歧义。configured 将省略 enabled 的合法声明按仅安装包展示。每次保存配置重新记录该快照尚未应用，后续阶段失败时保留已完成的安装和应用结果；只有已保存但尚未应用的配置或已识别的环境变动需要重启。
+configured 同样将省略 contribs 的合法空配置按模型默认空列表展示。
+默认来源为空时使用 manager 的 `host_source`；显式来源随配置迁移。入口只在其依赖 marker 对当前平台成立时启用。
+
+调研依据：[Python dependency specifiers](https://packaging.python.org/en/latest/specifications/dependency-specifiers/)
+定义包名、extras、版本或直接 URL 以及 marker；[uv dependencies](https://docs.astral.sh/uv/concepts/projects/dependencies/)
+使用标准依赖字符串并用 `tool.uv.sources` 选择索引；[uv compile/sync](https://docs.astral.sh/uv/pip/compile/)
+支持从 pyproject 解析依赖并用同一 pylock 同步完整环境。配置边界用 packaging/Pydantic 校验字符串；安装仍交给 uv。
+
+每次启动先通过配置服务读取和保存文档，按普通配置声明发现入口。app 先按配置启用监听 CONFIG_PREPARE 的插件及其服务依赖，
+在它们就绪后发布这个公开配置准备事件，等待每个准备插件发布 CONFIG_PREPARED，再切换所选业务组合。
+配置决定入口名称和参数，自写实现监听同一事件、完成后发布 CONFIG_PREPARED 即可替换。
+CONFIG_PREPARE 与 CONFIG_PREPARED 都是 EventKey[None]；包管理插件自己的事件处理器复用 sync(only_missing=True)，
+返回失败结果或抛出异常时都将诊断写入配置服务的 preparation_error，并总是发布 CONFIG_PREPARED。
+默认实现检查目标解释器中的声明、extras 及传递依赖，缺失或版本不符时执行完整候选解析、安装和入口验证；
+满足时直接继续。随后配置服务报告准备诊断，在同一 Hub 中切换到调用者选择的命令根或完整节点组合，再进入业务 lifespan。
+所选命令根及其依赖继续严格校验；完整运行组合复用 core 的 Failed／Blocked 隔离，让独立的健康分支继续。
+配置服务只在准备成功且完整候选通过校验后自动保存新建或转换后的文档；降级启动保留原配置及其全部插件声明。
+完整组合激活前再次校验本次启动根及其服务依赖，其他故障通过现有状态与日志展示。manager 只消费已有 CONFIGURATION，app 只发布准备事件并监听完成事件。
+显式 `bcn contrib sync` 按配置重新解析并安装，失败保留操作诊断；add、remove 及显式配置提交继续校验完整候选。
+普通解析将上次成功安装的 pylock 作为 uv 的版本偏好，复用仍满足配置的锁定版本和 HTTP 缓存；
+配置约束改变时由 uv 重新求解。用户显式执行 `bcn contrib sync --upgrade` 或 `bcn contrib upgrade VERSION`
+时传递 uv 的 `--upgrade`，刷新包索引并更新配置允许范围内的依赖，继续尊重显式版本限制。
+宿主升级的初次解析与迁移补包后的再次解析均沿用该选项，确保能解析索引缓存建立后发布的目标宿主和依赖。
+uv tool 安装直接使用解析得到的完整依赖，不额外强制刷新宿主包；依赖变化由 uv 按实际要求更新。
+管理操作只在组合中存在 CLIENT 服务提供者时探测 sidecar；无关插件的诊断保留原有展示，不额外引入客户端依赖。
+app 保留直接使用的核心、配置、版本、命令公共契约包及首次启动所需的默认准备插件；status、logging、sidecar 及平台实现由默认配置声明。
+默认 TOML 直接声明两种原生 sidecar 入口及标准 PEP 508 `sys_platform` 条件，通用配置读取只选择条件成立的条目。默认包规格及仓库内正式依赖采用各自所需的三段式兼容范围，首版为 ~=0.3.0；固定宿主、包依赖及用户保存的版本要求共同约束解析结果，兼容旧依赖可以保留。
+发行工具更新 project.version 时保留仍适用的依赖下限；使用更新接口时才提高对应最低版本。
+
+安装管理、同步和整体升级从配置生成候选，保留实例参数和显式来源／版本；操作日志和 pylock 是执行及恢复产物。
+卸载要求先停用入口，并验证其他包和当前自举载体仍能正常工作。配置文档通过 CONFIGURATION 条件提交。
+
+完整组合的版本与来源解析按以下步骤执行：
+
+1. 在目标宿主的操作临时目录生成 `pyproject.toml`，`project.dependencies` 包含固定宿主版本及全部额外包规格。
+2. 将每个额外包的 `source` 转为具名 `tool.uv.index`，由 `tool.uv.sources` 将包绑定到所选 index。
+   index 名由管理服务内部生成；用户填写的仍是包名、源 URL 和可选版本范围。
+   同源条目共用 index，依赖解析按保存的来源顺序及目标宿主默认包源使用 uv 的 `first-index` 策略；
+   直接声明的额外包通过 sources 固定来源，其传递依赖由 uv 从候选包源解析。
+3. 由自身 uv 执行 `uv pip compile <candidate>/pyproject.toml --python <target-python> --format pylock.toml --output-file <candidate>/pylock.toml`。
+   此步骤解析整个候选依赖图，产物保存选定版本、下载地址与校验信息。来源或版本冲突在改变安装环境前报告。
+4. 安装阶段消费同一份解析产物，完成后用目标解释器检查实际包、入口和 API 兼容信息。
+5. 成功后通过配置服务保存包声明与解析结果；启用请求另外校验并保存入口配置，结果显示下次启动生效。
+   操作失败保留原声明，并记录实际环境变更及恢复原组合所需步骤。
+
+生成的来源声明例如：
+
+```toml
+# 管理服务生成的候选 pyproject.toml，不是用户的 config.toml。
+[project]
+name = "bazaar-contrib-environment"
+version = "0"
+requires-python = ">=3.15"
+dependencies = ["bazaar-compute-node==0.3.0", "bazaar-contrib-pg"]
+
+[[tool.uv.index]]
+name = "selected"
+url = "https://packages.example.com/simple/"
+
+[tool.uv.sources]
+bazaar-contrib-pg = { index = "selected" }
+```
+
+- **uv tool 部署**：从同一 pylock 选择当前解释器兼容的 wheel、锁定的 sdist 或标准 archive 直接引用，将下载地址与 SHA256 写成 requirements。
+  使用 `uv tool install '<锁定的宿主包直接引用>' --with-requirements <candidate>/requirements.txt`，
+  主包及全部附加依赖均使用已解析的产物；默认功能包与其他配置依赖一同解析。
+  按 [pylock 产物规范](https://packaging.python.org/en/latest/specifications/pylock-toml/#packages-archive-path)，
+  本地 wheel、sdist、archive 的 `path` 和源码 `directory.path` 相对于锁文件解析为文件 URL；
+  wheel 按文件名选择兼容标签，文件产物保留 SHA256，源码目录直接交给 uv 构建安装。
+  现有监督进程负责下一次启动；Windows 沿用当前升级保留运行解释器的安装方式。
+- **自管 venv 部署**：同一 uv 使用 `uv pip sync --python <target-python> <candidate>/pylock.toml`，
+  目标是由宿主管理完整依赖集合的专用 venv，安装和卸载均按候选完整组合同步。
+- 安装、卸载和节点升级共用宿主环境变更锁，避免并发包操作覆盖依赖组合。
+- 保存用户给定的包版本、来源规格和模块实例配置；uv 负责发行依赖解析，运行时 `accepts` 负责服务装配。
+- 整体升级保留后端的额外包依赖、`database.config.backend`、连接参数、其他启用实例及停用选择。
+
+tool 部署使用普通 `uv tool install`，保留 Windows 正在运行的解释器。
+宿主安装与重启遵循 [服务监督计划](../2026-10-07-service-supervisor/plan.md) 的生命周期要求。
+
+后续节点管理命令保留 `bcn start`、`bcn stop` 作为服务管理命令的别名，帮助分别写为
+`Legacy alias for bcn service start`、`Legacy alias for bcn service stop`，沿用同样的说明方式。
+
+## 本特性分支的串行 Tasks
+
+每个 Task 完成后停下 review，通过后继续下一个 Task。后续在 `feature/node-contribs` 先交付独立定时器，再交付数据库，两项各用一个 commit；其后完成 agent 相关能力和整体交付。当前三条特性分支按依赖 review 并合入 `0.3`。
+新能力通过已有公共插件契约装配；服务提供者随消费者的声明依赖选入，V4→V5 同步补齐原功能所需的条目和参数。
+
+### Task 1：核心 contrib 框架
+
+- [x] 建立 Python 3.15 uv workspace 与独立 core 发行包，使用任务组管理真实资源。
+- [x] 定义 ContribHub、typed 服务和事件、可选配置模型、ContribEntry、Composition、Candidate 与版本契约；无配置 lifespan 只接收 Context。
+- [x] 每个条目创建一个具体实例，Context 提供 id、name、snapshots 以及 offer／accept／announce／enable／validate。
+- [x] 静态及配置计算的 accepts 统一解析，完整图在资源启动前检查缺失、重复和循环依赖。
+- [x] 默认服务绑定共享，ctx.enable 的 local 支持 ServiceKey 与 EventKey；继承其他绑定，私有消费者只接受相同绑定的提供者。
+- [x] 子组合由创建它的实例拥有，按服务和创建关系的依赖图启动、传播故障及逆序退出。
+- [x] 处理父实例到 yield 前启动子组合、已 offer 的祖先服务注入、重复关闭、取消和在途回调排空。
+- [x] 将 lifespan 的组合启用等待纳入图，真实 SQLite 验证跨层级环、多层嵌套环后的继续读写，以及后台启用、退出和持久化。
+- [x] run 用普通加载器提供 COMPOSITION 组织自举与业务阶段，退出先结束业务再释放自举资源。
+- [x] 真实 SQLite、文件、TCP 与任务故障验证独立组合、共享服务、私有事件、错误隔离和完整退出；完成 Ruff、根 LSP 与独立发行验收。
+- [x] 按发行包声明的支持平台生成 CI 任务，以单个 Checks 任务顺序检查受影响包；验证矩阵、工作流及 Ruff、根 LSP。
+
+### Task 2：独立状态查询模块
+
+- [x] 独立 bazaar-contrib-status 提供协议、typed key、入口与类型标记，只依赖兼容范围内的 core。
+- [x] 查询读取 ctx.snapshots，记录包含具体实例 id、创建者 parent 和不可变生命周期状态。
+- [x] 真实文件和任务故障验证历史快照、传递阻塞、独立 Hub 与嵌套共享查询；完成独立安装及检查。
+
+### Task 3：独立应用基础与节点输入
+
+- [x] 建立独立 app 发行包、Click 命令入口和默认依赖，普通 run 进入 core 的分阶段运行接口。
+- [x] 应用 run 接收普通 bootstrap 和 loader，明确启用具体条目，业务输入通过 typed 服务声明。
+- [x] bcn --version 与 run 处理启动输入、Ctrl+C／SIGTERM，完成真实文件与隔离进程的退出验证。
+- [x] 独立 wheel／sdist 验证应用公共调用、CLI、许可证、类型标记；完成 Ruff 与根 LSP。
+
+### Task 4：发现、配置与节点启动
+
+- [x] 统一 bazaar_compute_node.contribs 元数据发现，入口导入、API、配置与服务错误进入状态诊断，有效条目继续运行。
+- [x] 配置契约、filesystem、版本服务与状态成员独立发行，app 持有启动 flags 和 defaults.toml；官方 catalog 构建资源随本轮迁入 manager。
+- [x] --configer 选择载体，--configer-options／--config 可重复并保留顺序；载体自己解析原始参数并提供 CONFIG_STORE。
+- [x] CONFIG_V1…CONFIG_V5 的依赖链提供转换服务，载体按修订条件提交候选，保留历史转换和数据目录规则。
+- [x] FileConfigStore 使用原始字节修订、独立文件锁与原子替换，线程执行 IO 并等待在途操作。
+- [x] 已知条目通过 typed 服务与显式绑定表达依赖，保存前预检已声明的组合；agent 模型与实例展开由 Task 11 的业务插件接管，app build 统一加载 contrib 声明。
+- [x] ConfigDocument 提供通用文档与载体契约，agent 实体模型与展开在 Task 11 由 agent 插件持有。
+- [x] 独立第三方 wheel 用真实 SQLite／TCP 配置中心验证读取、编辑、冲突、未知提交响应、重建和启动取消。
+- [x] 自定义构建后端从 uv.lock 生成内置 catalog，独立 sdist 可重建；验证默认配置、组合导入、路径转义与隔离节点。
+- [x] 完成 Ruff、根 LSP、真实安装配置流程与独立发行验收。
+
+### Task 5：首个日志模块
+
+日志采集用明确的接收／关闭状态管理队列入口，退出时沿原有顺序排空并恢复 handler。
+
+- [x] CURRENT_CONTEXT 在实例 lifespan 与监听回调 set／reset；子任务和工作线程继承上下文，消费者绑定自身身份。
+- [x] logging 在 lifespan 中通过 QueueHandler／QueueListener 接收标准库日志并在线程中写入。
+- [x] text／json 格式保留时间、实际来源、级别和异常；实例外日志用 Python logger 标识来源，source.id 为 None。
+- [x] 真实文件验证按日及体积轮转产生文件并保留日志，以及 level 路径、日期保留、线程输出、handler 所有权和退出排空。
+- [x] 完成并发私有消息回调、真实普通日志 wheel 和隔离节点的安装验收及检查。
+
+### Task 6：模块安装管理与升级
+
+- [x] Context.update 和 Enablement.update 串行应用完整组合；首次启用、候选校验和更新复用 target／Diff／apply，保留未变资源并重建受影响依赖。
+- [x] 更新保留已有 local 绑定，父实例替换时清理其后代；真实 SQLite／文件验证跨组合重绑、缺失依赖恢复、并发、故障恢复和请求者生命周期。
+- [x] 消融删除 Enablement 重复的活动／失败索引、未使用的 ready 属性和 Diff 重复候选字段；真实资源回归验证由 Hub 单一记录提供查询。
+- [x] 独立 bazaar-contrib-manager 提供索引、包、进度和结果契约，复用目标宿主 uv 及环境操作锁。
+- [x] 真实本地／HTTP 索引、缓存、私有源和多入口 wheel 验证安装、发现、导入、启停、编辑及卸载。
+- [x] add 接受普通发行包及仅安装声明；显式启用时读取实际 contrib 入口。包详情和 remove 从完整安装元数据定位发行包，依赖解析与传递依赖由 uv 处理。
+- [x] add／enable／edit 使用可重复 --option KEY=VALUE，支持点分字段、列表位置与重复值；显式位置更新保留未编辑元素，重复字段值替换完整列表。
+- [x] uv tool／专用 venv 消费绑定来源的完整 pylock 候选，升级保留配置载体、额外依赖、来源与业务选择。
+- [x] 目标解释器先转换并检查完整配置，条件提交后分别记录安装、保存与运行结果；修改请求者自身生命周期时报告待重启。
+- [x] 普通 server lifespan 用 ctx.enable(local=(DB, RECORDS)) 管理真实 SQLite／TCP 子组合，验证混合运行、停用后节点继续写入和纯服务端启动。
+- [x] 完成真实安装环境、Blockbuster 回归、独立 wheel／sdist、Ruff 与根 LSP；修改 amend 回各功能的引入提交并签名推送。
+- [x] 配置携带完整依赖规格与来源，add 更新版本及安装后锁定版本时保留原依赖的 extras 和环境 marker；add／enable／edit／disable／remove／upgrade 统一读写配置。
+- [x] contrib sync 与每次启动复用配置所选 manager 的检查及安装，准备阶段按公开事件监听声明及服务依赖装配，再切换所选业务组合；独立载体验收使用替代入口与独立的 uv 环境检查实现。
+- [x] 真实 uv tool 与 venv 验证仅复制配置即可恢复包、入口及参数，完成发行检查、Ruff、根 LSP，并单独签名提交。
+- [x] 补齐 uv tool 的本地锁定产物支持，在现有真实安装工作流验证本地 wheel 和源码目录的同步及入口运行，完成 Ruff 与根 LSP。
+- [x] 在完整安装计划及迁移补包时保留选定的自举载体，真实安装验证文档未声明载体包时仍可预检和同步。
+
+存储等后续包交付时，继续验证历史配置自动纳入依赖及完整 V4→V5 运行迁移。
+
+### Task 7：插件扩展入口与按根启用的命令执行
+
+run 的用户帮助使用：`Run the node, serving until it is stopped.`
+
+- [x] 交付 invoke 的 COMMANDS、Commands.register／dispatch 与插件自持的 CommandEntry 扩展发现，保持原生 Click 和 lifespan 登记。
+- [x] core 在通用 Composition.roots 中按根及绑定选择依赖，保留既有完整建图、更新和生命周期流程。
+- [x] manager 与 app run 按相同元数据声明命令根，app 复用 boot／load 和一个 Hub，回调决定退出时间。
+- [x] 命令列表与执行按所属 contrib 的启用配置筛选，app 显式提供启动入口，保存参数用于实际插件装配。
+- [x] run 复用配置服务与 Context.update 启用完整组合，共享依赖保持实例；管理命令只启用必要分支。
+- [x] 真实文件／SQLite 与独立示例 wheel 验证根选择、绑定、命令参数、帮助、取消、信号、资源退出及管理升级。
+- [x] 完成真实 uv tool／venv、独立 wheel／sdist、Blockbuster、Ruff 与根目录 LSP，替换旧命令提交并签名推送供 review。
+
+### Task 8：sidecar 调用与节点基础接入
+
+Sidecar README 使用 V5 的 `package` 与 `enabled[].entry` 描述启用方式，与实际配置文档一致。
+2026-10-21 按已确认要求扩展并发调用：CLIENT 允许多个请求同时在途，具体实现决定连接方式。
+Unix／Windows／TCP 的 Call／Reply 流封套与共享读泵按 Task 12.1 的通信修订实现，
+公共 Request／Result 保持传输无关；单请求等待或取消不关闭其他调用共用的连接。
+
+本轮 review 节点为 sidecar 接口包、两个传输实现包及真实跨进程调用验收。`bazaar-contrib-sidecar` 定义
+`SERVER`、`CLIENT` 两个公共服务 key，并提供只接受 `SERVER` 的 `sidecar` 入口；它随完整配置组合进入 lifespan，
+通过连接所属的调用上下文转发框架操作。消费插件只依赖接口包并接受 `CLIENT`，按已有 offers／accepts 装配。
+
+`bazaar-contrib-sidecar-unix`、`bazaar-contrib-sidecar-windows` 分别提供同名入口，各自 offer 两个服务。
+`SERVER` 接受会话 handler 工厂并持有监听，`CLIENT` 传递类型化请求与结果；公共服务契约与具体 I/O 无关，
+后续 HTTP 实现使用同一契约。Unix 使用 asyncio Unix streams，Windows 使用 CPython ProactorEventLoop 的
+`start_serving_pipe`／`create_pipe_connection`；默认 TOML 声明两个平台实现，用依赖字符串中的标准 `sys_platform` marker 选择。
+app 原样读取并交给配置服务；配置的通用 marker 判断在入口发现前生效。删除 sidecar 及传输声明即可选择其他实现或停用，启动不补回。
+Windows 使用 [CPython 3.15 的 IOCP 与 pipe transport](https://github.com/python/cpython/blob/3.15/Lib/asyncio/windows_events.py)，
+创建句柄时以 FIRST_PIPE_INSTANCE 排他，并沿用 0.2 的 PIPE_REJECT_REMOTE_CLIENTS；按
+[CreateNamedPipe](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createnamedpipea)
+的句柄归属管理后续连接，接受任务由 lifespan 持有，退出时取消并关闭未连接句柄。
+Unix 沿用 0.2 的存活探测：已有 socket 能连接则拒绝启动，连接被拒绝的残留 socket 或失效链接才清理后重建，普通文件保留并报错；
+其他 I/O 错误直接上抛。先自行 bind，再把 socket 交给 asyncio，保留内核的地址排他，避免 asyncio 自动删除已有端点。
+Unix 监听与按文件身份清理由 [asyncio streams](https://docs.python.org/3.15/library/asyncio-stream.html) 持有。
+两端收发沿用 0.2 的分块读行：每次读取 64 KiB、查找换行并保留下一帧余量，避免 StreamReader.readline 的单行上限；
+共享实现放在 sidecar 包内，实际请求与响应均验证超过 1 MiB 的完整内容。退出先取消连接任务，再等待监听关闭。
+配置内可明确指定本机 endpoint，默认地址在插件内按平台生成，沿用 BCN_HOME 的数据目录。
+每个节点默认启用 sidecar 与本机实现，承接 0.2 的 bcn.sock 本机通信；V4→V5 无条件生成这两个入口，
+并将旧 Windows 路径按原有管道身份转换为原生地址。node.control 与本机通信的启用无关；
+已有 V5 的启用选择与参数继续保留。
+
+共享 handler 从服务端 Context 出发，提供公开属性读取、方法调用及异步上下文的进入、退出和引用释放。
+JSON 标量、序列和字典按值传输，服务、候选组合等对象以连接内引用返回；公共 key、定义和模型可用已安装的
+`module:symbol` 引用及构造参数传入，避免复制服务实例或丢失 key 身份。请求与结果由 Pydantic 校验。
+连接关闭时释放其对象引用及远端进入的子组合；服务端退出时取消并等待所属连接任务。
+
+消费方使用客户端取得远端 ctx，再通过 accept 请求服务并组合调用。
+每次远端 accept 使用已有 Context.enable，为调用方启用只声明该服务依赖的消费入口；
+消费入口继承原绑定范围，框架负责解析、就绪和退出顺序，连接持有并在关闭时释放这些消费组合。
+其余公开属性和方法继续转发原 Context；sidecar 只声明 `accepts=[SERVER]`，不导入配置、消息或其他业务契约。
+目标符号未安装或服务不可用时，沿用 Failure／RemoteError 将调用错误返回客户端，不安装或启用业务提供者。
+默认启用及 V4→V5 转换只声明 sidecar 入口。
+接口依赖直接写入插件的 `Contrib.accepts`；配置不提供 `services` 或同义字段，也不保留将这类字段解析为服务 key 的逻辑。
+配置刷新由调用者通过远端 CONFIGURATION.read／commit／apply 编排，继续使用配置加载器原有 ctx 的更新归属；
+sidecar 的 ctx 保持自己的服务可见范围与组合归属，调用方的服务依赖归连接内的消费入口持有。
+各传输共用这些 handler，业务编排由消费插件持有。
+
+本轮继续完成 manager 的实际消费。manager 的启动依赖仍为 CONFIGURATION、COMMANDS，
+所选组合未声明 CLIENT 提供者且没有加载诊断时，直接使用本地管理；已配置但无法加载或装配的客户端报告错误。
+首次依赖安装完成后，变更操作从所选配置构建以 CLIENT 消费者为根的临时子组合，复用 core 的依赖选择与资源退出。
+该子组合只创建一个 CLIENT 消费入口；启用后有客户端时直接取首项，没有客户端时继续本地管理。
+根选择仅展开本次组合内的声明，外部现存实例及其依赖继续复用，避免为父实例重复选择同名服务。
+取得环境锁后、产生安装或保存副作用前，通过 CLIENT 的远端 ctx.accept(CONFIGURATION) 建立配置会话，核对配置自举声明与当前修订。
+只有首次连接明确返回端点不存在或拒绝连接时使用离线组合；已连通后的远端异常、超时和断开直接返回失败，
+不重放操作。本机安装、目标解释器预检与操作记录仍归 manager，在线保存由远端配置服务条件提交，随后通过它的 apply 请求热更新。
+add --enable、enable、edit、disable 和索引变更复用此流程；单纯新增包不因新增发行元数据要求重启，
+已安装包的版本或来源替换、卸载及应用升级继续报告需要重启。配置服务在每次运行应用前刷新发行元数据发现缓存。
+离线管理操作只报告安装与配置保存结果；在线请求失败时保留已经确认的环境变动和重启状态，
+超时单独报告请求失败与已完成的保存阶段。运行应用确认成功时报告实际应用结果。
+版本、依赖和自举入口选择通过发行元数据读取；宿主内读取在工作线程执行，候选解释器报告自身元数据。
+同一次候选环境的检查结果用于安装后的版本核对。入口详情、目标配置预检及宿主安装前后的完整检查保留各自的实际执行。
+
+disable --force 明确许可剩余消费者因缺少服务而阻塞，保留其配置声明。core 的 Blocked 状态携带缺失服务名，
+并沿依赖传播；配置服务只对这种诊断放宽提交校验，配置模型、入口导入、重复服务及循环错误仍然拒绝。
+选项补救提示参照 [dnf --allowerasing](https://dnf.readthedocs.io/en/latest/command_ref.html#options)；--force 的帮助直接说明会停用目标并停止依赖方。
+配置服务以独立的 ConfigDependencyError 报告仅由新增缺失依赖造成的校验失败；manager 在普通 disable 的本地或远端提交收到这种错误时，保留具体 contrib 和缺失服务原因，再提示追加 --force，并说明依赖方会停止，所需服务恢复前无法运行。
+普通后续提交与包预检按模块名称、实例位置和缺失服务记录已保存组合的阻塞诊断，只保留同一实例的既有缺失依赖，拒绝其他实例新增阻塞；重启允许这些声明继续等待依赖恢复。
+core 继续按已有依赖图先停止消费者、再停止提供者；重新启用提供者后，由同一更新流程恢复消费者。
+管理入口、自身传输或配置服务被此次变更影响时，保留已保存结果并如实报告未应用与重启要求。
+
+- [x] 交付 bazaar-contrib-sidecar 的 SERVER／CLIENT 契约、接受 SERVER 的 sidecar 入口、共享 ctx／对象 handler 与会话资源管理。
+- [x] 交付独立 Unix socket 和 Windows named pipe 实现包，各自 offer SERVER／CLIENT；app 声明平台默认依赖与启用配置，V4→V5 的本地调用配置映射到 sidecar。
+- [x] 真实独立 wheel、节点进程和 CLI 消费者验证迁移地址、ctx 调用、配置热更新、远端子组合、断开清理与重启；TCP 示例实现复用相同 handler，完成 Ruff、根目录 LSP 和发行安装检查。
+- [x] 对照 0.2 补齐原生边界处理，交付真实 socket／pipe 和隔离进程的安装验收：残留端点、活动地址排他、异常退出恢复、坏连接隔离、退出清理及 3 MB 双向分块读行。
+- [x] 三系统原生 CI 验证各平台 socket／pipe 与相同客户端流程，提交本轮 review。
+- [x] manager 按配置选择 CLIENT 消费分支，在线通过远端 CONFIGURATION 条件提交及应用，首次明确离线时保留本地流程，失败不重放。
+- [x] 交付 disable --force 和配置层缺失依赖许可，复用 core 的停止顺序、阻塞声明和恢复能力。
+- [x] 真实独立安装环境、节点进程与 CLI 验证在线新增启用、编辑、停用、强制停用和依赖恢复，离线保存、并发修订与超时失败；完成 Ruff、根 LSP 和发行检查，独立签名提交供 review。三系统 CI 的验收结果记录于 PR。
+
+本轮继续迁出已经实现的功能，保留 app 直接使用的公共接口、自举依赖和 VERSIONS 清单。
+命令按所属 contrib 的根及服务依赖启用；准备组合只选配置准备处理器及所需服务。
+node-management 包只接收已经实现的 run 命令、配置激活和退出信号等待，通过 COMMANDS 登记并由默认配置选择；
+app 使用普通命令发现，不再插入 node-run 启动定义。后续 agent 与节点平台能力继续按各自 Task 交付。
+manager 自持 catalog 构建后端与锁文件快照，app 使用普通 uv_build；默认配置只声明资源地址。
+构建后端文件为 manager/build.py，pyproject 的 build-backend="build"、缓存键、源码包含与检查范围使用同一模块路径。
+依据 [importlib.resources](https://docs.python.org/3/library/importlib.resources.html) 的结论，使用 files(package).joinpath(path).read_bytes()
+读取包内资源，适用于 wheel 和其他资源加载器；资源模块缺失、文件或 JSON 读取失败沿用每个索引的错误和缓存结果。
+依据 [uv build backend](https://docs.astral.sh/uv/concepts/build-backend/) 的文件包含规则，manager sdist 包含自定义后端和 catalog.uv.lock，
+从独立 sdist 重建 wheel 仍能生成完整索引；app 的 wheel／sdist 保留自己的默认配置资源。
+
+- [x] 迁出 run 实现，真实配置选择验证命令、信号退出及资源释放。
+- [x] manager 持有官方索引构建和资源读取，真实索引增删、离线读取和独立 sdist→wheel 验证。
+- [x] app 的公共 run 通过真实安装与配置加载流程验收；manager 的依赖规格验收覆盖保存、传递与恢复。完成隔离 app、manager venv／uv tool、sidecar 回归、Ruff、根目录 LSP 和发行检查；在同一框架分支独立签名提交供 review。
+
+本轮 review 删除当前审计发行包、node-audit、app 的审计发布和依赖，以及按 CONTRIB_CHANGED 监听声明追加命令根的策略。
+logging 保留标准日志、格式、级别路径、轮转和资源释放，直接从标准 LogRecord 与 CURRENT_CONTEXT 捕获来源。
+实际资源异常验证 core 的报错及堆栈仍写入日志，命令错误继续由 CLI 展示；独立安装验收同步删除审计构建和配置。
+
+- [x] 删除审计实现、默认声明及发行依赖，简化命令根选择并保留配置准备流程。
+- [x] 日志改为标准 logging，真实文件、异常、线程、轮转、配置与隔离 CLI 验证通过。
+- [x] 默认索引列表使用多行 TOML，manager 的 build.py 通过独立源码包重建验证。
+
+The Open Bazaar index joins this 0.3 task through manager/build.py. Every build
+downloads the latest main/index.json from open-bazaar/contrib-index and writes
+open_bazaar_index.json beside the generated official catalog. Both generated
+JSON files are ignored in Git and included as package resources. The default
+index list names both local resources. Independent wheel and sdist installation
+checks validate the downloaded document and the default manager catalog flow.
+The index download uses a 60-second network timeout. Configured index order sets
+priority: overlapping package/source entries retain the first entry's metadata
+and collect every index origin.
+
+- [x] 完成 Ruff、根目录 LSP、独立 wheel／sdist 及受影响安装流程，amend 到各自引入提交并更新同一 PR。
+
+### Task 9：独立定时器接口与时间轮
+
+句柄以 frozen／slots 状态联合类型表达排队、到期、已消费、取消和关闭；到期状态携带代次，取消／关闭保留已有到期数据，等待 Future 只承担通知与单消费者归属。时间轮使用明确的打开／关闭状态。
+
+该 Task 用一个 commit 交付节点共享定时能力；下一 Task 用另一个 commit 交付数据库。
+沿用现有 `src/bazaar_compute_node/core/timerwheel.py` 的分层时间轮、代次与等待者语义，
+公共协议和错误移至 `bazaar-contrib-timer`，具体轮、驱动与条目归 `bazaar-contrib-timer-wheel`。
+
+公共包只依赖 core，导出 `TIMER`、`Timer`、`TimerHandle`、`TimerCancelledError` 和 `TimerClosedError`。
+`Timer` 提供 `create(delay_ms)`、`tick_ms`、`maximum_delay_ms` 和单调时间 `now_ms`；
+句柄提供 id、active、deadline、generation、expired_generation、reset、cancel 和异步 wait。
+每个句柄由一个消费者等待；reset 保留等待者并更新代次，取消句柄或等待任务会释放定时资源，
+待处理句柄在 provider 关闭时以公共关闭错误结束。消费者在自身生命周期结束时取消所属句柄。
+
+时间轮实现保留 10 ms tick、256 个近端槽及四层各 64 个槽。create／reset 的毫秒参数在公共调用边界
+以 Pydantic 校验范围；沿用原实现的当前 tick 加上延迟 tick 数，0 ms 等待下一个 tick。
+真实计时验收通过公共 `tick_ms` 计入一个刻度的量化误差，同时核对实际到期时间、代次及等待者保留。
+保留原句柄在到期后取消、取消后等待及 inactive reset 的行为。
+空轮通过 Event 等待新条目，实际驱动属于插件 lifespan 的 TaskGroup；正常退出先关闭句柄再取消驱动，
+驱动异常及意外取消使 provider 失败，由 core 既有依赖图处理消费者退出，并保留原故障。
+
+时间轮以普通条目进入消费方选择的组合候选；公共包随实现或消费者依赖安装。
+任何节点插件均可声明 `accepts=[TIMER]`，由已有 `Composition.roots` 按所选根的依赖闭包启用提供者，
+共享绑定与资源归属由普通组合声明表达。第三方插件只依赖公共包并提供相同 TIMER，组合可选择该实现。
+
+- [x] 交付两个独立发行包、公共类型和 TIMER key、时间轮入口及完整资源生命周期。
+- [x] 两包 LICENSE 通过 `../../LICENSE` 相对符号链接引用仓库根文件，验证 wheel／sdist 收录完整许可证并可独立安装。
+- [x] 通过真实消费者验证 TIMER 依赖选入所选实现、多个消费者共享及子组合继承，并观察计时与退出后句柄关闭。
+- [x] V4→V5 将旧节点的全局时间轮映射为 timer-wheel 提供者条目；已有 V5 的实现选择和参数按原流程保留。
+- [x] 真实计时验证到期、重置、跨层定时、取消、等待任务取消、共享绑定、消费者退出和 provider 关闭；真实驱动任务取消验证故障及依赖传播。
+- [x] 公共 timer 接口包仅持有契约与发行配置；实际计时、共享绑定与退出行为由 timer-wheel 及真实消费者验证，接口包不持有 tests 目录。
+- [x] 完成包内测试、Blockbuster、Ruff、根目录 LSP 与独立安装检查，签名提交一个 commit，停下 review。
+
+### Task 10：公共存储、SQLite 与 schema
+
+SQLite 执行器以一个阶段状态表达未启动、接收、排空和关闭；写请求的等待、执行、取消及完成状态直接携带 operation task，事务与绑定 Session 使用明确状态。实际任务、条件变量和完成通知保留原有职责与取消／中断／排空顺序。
+
+公共包 `bazaar-contrib-storage` 提供 `Database`／`Session` 协议、`BackendRegistry`、
+`STORAGE`、`DB` 和按名称缓存的 `backend_key(name)`。`storage` 入口提供共享注册表；
+具体后端在自身 lifespan 的注册上下文内提供对应 backend key；`database` 的必填 backend 配置
+通过 `accepts=lambda config: [STORAGE, backend_key(config.backend)]` 声明所选依赖，并将该对象登记为 DB。
+消费组合以实际使用者为根选择依赖，配置明确 `backend="sqlite"`；各包使用相对链接共享根 LICENSE。
+
+查询输入是冻结的 Pydantic 数据模型，标识符和参数分别校验，值始终作为绑定参数交给后端。
+公共 `Select`／`Insert`／`Update`／`Delete` 描述显式读写；表达式包含列引用、值、算术、聚合与
+coalesce／lower／length，过滤包含比较、IN、空值、逻辑组合与文本子串搜索。
+Select 明确投影、inner／left join、排序、分组、limit／offset；批量写入、冲突处理与 returning 明确声明。
+结果为普通记录和写入结果；关联由批量查询或明确 join 取得。
+`Database.transaction(operation)` 把绑定 Session 传给异步操作，整体提交或回滚，绑定 Session 在操作返回后失效；Session 提供相同数据操作与
+声明式建表、加列、索引操作。后端把连接、约束与查询错误转为公共错误类型。
+
+`bazaar-contrib-sqlite` 翻译公共操作为参数化 SQLite 查询，提供配置模型、连接及 sqlite 入口。
+SQL 结构保存在后端包的 `resources/*.sql.tpl`：查询、表达式与过滤、DDL、FTS 表及各同步触发器分别用
+Jinja 模板表达，Python 负责绑定参数、标识符／DDL 字面量转义及选择待执行语句。
+依据 [Jinja API](https://jinja.palletsprojects.com/en/stable/api/) 的 PackageLoader、StrictUndefined 和缓存机制，
+后端自持 Jinja 依赖，初始化时在工作线程预加载全部资源，关闭 auto_reload；每次渲染持有独立参数列表，
+模板中的 bind 调用按 SQL 出现顺序收集参数。递归表达式与过滤复用
+[Jinja macros](https://jinja.palletsprojects.com/en/stable/templates/#macros)，完整 SQL 及条件分支在模板内可直接阅读。
+`bazaar-contrib-postgres` 在 `open-bazaar/contrib-postgres` 独立仓库作为可选后端维护，采用相同的资源组织，
+提供 `postgres` 入口，保留 PG 自己的占位符、类型及搜索语义；wheel／sdist 验证资源安装后实际执行。
+复用原 `contrib/sqlite/executor.py` 的单 writer 队列与 reader 池机制，并将长期驱动纳入 lifespan 任务组；
+实际操作的取消、回滚、在途工作排空与连接关闭保留原语义，每次 SQL 调用在取消后先 interrupt 并等待该调用结束，再归还连接；后台故障通过公共 failure source 交给 core。
+路径参数默认沿用 BCN 数据目录；独立验收总是显式使用隔离路径。
+
+`bazaar-contrib-schema` 提供 `SCHEMA` 和模块 schema 的异步登记上下文，模块声明拥有的表、
+迁移与前置模块版本，消费方通过服务依赖保证前置模块就绪。统一 `Migration` 以 version／name 和公共操作表达变更，
+数据转换通过接收公共 Session 的异步 apply 完成，允许同一版本在建表、复制和改名之间执行数据处理。
+迁移和 ledger 写入处于同一个 DB 事务；登记检查表和模块身份归属，进度按 package／version 记录名称、应用时间和耗时。
+`contrib_schema_tables` 持久记录表的 package 归属，运行期退出保留数据和版本进度。
+ModuleSchema 只声明结构与版本；登记身份从当前 Context 的发行来源自动取得，包名按发行包规则统一。
+Context 公开已有的 ContribEntry.source；SCHEMA 使用框架设置的 CURRENT_CONTEXT，不接受调用方提供当前 package。
+
+Node 的 agent、messages-node、collaboration、reminder 持有各自的当前基线与后续版本，直接接受 SCHEMA 并自行登记。
+`bazaar-contrib-legacy-node-migrations` 持有完整已发布历史 1～32，接受 SCHEMA 接续旧库，完成后提供 LEGACY_NODE_MIGRATIONS。
+`bazaar-contrib-server-migrations` 持有完整已发布的 Server 1～7，以 upgrade_only 接受 SCHEMA 接续旧库，完成后提供 SERVER_MIGRATIONS。
+Node 迁移包随 BCN 共同发行；Server 迁移在 `open-bazaar/contrib-server-migrations` 独立维护，
+server 本体与各功能模块在各自的仓库中维护，以 Server 7 为前身登记自己的基线。
+Server 以 `>=0.3.0,<0.4.0` 声明 core、schema、storage 的公共兼容范围。服务端配置载体、存储组合、业务及页面包同属 open-bazaar 的可选仓库。
+Node 各业务服务接受 SCHEMA 并分别登记，依赖 LEGACY_NODE_MIGRATIONS 保证旧库升级完成；Server 的各功能模块对应依赖 SERVER_MIGRATIONS。
+Agent 持有自己的运行数据与 schema，由公共服务依赖带起旧库接续及所选数据库；新安装默认安装并启用 Agent。
+旧配置转换按实际 Agent／Server 使用情况分别生成对应插件及依赖声明，Server 由自己的业务插件带起迁移。
+组合配置通过现有 database 入口为同一个 DB 选择 SQLite／PG。迁移插件依赖 schema／storage 公共能力，
+数据库 provider 负责通用操作。当前尚无业务消费者时仍通过明确根和服务依赖选择插件；V4→V5 在旧配置存在 Agent 时声明 legacy-node-migrations，供 Node 消费组合依赖。
+
+ModuleSchema 可声明 baseline（当前结构及版本）和 progress（已有账本的表、版本／名称字段及所属链首版本身份）。
+空库执行基线并记录该版本；匹配的已有账本把已执行版本进度接入统一 ledger，随后使用同一个 Migration 执行循环推进。
+已有版本只按账本判断完成状态，去掉 checksum 字段、计算、比较与后端 migrate_legacy 接口。
+Node 的原 1…32、Server 的原 1…7 以同一迁移类型重写，保留版本和实际数据／结构变更；
+原已发布 src 作为只读验收来源。SQLite 的 legacy/node、legacy/server SQL 资源及自动识别执行路径移除。
+两种业务类型由被依赖的迁移插件显式选择，通用 schema／数据库 provider 均不识别 Node／Server 名称。
+
+公共 storage 操作补齐删表、改表名、改列名、删列、结构化唯一／CHECK／引用约束、表达式索引、搜索索引记录键、
+通用触发器操作、表存在查询、INSERT…SELECT 批量复制和 ROW_NUMBER 排序表达式。
+依据 [SQLite ALTER TABLE](https://www.sqlite.org/lang_altertable.html) 的约束变化与建新表／复制／替换步骤，
+旧消息结构变化使用公共建表、Copy、删表、改名表达，保留记录及约束。
+依据 [PostgreSQL 触发器](https://www.postgresql.org/docs/18/sql-createtrigger.html)、
+[触发器函数](https://www.postgresql.org/docs/18/plpgsql-trigger.html)及
+[窗口函数](https://www.postgresql.org/docs/18/functions-window.html)，PG 后端实现等价操作；SQLite／PG 均使用后端自己的 Jinja 资源生成 SQL。
+迁移中的消息顺序换算通过公共批量复制及排序表达式处理；数据合并、提醒消息生成和 JSON 回填由迁移插件使用公共查询／写入完成。
+
+CreateTable／CreateIndex 可显式声明 if_not_exists，模块接管已有资源时保留数据；SQLite 已有 FTS 索引整体复用。
+
+文本搜索契约以每个词在所选列中出现的子串语义定义，SQLite 使用 FTS5 trigram 外部内容索引与同步触发器，
+短词执行直接子串条件；额外 PG 实现使用 pg_trgm GIN 与绑定的 ILIKE 条件。
+依据 [SQLite FTS5](https://www.sqlite.org/fts5.html#the_trigram_tokenizer)，trigram 支持子串搜索，
+少于三个 Unicode 字符的词需要直接条件；依据 [PostgreSQL pg_trgm](https://www.postgresql.org/docs/18/pgtrgm.html)，
+GIN 支持 LIKE／ILIKE。两端以相同普通数据工作流验证搜索、批量关联、分页和事务。
+PG 后端是独立仓库的发行包，以 `>=0.3.0,<0.4.0` 声明公共 storage 与 core 的兼容范围，
+依赖 Pydantic、Psycopg 与 Jinja；按
+[Psycopg 异步连接](https://www.psycopg.org/psycopg3/docs/advanced/async.html)及
+[事务管理](https://www.psycopg.org/psycopg3/docs/basic/transactions.html)使用真实异步连接和显式事务，
+PG 依据 [Raw query cursors](https://www.psycopg.org/psycopg3/docs/advanced/cursors.html#raw-query-cursors)
+使用 AsyncRawCursor 与 $n 参数，保留 SQL 算术及文本中的字面 %。
+在自有 rootless 容器及临时数据库运行，固定两个后端并存、选择切换、退出和独立 wheel 安装验收。
+
+注册、选择、替换与迁移调度的机制测试使用固定的小型真实场景。
+完整 PostgreSQL 实现归外部插件仓库，主仓库机制测试复用真实 SQLite；外部 PG 插件持有自己的关键集成验证。
+插件 CI 后续补齐：从包源安装已发布 BCN 和插件，使用隔离配置启用 postgres 入口并验证实际消费流程。
+schema 的小型两版本模块验证执行顺序、事务回滚与已执行版本跳过；业务迁移保留关键数据转换回归。
+历史发行桥接固定为 Node 17→32 和 Server 3→7，以只读原实现产生数据和升级对照，目标链固定在原发行版本。
+Server 迁移回归随 bazaar-contrib-server-migrations 维护；测试夹具保存原实现生成的版本 3 数据和版本 7 升级结果及固定来源，独立安装后即可运行。
+Node／Server 消费者切换验收归 Server 迁移包的集成测试，主仓库测试只依赖自身包。
+新增业务 migration 复用同一执行机制，回归随实际数据转换风险选择场景。
+
+- [x] 交付 bazaar-contrib-storage 的通用数据、显式查询、事务及错误契约，以及 storage 注册表和 database 选择入口；依赖按所选 backend 展开。
+- [x] 交付 bazaar-contrib-sqlite，提供 sqlite 后端及真实连接、公共操作翻译；使用 SQLite 的消费组合明确 database.config.backend="sqlite"。
+- [x] 交付 bazaar-contrib-schema 的模型／索引登记、迁移顺序和 ledger；按 [数据与查询](roadmap.md#数据与查询) 统一抽象迁移、基线及版本账本，业务迁移插件显式注册。
+- [x] 消费组合声明 storage、sqlite、database、schema，并通过 DB 依赖选入；同步 V4→V5 所需配置，用隔离数据库验证实际查询、事务、迁移及后端选择。
+- [x] 完成各包独立 wheel／sdist 安装、真实组合及检查，提交供 review。
+
+验收覆盖 SQLite 公共入口选入后的真实查询与连接关闭、并发写入、事务取消与查询中断、驱动故障；schema 登记、依赖、归属及重启升级；
+真实 PostgreSQL 独立实现和两个后端并存／切换；初次迁移验收使用原始历史源码生成 Node 1／4／12／17／18／24／26／29／31／32 和 Server 1／3／6／7 数据库，
+对比原迁移完成后的业务记录、关联、游标和搜索数据，并核对旧账本保留及重复登记；
+V4→V5 声明直接连接原临时文件并选择 Node 迁移插件。各正式包均完成独立 wheel／sdist 安装，
+原已发布迁移源只读用于生成对照数据库；核对独立发行资源、共享 LICENSE 和 py.typed，通过 Ruff 与仓库根 Pyright LSP 检查。
+- [x] 完成统一迁移修订：Node／Server 所属包提供业务迁移入口、基线／已有版本接续、公共操作补齐及 provider 实现；验证真实不同旧版本的数据变换、空库 SQLite／PG、就绪依赖及独立安装。
+- [x] 将现有 PG 实现迁出主仓库，交付 open-bazaar 的独立可选插件；收敛主仓库测试到固定机制与关键业务场景，验证独立安装并修订原提交供 review。
+- [x] 将 Server 迁移入口及对应回归迁至 open-bazaar/contrib-server，由同一个 bazaar-contrib-server 包持有迁移与 Server 逻辑入口；移除主仓库成员、来源与测试依赖，验证独立产物并修订同一提交。
+
+Node／Server 业务迁移入口及 SQLite／PG 在独立 wheel／sdist 中验证当前基线；历史升级分别通过两种安装产物执行，
+Node／Server 消费者切换验证仅登记被依赖的迁移插件。公共操作验证批量复制、窗口排序、约束、改表／列及通用触发器。
+SQL 模板在 SQLite 与 PG 的独立 wheel／sdist 安装后完成实际查询、参数顺序、带引号及二进制默认值、
+索引移除重建和双后端切换验收；Blockbuster 检查初始化预加载及查询过程。
+
+### Task 11：agent 配置、实例与局部生命周期
+
+先实现真实 agent 插件，再在后续每个 commit 为该 agent 接入一项能力及所需接口。
+公共 channel／harness 契约随实际消费代码一起收敛，每次接入均由 agent 的局部组合验收。
+
+`bazaar-contrib-agent` 拥有实体模型与 `agent` 组合入口；入口配置为 `config.agents`。
+本次迁入身份、名称、mode、idle_timeout 及已有 provider 选择参数，V4 的 runtime 参数在 V5 中命名为 harness，
+保留原顺序与每项设置。转换只声明已经交付的入口，provider 选择保留在 agent 配置，所需入口随实际接入 commit 补齐。
+V4 使用自身的历史输入模型，V1…V4 原转换保持不变。
+通用 ConfigDocument 只保存 contribs 与来源，应用 build 只加载声明；agent 的实体解释、校验与装配归插件。
+app 的 Python 代码通过通用配置和入口发现使用所选插件；agent 的发行依赖归插件消费者，默认配置负责选择，包管理服务在启动前恢复配置中的包。
+app 的最小 wheel／sdist 验收使用其自举和通用组合，配置选择 agent 的流程由现有独立插件安装验收覆盖。
+
+插件公开 `AGENT` 服务和纯 Python `compose(AgentConfig)`，构造单实体组合；agent 入口逐个用
+`ctx.enable(..., local=(AGENT,))` 管理实例。实体 lifespan 创建所属工作区并提供身份与路径，
+工作区固定为 BCN_HOME／home 下 `.bcn/workspaces/<id>`，与 0.2 相同。
+工作区通过工作线程创建并沿用原权限；退出后保留持久文件，消费者先于所属实体退出。
+全新配置启用 agent，`config.agents=[]` 时保持实体数为零。持久数据服务与执行服务在消费它们的后续 commit 接入。
+
+- [x] 交付独立 agent 包、实体／入口模型、AGENT 与所属 workspace，真实局部组合管理两个实例及退出。
+- [x] 将 app／config 的 agent 业务模型和展开移入插件，默认依赖、配置及 sidecar 独立安装夹具同步；V4→V5 保存 agent 参数到入口 config.agents。
+- [x] 用只依赖公共 agent／core 的真实文件消费插件验证组合、共享依赖、实体隔离、空配置与资源释放；工作区按真实目录身份验收，覆盖经符号链接访问的目录，不增加测试注入入口。
+- [x] 完成普通安装、独立 wheel／sdist、受影响测试、Ruff 与根目录 LSP，新签名 commit 交付后停下 review。
+
+### Task 12：为 agent 接入 channel／harness 与所需公共接口
+
+Channel 入站载荷保留 provider 给出的稳定消息、channel session、Thread 身份及原始 provider 消息 ID；
+具体 provider 沿用自身原有 identity 算法，Agent 直接使用这些值进行业务装配和持久化。
+附件保留 kind、ready／failed 状态及原始失败说明；provider 未提供发生时间时继续使用接收时间展示。
+入站附件以 `source: AbstractAsyncContextManager[AsyncIterator[bytes]]` 提供明文字节流，消息导入通过
+`async with` 进入源资源作用域、`async for` 逐块消费；正常结束、读取失败及取消都退出并释放资源。
+源资源在进入作用域或首次迭代时取得；附件元数据参与 JSON／审计，活资源 source 不参与序列化。
+ready 附件必须有 source，failed 附件仅携带失败说明；接口不要求 provider 预先下载为本地源文件。
+入站保留消息类型、会话展示信息、引用、原始接收时间与 payload 引用；发送者必填，可只提供名称，
+内部路由状态由接线对象持有，provider metadata 原样进入业务记录。
+
+本次同时交付 `bazaar-contrib-audit` 的发布契约和 NodeAudit 服务，agent 通过 AUDIT 依赖无条件发布当前执行链路的输入、会话／turn、完整输出、审批及关闭事件。
+NodeAudit 使用 ctx.announce(AUDIT_EVENT, event)；公共事件包含 AuditContext、运行标识与发布序号、发生／接收／单调时间及完整 JSON payload。
+发布调用沿用 main `AuditRecorder.append` 对消费异常的日志处理。
+HarnessOutput 的 kind 接受 provider 的事件类别，保留 provider 事件名、会话／turn 关联、发生时间、原始 JSON 与现有公共字段。
+默认声明与 V4→V5 启用 audit；独立 agent 组合显式提供该服务，事件消费者沿普通 listen 订阅。实现按[完整行为事件与 NodeAudit](roadmap.md#完整行为事件与-nodeaudit)的来源和分工交付。
+
+Codex、Claude Code 及 Telegram／Lark／WeCom 等具体 channel 实现统一在 open-bazaar 独立插件仓库维护。agent 声明其实际导入的 audit／channel／harness 发行依赖，初始配置选择 agent 及对应服务入口。V4→V5 按旧 runtime 的 kind 加入所选 Codex／Claude Code 插件及 builder 声明；普通安装由用户通过 bcn contrib add codex／claudecode 选择实现。
+公共 channel／harness 包的节点安装示例使用 `bcn contrib add channel`／`bcn contrib add harness`。
+V4→V5 只在 `old.agent` 非空时启用 `channel-builders` 与 `harness-builders`，与 Agent 及其所选 provider 一起迁入。
+
+后续独立 Channel 插件迁移使用该异步字节流接口：
+
+- Telegram 沿 main `TelegramBotApi.download_file` 的 HTTP 分块读取及下载限额提供异步迭代器。
+- Lark 沿 main `LarkApi.open_message_resource` 与 `LarkResourceCache._download` 适配，保留响应头文件名、类型、下载限额、缓存及并发合并语义。
+- WeCom 在 HTTP 异步字节迭代上逐块执行 AES-256-CBC 解密并 yield 明文，保留原 IV、最多 32 字节填充校验及明文 SHA256；
+  读取按需执行并保留有限缓冲，完成校验后才结束迭代，不累计整份附件或创建中间密文文件。
+  引用消息身份依赖最终明文指纹，需在 Channel 的引用构造时完成该指纹，保留原身份、去重和引用关联。
+- 各插件持有 HTTP 请求、鉴权、解密及响应关闭；取消、读取失败及正常完成都释放源资源，消息层统一进行一次附件落盘。
+
+沿用 main 的 `core/channel.py`、`core/runtime.py` 与 `core/orchestration/turn.py` 的实际调用边界：harness 包拥有会话／turn 输入、运行指令与工具环境、输出流、审批请求／决定／结果及模型／skills 描述；channel 包拥有输入消息、附件、身份、发送与交付回执，并复用 harness 的审批载荷。两包使用 Pydantic 公共模型，provider 的连接／进程由其 Contrib lifespan 持有。执行流的时限、任务取消、终态与输出流 aclose 以 main 的对应路径为依据；main 已有的配置预算及完整会话／交付／恢复语义随所属执行编排任务迁入。
+
+Harness 的会话 start／reconcile／stop 保留 ProviderCallResult 的确认、失败和结果未知区别；
+reconcile 返回所属 session 及可选的恢复 stream。start_turn 在请求尚未写出时可抛出 HarnessSessionUnavailable，
+steer_turn 接受当前 session、turn、纯文本通知及 timeout，仅在 provider 确认后返回 True。
+has_background_job 查询所属 session 的后台工作；receive_event 接收 HarnessExpire，通知执行端在安全时机更新会话上下文。
+连接、进程和事件接收任务仍由 provider 的普通 lifespan 管理，Agent 在 Task16 消费完整契约。
+
+builder 配置以 ClassVar 声明 kind、entity_model 和运行 Contrib；共享注册入口按 kind 提供 builder key。provider 通过既有方法的返回结果和事件表达实际执行行为。core 的普通配置校验通过 Pydantic ValidationInfo.context 提供当前候选及现有外部声明组成的 Composition，agent 的配置模型从其中读取 builder 元信息，以实体模型预检选定参数。该上下文只含声明，沿用现有建图与生命周期流程。
+
+公开 compose 接受 agent 配置和所选 builder 声明，构造实体。实体先提供 AGENT 并 yield，再由所属 TaskGroup 启动各 provider 子组合；每个子组合通过 local=(CHANNEL_INPUT, CHANNEL) 或 local=(HARNESS_INPUT, HARNESS) 建立私有范围，运行输入只包含业务上下文。agent 持有所选 provider 的 Enablement 句柄；执行实例通过句柄的 ref(CHANNEL)／ref(HARNESS) 声明依赖，在子组合就绪后消费输入、调用所选 harness、转发事件和渠道审批，并由 core 既有依赖图先停止执行消费者。按 main 的 _consume_events／_forward 转发输出并在终态结束当前流，文本事件保留为事件，失败事件保留为 turn 终态；消息发送及完整故障状态随所属业务任务迁入。退出先结束执行流与会话，再退出 provider 子组合，最后释放实体。身份、工作区和现有配置保留在 agent 包。
+
+`loop.py` 持有持续接收消息、驱动 turn、转发输出并回到下一条输入的 agent 运行循环；内部使用 LoopConfig、run 和 loop 声明，生命周期任务及实例命名为 agent-loop。provider 子组合与循环实例的装配归 agent 入口模块。审批请求的 session／turn 与当前执行不符，或 channel 返回的 request_id 与原请求不符时，agent 路由记录 warning 日志，并返回使用原 request_id、带原因说明的 rejected 决定。日志明确包含期望值、实际值、审批 request_id、session／turn、agent、channel／harness 及目标会话，便于关联调用排查；reason 仅简短说明本次操作被拒绝的原因。harness 沿正常审批返回流程处理拒绝；approval.requested 保留原请求，approval.decided 发布实际返回的决定。
+
+真实验收由 TestChannel 注入自然用户消息、观察输出及处理审批，独立安装的小型 provider wheel／sdist 使用本地连接与隔离进程执行实际文件任务。每次验证使用自有临时配置与工作区，覆盖普通调用、审批往返、取消与资源退出，以及原有 agent 文件消费者和受影响安装流程。
+
+行为用例依据 main 的 `tests/contrib/test_orchestration.py`：`test_stream_events` 的事件转发、`test_approval_is_routed_to_the_current_channel_session` 的会话／原发送者／当前消息审批路由、`test_multiple_sessions_keep_workspace_and_correlation_isolated` 的会话隔离，以及 `test_graceful_stop_cancels_turn_and_closes_runtime_stream` 的取消与释放。现有 TestChannel／文档子进程验收扩展为同一会话连续请求、不同会话各自的目录与关联、审批关联及关闭中的实际进程退出。按 main `run_turn`／`_consume_turn_stream` 将子进程故障转为当前 turn 的失败事件，结束该流后继续处理后续输入；正常 EOF 按终态观察结果完成当前 turn。事件按 kind／thread_id 转发到所属会话，审批单独保留原发送者 id 和当前入站消息关联；普通发送沿用 main 的显式 target 与可选 reply-to 语义，随消息命令迁入。消息持久化、完整 actor／inbox／恢复与配置管理测试按原任务依赖顺序接入。
+
+- [x] 按 [channel 与 harness 公共接口](roadmap.md#channel-与-harness-公共接口) 交付两个独立公共接口包、Pydantic 输入／输出／审批模型及 CHANNEL_BUILDERS／HARNESS_BUILDERS；具体 provider 依赖接口包，默认 agent 通过同一接口调用。
+- [x] 提供 channel-builders、harness-builders 两个共享注册入口，builder 登记 provider 实体模型、运行入口和能力；将运行输入及 provider 的 runtime 命名统一改为 harness。
+- [x] app 默认组合启用两类 builder 注册服务，功能包继续拥有命令文案。
+- [x] 将所选 channel／harness 接入真实 agent 的局部组合；以独立 provider wheel 和真实控制面验证消费、调用、审批与资源退出，公共接口随同消费代码交付并 review。
+- [x] 交付 audit 公共包与必需发布服务，接入 agent 当前执行链路及 provider 原始事件；使用现有真实 provider 验收记录完整事件、来源、文件内容与时序，完成独立安装、受影响检查并修订原提交供 review。
+
+验收订阅器使用自身的 asyncio.Lock 串行追加审计 JSONL，锁覆盖文件打开、写入和关闭，
+防止并发事件的文件句柄互相覆盖；退出后仍逐行校验完整 AuditEvent、原始内容及关联和时序。
+
+### Task 12.1：为 agent 注入 developer instruction 与 bcc
+
+bcc 根帮助保留原说明、`-h`／`--help` 和命令使用提示；原生 Click 命令、格式化和 bcc 模板归 Agent 工具包。
+按 0.2 直接导入并注册 message、thread 和 reminder 固定命令，在 dangerous_individual 模式提供 inbox；
+命令集合由 Agent 工具持有。查看各级帮助不要求节点已经运行。
+
+按 main `app/agent.py`、`app/wrapper.py`、`core/instruction.py`、`resources/developer_instructions.md`，
+以及 Codex `start_session`／Claude `_open_connection` 的实际时机，将默认 agent 的初始化上下文提前至消息能力之前交付。
+实体准备 workspace 后，在 `<workspace>/.bcn/bin` 安装自身解释器启动的 bcc wrapper；退出和启动失败沿所属生命周期清理 wrapper。
+POSIX、Windows CMD 与 PowerShell 脚本文本分别放在 agent 的 `resources/bcc.sh`、`bcc.cmd`、`bcc.ps1`，
+使用现有 Jinja2 加载并渲染 agent／mode 与自身解释器路径，保持原生成内容和各平台引号规则。
+POSIX 与 Windows 沿原 wrapper、stdin 和 UTF-8 行为；其他 workspace 文件保持持久保存。
+
+agent 在每次建立 harness session 前渲染现有 developer instruction 资源，注入 agent 身份、实际 channel 名称、
+harness、workspace、mode 与本次 session id；同一次 SessionInput 提供 instructions 和 environment。
+环境将 wrapper 目录前置 PATH，携带 agent／mode、当前 actor 和 harness session 关联；provider 使用已收到的指令和环境创建实际进程或 SDK 会话。
+指令模板保留 main 的已有行为约束及 mode 分支，按[统一验收标准](#迁移实施与验收标准)删除 Agent ID 显示行、将 runtime session 显示为 Session，随 agent 的 wheel／sdist 发行；加载与渲染通过工作线程完成。
+
+bcc 是 agent 注入给模型的工具。Agent 的执行生命周期接受公共 CONFIGURATION，
+将所选 ConfigurationEnvironment、默认文档和现有 build 的导入标识写入私有临时配置文件，
+通过 SessionInput.environment 的 BCN_TOOL_CONFIG 交给工具进程；文件随 Agent 执行生命周期释放。
+这一配置环境包含实际选择的配置载体、选项和版本服务，沿用 Configuration.preview 的跨进程装配表示。
+sidecar 的公共 Client 表达远端调用与资源生命周期，连接方式和所需配置由具体实现持有。
+命令帮助与新增实现说明统一使用 `contrib`／`contribs`。
+
+2026-10-21 按进程边界修订：bcc 子进程用配置环境所指定的 Hub、真实配置载体和现有版本转换链，
+经 Hub.run 及 configuration 的 start 回调，把接受 CLIENT 的命令消费者作为唯一业务根。
+依赖选择和资源退出复用现有框架，所选 sidecar 实现直接提供 CLIENT 并持有实际连接。
+默认 Agent 和独立 editorial Agent 都接受 CONFIGURATION，在自己的 lifespan 持有 Tool，
+将 tool.path 交给 SessionInput.environment；bcc 的插件装配封装在 Agent 所属工具内。
+固定 message／inbox／thread／Reminder Click 命令、格式化和资源全部随 Agent 发行，
+只通过工具 request 回调使用公共 MESSAGES／REMINDER 服务；业务请求、身份／会话能力、结果和错误文案保持原行为。
+
+按 2026-10-21 确认，sidecar 的 CLIENT 允许多个调用同时在途并各自返回结果。
+公共 Request／Result／Failure 不携带流传输的关联字段；HTTP、gRPC 或串行底层实现自行决定调用方式。
+共享流协议在同一连接上支持多路复用：Call／Reply 封套携带相同的 UUID，内含原有 Request 与 Result／Failure，
+流客户端只用短锁保护惰性连接和完整帧写入，统一读取任务按 UUID 唤醒各请求，等待业务结果时不持锁。
+Unix socket、Windows named pipe 与真实 TCP 实现共用流协议收发；服务端在连接拥有的 TaskGroup 中并发分派请求，
+业务生命周期取消单个分派任务时，以同一编号返回 Failure，结束该调用的等待；其他请求继续运行。
+断开连接先取消并等待所属调用，再释放该连接的对象表与远端资源。
+Client 的请求可单独覆盖等待预算，默认继续使用所选实现的客户端配置。
+工具取得 CLIENT 后用公共 Client.request 获取目标服务并调用其 request，显式传 timeout=None，
+由既有业务 dispatcher 持有命令预算。bcc 调用结束或取消时，自己的 Hub 释放所选客户端及配置自举资源。
+
+使用现有独立安装的 TestChannel／文档 provider：自然用户输入建立真实 session，子进程收到实际指令与环境，
+通过注入 PATH 查找并运行固定 bcc 命令，查看消息、发送报告并登记 Reminder；
+文档子进程读取实际文件并保存报告，覆盖两个 agent、会话重用／隔离与退出。
+验证 wheel／sdist 内模板、wrapper 和公开入口均可用，保留原审批、失败后继续及关闭验收。
+
+- [x] 迁入默认指令资源与渲染、各平台 wrapper 生命周期，并在 harness session 创建前注入。
+- [x] 通过原生 Click 固定注册 bcc 命令，将实际 agent／actor／session 上下文交给命令。
+- [x] 扩展现有真实 provider 独立安装验收，完成受影响检查、Ruff 和根目录 LSP，以新签名 commit 交付并停下 review。
+
+### Task 13：为 agent 接入消息与会话
+
+命令调度器以明确状态控制接收和停止接收，in-flight 任务及排空 Event 保留实际资源与通知职责。
+sidecar 客户端保留明确的打开／关闭状态；按本轮多路复用要求允许并发请求，
+单请求预算独立，连接故障向所属等待方返回错误，提供者退出统一关闭连接。
+
+公共 MessageStorage 提供所属 Thread 的送达游标，MessageService 提供按 Actor 的非消费式未读汇总；
+底层沿用既有 read_unread_summary 的同一快照和最新端采样，供 Agent 通知与去重使用。
+
+以 main `core/orchestration/commands/messages.py` 的 MessageCommands、`core/storage.py` 的快照与持久化操作，
+以及 `contrib/sqlite/repository/{messages,sessions,search,facade}.py` 和 codec 为来源，交付独立 messages contrib。
+保留入站去重、会话 target／显示名与 handle 解析、跨 bot 同名目标发送、check 推进游标、read 读取快照，
+以及发送前两次新鲜度检查、按目标保存与恢复草稿、附件校验、可选回复关联、交付回执和 thread unfollow 的原规则。
+搜索保留前五个字面片段、时间／sender／target 过滤、原相关性公式、分页与 snippet，以及原查询取消语义；按本轮确认，执行预算由调用方可选传入，bcc 默认不设查询超时。
+按本轮 review 确认，发送者 ID 与用户名分别参与搜索过滤；同时保存两者的消息可用任一标识查到。
+
+消息记录、会话与 cursor 模型及命令结果迁入 messages；`core/actor.py` 的 Actor／Actors 作为消息公共契约迁入，
+内部服务参数、草稿归属、快照与锁的键统一使用 Actor，数据库记录及进程请求的 id 只在边界转换。
+messages-node 接受公共 DB、Node 迁移就绪服务和 AUDIT，持有自己的数据操作、按 Agent 分离的服务与生命周期；
+通过已有 Select／Insert／Update／Delete／transaction 表达原查询，沿用 Node 已发布迁移及当前基线。
+原搜索表达式需要的通用字符串运算随实际查询补入 storage 公共表达式，查询取消使用现有 backend 的中断机制。
+查询控制按 main `contrib/sqlite/storage.py` 的原边界恢复：普通读取借用 reader，目录、历史、未读摘要和搜索
+持有同一读取快照，check／freshness／落库仍在原写事务中；普通写入保留原 writer 操作边界。
+公共 Database 提供 read(snapshot, query_budget) 和 write(transactional)；SQLite 沿用已有 reader、transaction
+和 query_budget；MessageStore、MessageService 及 RPC 搜索请求透传可选 query_budget，默认 None。
+需要限制搜索的调用方显式指定秒数，公共消息层不再固定五秒；bcc 沿用默认值。
+使用当前节点数据库的只读一致性副本统计规模并测量实际搜索，正式数据库只读打开，测量在副本完成。
+独立 PostgreSQL 已有相同作用域实现。
+目录按 main 的 latest_message_ranked／latest_message／pending_message／target_catalog 集合查询表达，
+通用 Select 增加实际所需的 CTE、分区窗口及标量子查询，由 backend 的模板渲染。
+入站消息的附件按本次结果集批量读取；目标解析合并渠道与 handle 唯一性读取。
+搜索相关性所需的文档数、平均正文长度及全部关键词的文档频次恢复为 main 的单次聚合查询；
+使用现有 SUM／Case／Contains 表达，不逐个关键词重新扫描同一消息集合。
+未读调度同样恢复 main 的 unread_ranked 窗口 CTE，在数据库中只返回每个会话最新的未读消息，
+再统一补齐附件，避免读出全部未读消息后在 Python 中筛选。inbox check 的当前会话和未读条件在存储查询中生效后再计数、分页；message check 的 Agent／Thread 两种作用域均通过审批条件查询会话，只推进至实际交付的通知消息。
+按本轮查询 review，独立的目标投影与引用读取以协程并发处理，保持输出顺序、快照及 cursor 原子性。
+逐项核对完整 MessageStore 查询与原 SQLite storage/repository：在真实节点数据库的一致性副本上，
+对目录分页、review、历史与引用、未读、目标解析、附件、搜索结果及游标／新鲜度写事务作对照；
+仅允许已批准的 Actor 表达、调用方可选预算与逐段消息持久化差异。完整运行受影响 contrib 验收。
+
+从 `app/command.py`、`core/serialize.py` 及 `cmd/bcc/{message,inbox,thread,_client,_format}.py` 迁入对应请求校验、
+结果序列化；native Click 命令和格式化迁入 Agent 工具，通过所选 CLIENT 调用公共服务。
+Click 的正常命令退出在工具连接释放后交回原顶层，保留草稿拦截的原错误文案。
+CLIENT 的依赖和消费由 Agent 所属 bcc 工具在自己的进程中声明及装配。
+本机传输的选择和 endpoint 解析留在所选 sidecar 实现内。
+消息服务的进程边界沿用 CommandDispatcher 的 Actor 解析和 session binding validator，绑定由调用它的 agent 提供。
+sidecar 只负责转发框架调用，Agent 所属工具通过连接所属的通用消费入口请求 `MESSAGES`；
+消息依赖由该调用方声明并由框架绑定，sidecar 的定义及发行依赖均不包含消息或配置业务。
+V4→V5 保留 `if old.agent`，只在旧配置存在 agent 时加入 messages-node 和 legacy-node-migrations；
+只有 Bazaar Server 等其他 contrib 的节点继续使用通用通信入口。
+删除 `services` 配置模型、服务 key 字符串解析及全部默认／转换／测试用法。
+原 `resources/command/` 保留业务格式化与模板字节；bcc 的输出格式化、相关模板及 TextTemplate 随 Agent 工具发行。
+channel 公共契约按原发送链路补齐 DM 地址、目标显示及交付信息，消息服务消费实际 channel，不持有 provider 生命周期。
+`app/attachments.py` 的 AttachmentMaterializer 迁入 messages-node，保留暂存、原子落盘、文件上限及按数据库引用清理。
+消息导入通过异步资源作用域逐块消费字节流，并在成功、失败和取消时关闭；保留附件类别及原始失败说明。
+所有附件文件平铺为 `attachments/<uuid><suffix>`；`_stage` 只接收字节流和目标路径，
+在内部用标准库 `tempfile.mkstemp(dir=destination.parent, prefix=".bcn-", suffix=".part")` 创建同层临时文件，
+并持有其写入、fsync、关闭、原子发布及异常清理。调用方只负责最终附件身份和目标路径。
+并发导入的每个附件独立持有源流、临时文件与最终路径，目录创建使用可重复的 mkdir，文件写入和发布独立完成。
+清理按临时文件前后缀、最终文件身份与数据库引用执行，删除未引用的自有文件和未完成写入。
+Messages 在读取附件字节前准备稳定的附件 ID、名称、类别及媒体类型，源可用时以 `downloading` 状态随入站消息登记；
+Channel 已报告失败的附件保留其 `failed` 及原始失败说明。每个附件完成后沿用登记时的 ID，
+通过所属 Agent 的公共存储接口回写 `ready`、相对路径和字节数，或 `failed` 及失败说明。
+入站附件表已有的文本状态列和可空路径、大小、错误列承载这些状态；回写以消息归属和附件 ID 定位现有记录。
+MessageService 的公开附件导入入口通过 Pydantic 校验调用方提供的 UUID，标准 UUID 字符串用于文件名；
+省略 ID 时仍生成 UUID，复用 Agent 预留身份及现有下载、落库流程。
+check／read 在下载期间显示文件名、ID 和 `state:downloading`，完成后显示既有路径或失败格式，重启读取仍使用已保存引用。
+默认配置选择 messages-node 及其数据依赖，由 manager 恢复；Python 发行依赖由实际导入接口的消费者声明。
+Agent 所属消息 CLI 消费工具提供的请求回调；所选 sidecar 实现由节点配置声明并由 manager 恢复，各包的发行依赖只声明实际导入的接口包。
+独立安装验收在准备工作区及附件路径前解析临时根目录，沿用实际 agent 的工作区路径语义，覆盖 macOS 的 `/tmp` 符号链接。
+
+按消息接口拆分 review，`bazaar-contrib-messages` 保留 Actor、消息／会话／附件、状态及请求和结果类型，
+定义 `Messages`、`MessageService`、`MessageStorage`、写入作用域 `MessageSession` 和 `ThreadConcurrency` 公共 Protocol，
+并导出同一 `MESSAGES` key。契约包只声明直接使用的 core 和 channel 公共依赖。
+`bazaar-contrib-messages-node` 承接现有 MessageStore／repository、消息业务、发送与草稿、附件管理、
+会话锁实现、命令分派、业务模板及绑定生命周期，通过 `messages-node` 入口提供 `MESSAGES`；
+message／inbox／thread 原生 Click 命令及输出模板随 Agent 工具发行。公共模型和模板保持原内容。
+消费者通过 `accepts` 声明服务依赖，装配方通过 `ctx.accept(MESSAGES)` 获取服务并绑定某个 Agent，
+将产生的消息服务显式传给 collaboration；内部调用直接使用接口对象。
+`MessageStorage.write` 把通用会话读取和保存交给同一次数据库 writer 回调，
+公开 `get_thread`、`get_channel_session`、`save_channel_session`，沿用原审核写入的 writer 边界及数据约束。
+查询、入站登记和交付持久化保留已有读取快照及事务作用域。
+共享回执转换移到消息契约的纯值转换，交付执行器消费相同转换；collaboration 不导入消息实现。
+独立安装验收分别安装契约及实现 wheel／sdist，通过现有真实 TCP Channel、sidecar、持久化和重启工作流验证服务绑定；
+同时核对只安装消息契约及其声明依赖时可以导入全部公共契约，默认配置、V4 转换及 manager 索引选择实现发行包。
+
+- [x] 交付 bazaar-contrib-messages 公共契约及 bazaar-contrib-messages-node 消息、历史、收发、附件和命令实现。
+- [x] 模块通过 DB 自持模型、schema 与显式查询，使用 schema 和调用登记入口，共享服务供 CLI／RPC 消费。
+- [x] 默认配置选择 messages-node，由 manager 恢复所选发行包；通过真实 TestChannel、隔离数据库和文件验证消息、历史、搜索、草稿及附件流程和资源退出。
+- [x] 完成独立包安装与检查，提交供 review。
+- [x] 验证同一条消息可分别按用户名及用户 ID 搜索，完成真实独立安装与持久化验收。
+
+### Task 13.1：统一 channel 分段交付、错误与退避重试
+
+按本轮讨论，重试策略归 channel 公共层；具体渠道只负责拆分发送操作、调用上游及映射错误。
+将 `Channel.send` 的整包发送边界改为 `prepare_send`，返回逐个文本分段、上传或附件发送的单次操作；
+公共 `ChannelSender` 串行执行这些操作。每个操作独立计算尝试次数与指数退避，成功部分不重复发送，
+每次重试沿用同一个 operation id；仅在渠道明确保证幂等时，才重试可能已送达的操作。
+按本轮 review，`ChannelRetryPolicy.timeout` 表示每次发送尝试的完整时限：准备阶段和每个上传／消息操作的
+每次尝试分别从零计时，各分段及重试沿用相同的时限；移除重复的 `attempt_timeout` 字段。
+公共策略通过有限尝试次数、指数退避与 jitter 控制重试，并尊重上游 retry-after；
+退避等待消费已存在的公共 TIMER，等待完成后才开始下一次尝试的计时。
+
+公共 `ChannelError` 保留上游原始错误信息及可选错误码，并提供连接、超时、限流和拒绝等常见子类。
+错误类型与发送阶段、确定未发送／可能已发送及可重试性通过 `ChannelError.detail` 显式报告；
+`ChannelSendAttempt` 只携带不可变的 operation id、尝试次数和时限。公共执行器依据明确报告的错误事实决定重试；
+准备及上传操作失败按未发送处理，未分类的消息操作异常或公共时限到期保留 unknown。
+公共层保留每段结果及先前确认回执，后段确定失败返回 partial，不确定结果返回 unknown；
+messages 直接消费统一执行结果，移除把所有异常一律归类 unknown 的旧边界。
+
+每个实际可见的消息操作必须公开其正文、附件和目标；上传操作只保留操作回执。
+公共执行器在每段返回回执后、执行下一段之前通知 messages，由 messages 立即保存该段的正文、
+附件、上游消息 ID、状态和独立本地消息 ID。持久化在上游重试边界之外，保存失败不能重发已接受的段。
+同一次发送的各条记录通过原始发送 ID 关联，第一条实际消息沿用命令返回的消息 ID；
+聚合交付状态与完整操作回执保存在该条记录的元数据中，不覆盖其实际正文、上游 ID 或分段状态。
+新建私聊在首条有交付证据的消息回执到达时建立会话并写入该段。后续分段仍在发送时，
+按前段上游 ID 收到的引用即可关联已有消息，重启后各段仍分别可查询。
+
+在已安装 wheel／sdist 中，通过真实 TCP TestChannel 控制面验证多段与附件发送、后段限流恢复、
+独立退避及稳定 operation id、原始错误与阶段信息、已确认结果保留和资源退出。
+在真实 TCP 往返中让后段经历多次可重试拒绝、退避及延迟确认，累计耗时超过单次时限后仍可交付，
+验证每次尝试与后续分段都获得完整时限；丢失确认时按单次超时、交付未知及所记录的超时证据验收。
+逐段核对实际消息内容、附件与上游 ID 的持久化，并在后段待确认时从 TestChannel 注入引用前段的入站消息，验证引用立即关联以及重启后的记录。
+验收中的只读 SQLite 查询在返回消息记录时显式关闭连接，确保 Windows 也能在流程结束后删除临时数据库。
+消息限流验收通过现有 sidecar RPC 读取实际节点 TIMER 的 tick_ms；50 ms 退避的耗时检查计入一个调度刻度的精度，
+继续验证真实 TCP 重试、稳定 operation id、前段不重复发送及逐段持久化。
+现有消息、草稿、附件及 CLI 行为验收继续运行；按实际公共接口导入补齐依赖与 TIMER 声明。
+
+- [x] 交付公共错误、单次操作契约及统一分段退避执行器，并接入 messages。
+- [x] 扩展真实 TestChannel 与独立安装验收，完成受影响检查、Ruff 和根目录 LSP。
+- [x] 在原 channel 功能提交中签名 amend，更新 PR 验证信息后停下 review。
+
+### Task 14：为 agent 接入身份与协作
+
+原节点的 `core/review.py`、`core/orchestration/commands/review.py` 以及
+`core/orchestration/orchestrator.py` 的 `_record_inbound`／`_answer_unreviewed` 是本项迁移依据。
+`messages` 已拥有 sender、channel session、thread、Actor、已知发件人查询及引用读取，
+collaboration 消费这些公共契约，保持同一会话登记、审核状态和消息数据。
+原 `bazaar_compute_server/refs.py` 的短数字映射与 `v02_refs` 属于服务端页面和数据源，
+归 server 本体，在第 11 阶段迁移；节点本项的引用关联使用现有消息 ID 和上游消息 ID。
+
+共享 `COLLABORATION` 依赖 `MESSAGES`、DB、AUDIT 和共享 TIMER，通过所属 agent 的绑定生命周期提供协作服务；
+内部 agent／thread 参数和归属键保留 `Agent`／`Thread`，与 messages 共用会话锁。
+准入以数据库中的会话审核状态为准，新会话默认待审；保留原可信入站审核标记及已保存的审核结果。
+调用方经 sidecar 获取 collaboration 公共服务后查询、通过或拒绝，状态持久化和审计由服务持有。
+原 `ReviewPolicy` 的 `listed`、`reviewed` 及配置白名单装配从本项公共 API 和验收入口移除。
+入站登记沿用原安静回显去重、已交付出站优先的引用解析、可信入站审核标记、
+原子会话登记、已拒绝会话再次入站转待审及原入站审计字段；返回原登记结果供 agent 编排消费。
+channel 公共入站载荷补齐原 provider 入站消息已有的 chat ID、通知／提及标记及 metadata，
+使实际渠道能够携带安静历史、引用 ID 和可信审核标记；默认值保持现有消费者行为。
+未审核自动答复读取 `review.reply`，通过公共 channel 发送契约及共享 TIMER 交付，
+保留答复及失败审计。审核沿用原会话归属校验、并发锁、状态持久化和 `channel.session.reviewed` 事件。
+collaboration 保持独立发行，只消费 messages 公共契约。审核决策由 collaboration 持有：
+在共享会话锁及同一次 `MessageStorage.write` 回调中读取 thread 和 channel session，
+修改审核值后通过通用 `save_channel_session` 保存，再发布审核审计；消息接口以通用会话操作表达，
+MessageStore 和 repository 的专用 `set_review` 由这一调用链替代。设置等自身业务数据仍通过 DB 管理。
+设置读取及 upsert 通过公共 DB 操作现有 Node 迁移的 agent 级 `settings` 表，
+`setting.changed` 只记录 key；不重复创建已属于 Node 历史的结构或版本。
+
+本轮确认一并恢复 9 月 20 日曾实现后撤回的重复入站修复 `e0ebfbd`：
+messages 的登记先用到达载荷中完整的渠道实例身份查找会话，随后复用已入库的消息并补回该身份。
+原历史消息行没有保存 `channel_identity`，直接用重载消息查会话会误报身份变化；
+同一上游 ID 的引用补历史或再次投递应复用原消息和会话。使用真实 TCP 入站在重启后再次投递已入库消息，
+验证原审核状态、会话身份、消息记录及后续新消息均保留。
+
+app 默认配置选择 collaboration，manager 官方索引收录其独立发行包；
+V4 配置存在 agent 时添加 collaboration。各发行包按实际公共导入声明依赖。
+真实外部 consumer 通过 accepts／offer／绑定调用服务，sidecar 沿用公共框架转发 typed 对象及调用。
+在独立安装 wheel／sdist 的隔离节点和 TCP TestChannel 上验证两个 agent 的身份及会话隔离、
+新会话默认待审、sidecar 控制的待审／通过／拒绝及再次入站、原消息可见范围、
+自动答复和审计、重复入站、安静出站回显、入站及出站引用、设置和审核重启恢复。
+
+- [x] 交付 collaboration 公共服务及持久化准入、审核、原入站关联和设置实现。
+- [x] 接入默认选择、版本转换和独立发行，通过真实隔离安装验收及受影响检查、Ruff、根目录 LSP。
+- [x] 独立签名提交，更新 PR 验证信息后停下 review。
+
+本项及受影响的 channel、agent、messages、配置转换、app、manager 和根目录脚本共 15 项本地 pytest 通过。
+collaboration 的独立 wheel／sdist 消费者通过真实 sidecar 操作审核和设置，
+在 TCP TestChannel 上完成两 agent 隔离、引用、安静回显、自动答复及失败、重启与重复入站验收。
+既有消息及 agent 的独立安装工作流和四种 manager 安装／升级工作流通过；
+Ruff、仓库根目录 Pyright LSP 和原 12 份消息模板一致性核对通过。
+
+### Task 15：为 agent 接入 Reminder
+
+scheduler 以 frozen／slots 状态联合类型直接携带驱动任务和 frontier timer，统一未启动、运行、停止中和已停止的表达；任务故障状态直接携带异常，命令入口使用明确接收状态。保留原有唤醒、到期与退出行为。
+
+以 main `53d925f` 的 `core/models/reminder.py`、`reminder_owner.py`、`core/reminder.py`、
+`reminder_schedule.py`、`core/orchestration/reminder.py` 和 `commands/reminders.py` 为业务来源，
+迁入 `bazaar-contrib-reminder`；模型状态、请求与结果、周期计算、单全局 frontier 定时器、
+60 秒时钟复核、失败重试、到期批处理、版本并发保护、不可用提醒取消及启动未读恢复保持原行为。
+`app/resource_dispatch.py` 的 Reminder 分支迁入该包；`cmd/bcc/reminder.py`、Reminder 格式化、
+三个 bcc 模板及错误模板逐字迁入 Agent 工具，通过所选 CLIENT 访问 REMINDER 公共服务。
+命令完成事件由 `_append_audit` 统一写入审计服务。
+Reminder 消费公共 `Timer` 契约时，参数和成员统一命名为 `timer`。
+Reminder 的绑定参数、scheduler 参数与内部唤醒转发统一命名为 `wake`。
+
+Reminder 自有定义和状态由 DB 公共查询操作读写，沿用 Node 迁移中已发布的 reminders 表和版本账本，
+通过 SCHEMA／LEGACY_NODE_MIGRATIONS 依赖等待其就绪。消息接口补齐已有的会话列表、消息定位、
+系统消息保存及全局未读恢复操作；消息服务提供可加入调用者 Session 的消息作用域，
+Reminder 在 DB 的一个事务内更新提醒状态并通过该作用域保存系统消息，保留原子提交／回滚。
+消息实现持有消息归属、路由校验和序号分配，不增加 Reminder 专用消息方法。
+共享 Reminder 服务提供按 Actor 的命令绑定、全局 scheduler 的 start／stop／wait_failure 和唤醒回调；
+执行组合在完成 agent 绑定后启动 scheduler，完整 agent 执行接线沿 Task 16 交付。
+
+默认配置、V4→V5 的既有 agent 转换与官方索引选择 reminder；app 发行元数据仍只声明自身直接使用的包。
+从实际 wheel 和 sdist 在独立环境运行真实 timer／SQLite／消息实现和 sidecar 消费者，
+验证登记、修改、延后、取消、周期、到期系统消息、未读与锚点、重启恢复、两个 mode 的 Actor 范围及资源退出。
+
+- [x] 交付 bazaar-contrib-reminder 的持久化、到期、snooze、更新、取消及唤醒规则，依赖 DB、schema、timer 和消息。
+- [x] app 默认安装并启用 reminder，复用节点共享 TIMER；持久化与唤醒业务归 Reminder 插件。
+- [x] 以真实定时器和隔离数据库验证到期、更新、取消、持久化及清理，完成独立安装与检查，提交供 review。
+
+验收：本项和受影响的 messages、collaboration、配置转换、app、manager、根目录脚本共 14 项 pytest 通过。
+Reminder 的 wheel／sdist 经独立节点、真实 TCP TestChannel、sidecar 和原 bcc 命令完成
+登记、修改、延后、取消、周期、到期系统消息、锚点／未读、两种 mode 的会话范围及离线后恢复。
+单独按声明依赖安装的 wheel／sdist 均成功导入 Reminder 全部模块，依赖闭包不含消息实现包。
+Reminder 模型、请求、周期计算三个源文件和四份 bcc 模板逐字一致；
+命令、scheduler 及辅助函数按 Actor／公共 timer 适配核对，dispatch／格式化方法和 CLI 文案保持原结构与内容。
+四种真实 manager venv／tool 安装升级流程、workspace Ruff／format、锁一致性和 exact 根目录 Pyright LSP 均通过。
+
+### Task 15.1：业务迁移独立登记与 Legacy Node Migration 接续
+
+agent、messages-node、collaboration、reminder 各自持有当前表结构基线与从 1 开始的后续版本链，
+直接在 Contrib.accepts 声明 SCHEMA，在自己的 lifespan 中登记 ModuleSchema，完成登记后再提供服务。
+迁移按 package／version 独立记录，各包内部按版本推进。ModuleSchema 删除手填的 package；
+SCHEMA.register 在当前 contrib 的生命周期上下文读取 Context.source.package，以发行包规范名登记。
+Context.source 直接公开入口发现已保存的发行来源；没有发行来源的登记在写入前报错，不用实例名代替包身份。
+运行期 modules 按推断出的包名索引声明，调用方只维护自有表、迁移和历史来源。
+可选 Server 同步删除重复身份声明，安装验收经真实入口发现取得 Context，并使用业务自有基线验证 Node／Server 根切换。
+
+`bazaar-contrib-legacy-node-migrations` 的 `legacy-node-migrations` 入口持有已发布的完整 Node 1～32，
+历史表定义、公共操作及数据转换以 main 和 Task 15 的实现为来源，保留跨表步骤和原版本顺序。
+Progress 可声明旧统一账本的 package，作为历史进度来源；已有旧表、统一账本记录及其身份均保留。
+Legacy 从 `bazaar-contrib-node-migrations` 或旧 schema_migrations 接续，新增进度记入自动取得的真实发行包身份。
+该 contrib 调用 SCHEMA.register(..., upgrade_only=True)，只接续已有历史进度；
+空库及已完成的历史不执行建表或重新夺取归属，完成后提供 LEGACY_NODE_MIGRATIONS 就绪服务。
+Node 业务 contrib 显式依赖该就绪服务，历史完成后各自登记，不扫描发行入口或集中登记业务版本。
+
+SCHEMA 的 ModuleSchema 增加 predecessor 声明，以公共 Dependency 表达前身包及交接版本。
+业务模块声明 Legacy Node 32 为前身；引擎读取前身账本及其已登记历史来源，已完成交接点时将原表归属转给该业务模块，
+在同一事务登记其基线进度而不重放建表，再执行该模块新增版本。
+空库没有前身进度，直接执行各包基线。独立注册、重启及后启用的业务模块均按各自账本继续。
+Server 的登记与独立历史接续继续使用同一通用引擎；SQLite／PostgreSQL 只负责公共存储操作。
+
+验收从原只读迁移生成 1～32 数据库，与原升级结果比较业务数据、关联、序号、搜索和旧账本；
+从拆分前真实 0.3 实现生成已登记数据库，验证旧包身份、归属交接和已执行步骤不重放。
+验证真实 contrib 启动次序、各包独立登记、当前基线、新增业务版本、重复启动及保留业务数据。
+执行独立 wheel／sdist、SQLite／PostgreSQL、Server 及受影响消费者、Ruff、锁和根 Pyright LSP 检查。
+从 PyPI 最早可下载的 0.1.3 和仓库最早 v0.1.0 标签分别安装真实旧实现，使用其公共存储接口生成配置与业务记录；
+仅本次最早版本验收使用一次性容器，在隔离安装根直接替换为当前发行产物；其他版本继续使用已有隔离能力。
+检查配置转换、原账本、业务数据、迁移和重复启动，分别记录安装、配置和完整运行的实际结果。
+Sidecar 的独立安装验收仅构建应用、通用配置／管理和通信消费者实际使用的发行包，
+清理未使用的 Agent／audit／channel／timer／harness 测试构建项，并验证原生传输、TCP、热更新和退出恢复。
+将通用自有表／版本／lifespan 登记规范写入开发约定，在 schema README 给出简短可用示例；历史背景仅在 Legacy 包 README 简述。
+
+- [x] 收拢已发布历史为 Legacy Node Migration，业务包仅持有自己的基线和后续版本。
+- [x] 业务 contrib 自行登记，SCHEMA 按前身进度完成归属与基线交接，保留旧账本。
+- [x] 从实际 contrib 发行来源自动取得登记身份，删除重复声明并验证历史接续、独立发行和重启。
+- [x] 完成真实最早安装版直接升级当前产物的配置转换、数据及业务服务启动验收，记录完整 CLI 启动的当前阶段限制。
+- [x] 完成历史／当前库／空库／新版本及独立安装验收，修正同一签名功能提交并停下供 review。
+
+验收：本轮 91 项主仓库 pytest 通过，包含 core 43 项、schema 3 项、Legacy 历史／独立安装／真实业务 lifespan 38 项、
+四个业务独立安装及 scripts 3 项。此前的配置转换、应用配置、manager 和 Sidecar 12 项验收已通过。
+全部 32 个历史起点与原升级结果一致，已有 0.3、新增业务版本和重启保留数据与旧账本。
+新增未修改的旧引擎生成的统一账本 17 版夹具，验证自动身份下接续到 32、归属交接及重启；所有业务记录与原 32 版结果一致。
+SQLite wheel／sdist 验证逐包登记、基线和接续；真实 PostgreSQL 两种产物验证旧进度 17／32、空库、
+实际业务启动、独立新增版本及两次重启。Server 的原升级／基线和适配登记后的消费根切换通过。
+五个业务／Legacy 包的声明依赖导入及发行源码／资源／LICENSE 对照通过；README 示例独立打包并以不同入口名加载，
+wheel／sdist 均从 Example_Notes 元数据取得 example-notes 账本与归属，重启保留数据。Server 三项验收在两种产物下通过。
+32 项迁移与数据变换、21 项基线操作保持一致，保留声明均有引用；workspace Ruff／format、锁和根 Pyright LSP 通过。
+
+最早安装升级验收：PyPI 0.1.3 原 wheel 与 v0.1.0 原标签构建 wheel 分别在一次性容器内独立安装，
+使用对应旧版公共 API 写入真实配置、会话、收发消息、附件、游标及运行记录，随后直接换装当前真实发行产物。
+V1→V5 配置转换保留 Agent 身份、provider、模型、环境引用、endpoint 与数据库位置；
+原 3／8 版账本记录保持不变并接续到 32，所有现存业务表与未修改原实现的升级结果一致。
+四个业务 contrib 的真实 lifespan 启动、公共消息／线程／附件／搜索及两次独立进程重启通过，附件文件哈希保持不变。
+CLI 版本与直接安装通过；原配置的 CLI 依赖恢复仍需索引中尚未发布的 0.3 产物，本轮以真实本地包完成配置与业务服务验收。
+完整 Agent 执行及外部 provider 运行仍由后续对应任务验收。容器及所属临时运行环境在验收后移除。
+
+### Task 15.2：0.3 RC 版本与依赖约束
+
+app、core、当前所有内部 contrib 及已迁入独立仓库的 Server／PostgreSQL 使用自身版本 `0.3.0rc1`；
+各自发行与开发依赖、真实安装夹具引用内部 0.3 包时统一使用 `~=0.3.0rc1`，第三方依赖保留已有要求。
+PEP 440 的 compatible release 允许该下限之后的 RC、正式版及 0.3.x；正式版下限 `~=0.3.0` 会排除 0.3.0rc1。
+默认组合中的包选择和配置转换的 PackageRequirement 默认值同步采用 `~=0.3.0rc1`；
+manager 官方索引由共享 uv.lock 生成包名和来源，不单独写版本，随工作区 lock 更新核对生成产物。
+core 的 `API_VERSION = "0.3"` 表示公共框架契约版本，继续用于现有 API 兼容判断。
+manager 的独立安装流程以真实 RC wheel 验证首次安装、依赖恢复及后续正式版本升级，保持原包安装、配置保存、运行应用流程。
+安装夹具从当前 app 元数据读取起始版本，并生成下一补丁版本的真实 wheel；首次安装选择升级目标之前的包，升级和新环境恢复共用同一目标，随 RC 发行自动推进。
+应用、manager、agent-command 和共享 sidecar 安装验收通过 `uv python find` 定位隔离环境的解释器，不拼接操作系统专用的可执行文件路径。
+在隔离 tool／venv 和本地真实包索引完成 wheel／sdist、默认配置和历史配置转换的独立安装验收，
+核对全部内部包元数据、原第三方要求和锁中已选第三方版本，执行受影响检查、Ruff 与根 Pyright LSP。
+参考：[Python 包版本约束](https://packaging.python.org/en/latest/specifications/version-specifiers/#compatible-release)、
+[uv 预发布解析](https://docs.astral.sh/uv/concepts/resolution/#pre-release-handling)。
+
+- [x] 统一内部发行版本、依赖约束、默认配置及转换需求，并更新共享锁与官方索引。
+- [x] 使用真实 RC 发行产物验证独立安装、依赖恢复、配置转换及版本升级，通过相关检查后提交供 review。
+
+验收：27 个工作区发行包及 Server／PostgreSQL 共 29 个包、58 份 wheel／sdist 的版本和依赖元数据均与源码一致，
+原第三方要求及共享锁中 29 个第三方包的完整记录保持不变，官方索引仍正确列出 25 个内部 contrib。
+两种产物均经真实本地索引在独立 tool 中安装 RC，无额外预发布开关；默认组合自动恢复全部依赖，
+实际 CLI help、默认空 Agent 组合的 run、正常退出及再次启动通过，SQLite 完整性与外键检查通过。
+公共 V4→V5 转换产出的全部包需求为 `~=0.3.0rc1`，Server／PostgreSQL 公共入口能以 RC 契约导入。
+8 项现有 CI Blockbuster pytest 通过：配置转换 3 项、应用 1 项、manager 的 venv／tool 安装与运行中管理工作流 4 项，
+其中真实 RC 安装可升级到正式版本产物。workspace Ruff／format、共享锁及根 Pyright LSP 检查通过；
+Server／PostgreSQL Ruff／format 与独立构建通过，所属临时安装、索引服务和节点进程已回收。
+
+### Task 16：补齐 agent 执行、恢复与替换契约
+
+- [x] 在消息服务公开入口校验附件 UUID，复核预留身份及真实附件下载、落库流程。
+- [x] 接收时间缺失时按 Unix 墙钟毫秒保存；公共 Timer 的单调时钟继续用于等待及间隔。
+- [x] 附件清理识别公开入口接受的所有合法 UUID 文件名，保留数据库引用的文件并清除孤立附件；UUIDv7 是默认生成方式。
+
+Agent 的 Channel 集合、Connection、Runtime 和 turn 使用明确生命周期状态；Connection 排空阶段合并进 state。ActorLoop 的会话状态以 frozen／slots 联合类型携带会话绑定和错误，移除并列的 busy／stale／error 标志；繁忙依据实际批次任务判断，失效数据属于会话绑定，保留合批、steer、恢复、后台保护与退出次序。
+
+会话建立按首次尝试加最多三次重试执行；失败后的重建通过公共 TIMER 进行带 full jitter 的指数退避，
+三次等待上限依次为 1000／2000／4000 ms，并受 Timer 最大延迟约束。UNKNOWN 先 reconcile，
+只有确认该次会话建立未成功才进入重建重试；恢复出活动 turn 时保留既有错误处理，已发出的 turn 沿原结果确认流程处理。
+取消时释放退避句柄，达到重试上限后交还现有 provider 故障与切换流程。
+
+已迁入能力逐项与原实现核对，覆盖启动与配置、命令和文案、Actor／消息／审批、持久化、调度、故障恢复及资源退出；
+每项保留原实现位置、当前所属包与验证依据，行为差异仅采用已明确确认的调整。
+本次按原源码 194 个 Python 模块登记归属，并逐项映射原 orchestrator／turn 的 98 个函数与方法。
+具体 Channel／Harness provider、节点平台管理和配置审核命令按后续所属任务承接，公共契约不代表这些插件已经实现。
+
+| 原实现与行为 | 当前归属 | 对照和实际验收 |
+| --- | --- | --- |
+| `app/config.py`、启动、自举、配置保存和运行更新 | app、config、config-filesystem、config-versions、manager、node-management | V1→V5 文件转换、独立安装、在线／离线管理、实际 run 与退出 |
+| `app/agent.py` 的 Agent 身份、工作区与装配 | agent | 两种 mode、默认和自定义 Agent、空实体及热更新 |
+| `core/actor.py` 的会话隔离和 Agent 共享 | messages 公共 Actor／Actors；agent 调度 | 两种 mode 的原生 bcc、会话目录与关联 |
+| `app/wrapper.py`、指令和原生 bcc | agent；命令由所属 contrib 登记 | 包装资源、指令渲染、两种 mode 共 60 组帮助输出对照 |
+| `orchestrator._notice_for`、`turn.inbox_notice` | agent 调用 Messages 公共未读汇总 | 原模板和渲染结果；start／steer 只传通知，实际子进程用 bcc 读取 |
+| `_runtime_loop`、`_steer_active_turn` 和 turn 参与者 | agent AgentLoop／ActorLoop | 运行中更新、静默合批、接受后加入、拒绝后下轮处理、已读去重 |
+| `_ensure_runtime_session`、`_recover_turn` | agent；实际资源由 Harness 持有 | confirmed／failed／unknown、重建、真实会话文件丢失及恢复 |
+| provider 选择、隔离、故障切换和关闭 | agent 调度；Harness 生命周期 | 配置顺序、现有绑定、隔离与试探、失败后恢复、独立关闭任务 |
+| 失效通知和后台工作保护 | Harness 事件与查询；agent 调度 | 真实上下文文件变更、独立后台归档进程、闲置释放和热替换 |
+| turn 输出、工具、usage、provider 原始事件和关联 | Harness 公共事件；agent 转发；audit 发布 | 完整事件字段保留、会话／turn 校验、参与会话路由和终态收口 |
+| `turn._request_approval`、模式、发送者和结果关联 | agent ApprovalRoute；Channel 展示 | 会话模式人工审批、非人类锚点拒绝、dangerous_individual 自动批准 |
+| 失败与未知结果反馈 | agent 调用公共 ChannelSender | 原英文反馈和拒绝资源、失败后后续请求继续执行 |
+| `commands/messages.py`、收件箱、历史、搜索、新鲜度、草稿和 unfollow | messages 公共契约；messages-node 实现 | 113 项声明对照、原文案、真实 TCP／SQLite／原生 bcc 和重启 |
+| 目录、引用、游标、普通读取与快照写入 | messages-node；通用 DB 由 storage／sqlite 提供 | 原查询及编解码对照、只读快照和真实持久化；保留已确认的可选查询预算 |
+| `app/attachments.py` 的暂存、原子落盘、上限和清理 | messages-node；通过公共 Messages 导入 | 原方法体、分块文件、附件类别与失败状态、重启引用 |
+| `record_inbound`、引用、持久化审核和自动答复 | collaboration 调用 Messages；自身设置由自身保存 | 原方法仅适配公共接口及已确认准入规则；真实重放、引用和审核重启 |
+| 分段交付、重试、回执和逐段持久化 | ChannelSender；messages-node 保存消息 | 按已确认设计保留前段回执、后段失败、引用前段及重启读取 |
+| Reminder 命令、日历、锚点、持久化和调度 | reminder 调用 Messages 和公共 Timer | 7 个文件逐字节对照、命令及调度声明对照、实际到期唤醒和重启 |
+| `core/timerwheel.py` 的 tick、代次、等待、取消和关闭 | timer 公共契约；timer-wheel 实现 | 原截止 tick 和到期后取消语义、真实计时／跨层／资源关闭 |
+| SQLite 历史 1..32、基线和表归属 | legacy-node-migrations；各业务自持 schema | 全部历史函数与 21 个基线操作对照；38 项历史和实际业务 lifespan 验收 |
+| 通用通信、异常和所属资源退出 | sidecar／平台传输、core；命令业务留在所属 contrib | 真实分块 socket、错误返回、热更新排空及整节点取消 |
+| 标准日志、来源上下文、文件轮转和故障 | logging、core；audit 为公共事件接口 | 真实线程与文件、异常堆栈、轮转及依赖故障验收 |
+
+Actor 继续作为内部流通的身份原语。AgentLoop 管理整个 Agent 的接入、provider 和资源生命周期；
+ActorLoop 保存一个 Actor 的队列、会话与运行状态，AgentLoop.run(loop) 执行该 Actor 的常驻消费循环，
+运行中的循环按 Actor 保存在 actor_loops 中。队列条目命名为 Wakeup，携带触发消息、runtime 和回复上下文，
+支持静默合批与运行中 steer。
+
+- [x] 统一 AgentLoop／ActorLoop、actor_loops、run(loop) 与 Wakeup 的命名，完成 Ruff 和根目录 Pyright LSP 检查。
+- [x] 空闲等待按是否存在 expiry 任务直接构造 `(receive,)` 或 `(receive, expiry)`，交给 `asyncio.wait(..., return_when=FIRST_COMPLETED)`。
+  按 [asyncio.wait 的 Task／Future 契约](https://docs.python.org/3/library/asyncio-task.html#asyncio.wait)，
+  将公共 TimerHandle.wait() 包装为 expiry 任务；退出时取消原定时器句柄并取消、回收接收与计时任务。
+  保留消息交接、剩余空闲扣减与后台任务保护，以 Ruff、根目录 Pyright LSP 和现有真实独立安装 Agent 验收确认。
+
+Harness 抽象保留既有执行能力，Agent 以现有 contrib 装配这些能力：
+
+- [x] 同一会话多条通知合并进一轮或经 steer 加入时，沿用原 `join_turn` 保留第一条参与消息的工具审批关联；
+  用不同发送者在上一轮执行期间排队的真实消息验证，后续消息继续保存在收件箱供读取。
+  普通消息的目标和引用由 Agent 通过 bcc 显式选择；按已确认调整，turn 事件只携带会话路由，
+  工具审批单独保留请求定位。真实 Channel 验证运行中 steer 后的事件路由与审批关联。
+- [x] 存活会话的 bcc 身份绑定沿用原 `_validate_actor_binding`，有效能力在 turn 结束后的闲置期间继续可用，
+  会话释放后失效；真实后台归档子进程在 turn 结束后读取会话历史，完成归档后再允许闲置释放。
+  事件按参与会话分别转发和记录异常，保持单个 Channel 展示失败时其他参与会话继续收到事件。
+- [x] 入站沿原 `dispatch_inbound`／`_ingress_loop` 按 Thread 排队处理，同会话保序、不同会话并行；
+  Channel 与所选 Harness 的已受理计数覆盖入站队列、持久化及后续 Actor 工作，整节点退出取消并清理这些队列。
+  AgentLoop 直接持有各 Channel 连接的 `receive(connection)` 接收协程，收到消息后连续完成
+  runtime 选择、计数登记与无界队列入队，交接期间不挂起；入站及 Actor 工作的计数均由 AgentLoop 释放。
+  `dispatch()` 将总队列消息按 Thread 分流，由 `ingest(queue)` 顺序处理；分流任务成员及诊断命名统一使用 dispatcher／dispatch。
+- [x] turn/start 与 steer 均发送原 `inbox_notice.tpl` 的内容无关通知，消息及附件由原生 bcc 读取；
+  Messages 公开按 Actor 查询的未读汇总和送达游标，读取汇总保持游标不变。启动取最新 100 条构造通知，已读队列项不再创建重复 turn。
+- [x] 同一 Actor 的 ActorLoop 同时等待 turn 终态和新通知；`ActorLoop.drain()` 按序取尽当前队列，
+  在开轮取批次、运行中 receive 完成和退出清理三处复用。运行中先接收该条消息，再收齐当前积压到 pending，
+  统一重置一次公共 TIMER 的 3000 ms 静默窗口，窗口结束后调用 Harness.steer_turn。
+  仅确认接受才将通知加入本轮，未接受的通知保留为下一批；
+  终态、队列交接及取消都由所属 ActorLoop 收口，通道事件覆盖本轮参与的会话。
+- [x] Harness 保留会话 start／reconcile／stop 的 confirmed、failed、unknown 结果，
+  reconcile 可返回恢复中的 turn stream；已写出的 turn 先确认实际结果，再决定下一步，明确未写出的会话丢失可重建后重试一次。
+- [x] Harness 公开后台任务查询和会话失效通知；失效标记所属 provider 的会话，
+  原会话在后台工作结束后的下一轮或闲置到期时重建。闲置释放先查询后台任务，存在工作或查询失败则重新安排公共 TIMER。
+- [x] Harness 按配置顺序及 Actor 的现有绑定选择，失败隔离一小时，成功解除隔离；
+  同一轮已尝试的 provider 不重复选择，全部隔离时试探最早隔离者，保留故障切换和最终错误反馈。
+- [x] provider 调用预算沿用 600 秒、启动恢复沿用 60 秒；普通入站的 turn attempt 使用消息身份去重。
+  会话从 Actor 解绑后，由所属 teardown 任务完成 provider 关闭并记录确认、失败或未知结果；
+  新一轮继续执行，provider 退役等待这些既有关闭工作，整节点退出按已确认要求取消所属任务。
+- [x] Harness 依赖故障导致接线实例进入 Failed／Blocked 时，每轮从公开 ctx.snapshots 读取自身故障状态，
+  直接释放已空闲且队列为空的会话，等待已受理工作及已有 teardown 完成；正常退役保留后台任务保护。
+  通过真实 provider 后台任务的文件 I/O 故障验证依赖清理到终态，并继续完成其他 Agent 的真实文档任务。
+- [x] session mode 的工具审批保持原人类消息关联，关联不符按已确认调整记录诊断日志并返回原请求 ID 的拒绝结果，
+  给 Agent 的原因使用简短文案；缺少可审批人时返回原拒绝文案；
+  dangerous_individual 保留直接批准及审计。原有通知、审批和错误反馈文案按所属 contrib 保存。
+- [x] 通过真实 TestChannel、独立 Harness 子进程及原生 bcc，验证运行中通知、静默合批、已读去重、
+  恢复／切换、后台任务保护、模式审批和退出。计划与本任务修正一同提交在原特性提交。
+
+现有 agent 的 `compose`、provider builder、`ctx.enable`、`loop.py` 的执行／审批／审计及指令资源作为接线基础。
+Agent 在 `Contrib.accepts` 声明 MESSAGES、COLLABORATION、REMINDER 和 TIMER，通过 `ctx.accept` 获取所选实现。
+每个 Agent 只建立一组 `Actors`、共享会话锁和业务绑定；Channel 的入站经 collaboration.record_inbound 持久化及准入，
+消息读取和交付走 messages，Reminder 的 `wake` 回调进入同一个按 Actor 调度的执行链。
+Reminder 的首次时区加载及持久化日历复发计算在线程中执行，原生命令和 scheduler 保持异步执行。
+Messages 的公共服务提供入站附件导入及消息格式化，沿用其现有格式化函数和文案资源，
+导入在异步资源作用域内消费 Channel 的字节流，按统一平铺路径落盘并保留原附件类别与失败状态；
+Agent 通过公共 Messages 服务导入 Channel 附件并渲染消息。
+Agent 先准备附件元数据并调用现有 collaboration.record_inbound 登记消息，以消息身份原子去重；
+登记返回后先检查 channel session 的 Approved 状态，已通过审核的会话进入附件下载。
+待审核或已拒绝的会话将待下载附件保存为 failed，说明下载需要会话通过审核，随后按现有条件回复未审核提示。
+仅首次创建消息的接收调用在 TaskGroup 中并发下载本条消息的全部待下载附件，各自完成后立即保存最终结果，
+全部结束后按原附件顺序组装消息。重复消息在打开附件源前结束。
+下载中的消息可由正在运行的 Agent 通过原生 bcc 读取，全部附件处理结束后再进入既有审核和 wake 条件。
+单个附件的正常下载失败保存其 failed 结果，其他附件继续完成；异常或取消时，TaskGroup 先取消并回收其余任务，
+已完成附件保留其结果，尚未完成的附件保存失败说明；普通异常记录后继续唤醒，使正文和失败状态可读取；取消等 BaseException 继续传播。
+现有真实 TestChannel 安装验收控制三个源：保持第一个下载挂起，释放后两个并观察其 ready／failed 回写，
+验证下载期间的 CLI 状态、原始顺序、稳定附件 ID 及实际文件内容，并重投同一消息确认单条消息及文件引用一致。
+同一验收向未审核会话发送受控附件源，验证接收无需释放源就保存审核原因及 failed 状态。
+运行尝试的 started_at_ms 保存 Unix 毫秒时间，调度和退避仍使用计时器。
+运行会话把随机命令 capability 与 Actor、session 绑定，Messages／Reminder 使用同一个 validator；
+指令、bcc 原生入口和审批／输出沿用现有公共契约。启动从 Messages 的未读 owner 恢复工作，闲置会话通过 TIMER 释放。
+默认组合分别启用无参数的 `agent-execution` 和持有 `config.agents` 的 `agent`：
+前者声明公共服务依赖、登记 Agent schema 并通过 ctx.enable 持有实体组合；后者接受其 AGENTS 服务及所选 builder，
+用同一 compose 函数构造完整条目并请求 Enablement.update。配置变更只替换变化的 provider 条目，
+稳定的 Agent 身份与执行条目继续持有 ActorLoop 和业务绑定；移除配置入口后沿公共 CONTRIB_CHANGED 清空所属实体组合。
+Channel 子组合的变更由 Agent 所属组合管理，保留未改动的 Agent、ActorLoop 和 Harness；
+退役 Channel 停止入站后保留已受理工作所需的回复、审批与命令路由，排空再释放。
+Harness 的配置顺序确定默认执行者；入站受理即计入所选实例，排队及持久化中的工作随该实例完成后退出。
+Agent 执行绑定使用零退出等待预算关闭 Messages／Reminder 命令，在途 bcc 调用与 Actor 任务一并取消后回收 Harness。
+配置入口进入 Running 后，通过现有 CONTRIB_CHANGED 回调应用实体组合。
+
+- [x] Channel 与 Harness 分别持有纯内存运行状态，随实例创建、销毁和重建，按 Running → Stopping → Stopped 管理退出。Stopping 停止接收新业务工作，保留既有请求所需的事件、审批、回执及回复通路；使用公共 TIMER 定期复核队列、在途请求／回复和相关后台工作，排空后再关闭资源。Agent 通过公共 TIMER 复核所属实例和会话；繁忙时重新安排，排空后退出，整节点退出取消工作及所属定时器。
+
+- [x] 保持 Agent 身份、Actor 会话、ActorLoop 与调度状态的生命周期稳定。为已有 Agent 新增或移除 Channel 时，仅更新相应 Channel 子组合与接线，保留其他 Channel、harness 和正在运行的 Agent；移除时先停止接收新工作，保留已接收消息、排队／执行任务及其回复所需的连接和绑定，排空后再关闭 Channel 并释放子组合。验收运行期间追加和移除 Channel，检查已受理工作完成、既有会话与其他通道继续运行。
+
+- [x] Agent 自持运行数据，接受 DB、SCHEMA 和 LEGACY_NODE_MIGRATIONS，在自己的 lifespan 登记后提供业务服务。run 通过配置服务激活完整的已启用组合，不限定 roots；管理命令通过插件登记选择启动根。全新安装默认启用 Agent；V4→V5 仅在旧配置存在 Agent 时启用 Agent，存在 Server 使用配置时启用 Server 及对应依赖。
+
+- [x] 在已交付的 agent 及各能力接入基础上补齐 turn、会话绑定、inbox、调度、输出交付、审批、任务故障和恢复，按实际消费依赖消息、协作、Reminder、timer 与 builder。
+- [x] 复用 messages 已公开的 `Actor`／`Actors`：内部身份参数、业务调用与归属键全程使用 Actor，仅在边界与 `session_id`／`agent_id` 转换；保留两种 mode 的身份解析、按 Actor 归属的运行会话／状态／队列／ActorLoop／timer、业务可见范围和活跃命令绑定，分别验收各会话隔离及同 Agent 会话共享的原行为。
+- [x] 沿用 Task12.1 已交付的 developer instruction、bcc 工具入口与初始运行环境，补齐命令能力的活跃身份／会话绑定、上下文及通讯编排；按 [默认 agent 行为与替换](roadmap.md#默认-agent-行为与替换) 由 agent 选择提示词、工具及所需公共服务。
+- [x] agent 消费 channel／harness 公共包的输入、请求、输出／审批和生命周期契约，harness provider 执行 agent 提供的指令和工具环境；具体 provider 自身持有 SDK 和资源。
+- [x] 按[完整行为事件与 NodeAudit](roadmap.md#完整行为事件与-nodeaudit)接入 agent 构造输入及 harness 原始事件的完整发布，保留关联、顺序、时间、工具／技能／文件、原始 usage 和模型步骤来源；审计记录、两端上报及 Bazaar Server 消费随所属阶段接入。
+- [x] agent 组合用普通 Python 函数从已校验配置构造具体条目及稳定绑定；配置候选预检显式调用同一构造逻辑，已知组合完整校验后由 lifespan 的 ctx.enable 管理。
+- [x] 公开 agent 入口拥有 config.agents 和 channel／harness 参数模型，明确创建执行与 provider 实例；私有服务和消息事件用 local 绑定，共享服务沿用外部绑定，依赖就绪后进入执行。
+- [x] 用真实自定义 agent 组合替换默认入口，验证其配置模型、实体装配、指令、工具环境、通讯行为、所选依赖与资源退出。
+- [x] 使用 TestChannel 控制面及真实隔离资源验证消息注入、调度、输出、审批、故障和退出；具体外部 provider 的 e2e 由其交付阶段使用相同控制面验证。
+- [x] config.agents 为空时保持 AGENT／CHANNEL／HARNESS 运行实例数为零，真实实体组合验证服务可见范围和所属资源回收，完成独立安装与检查，提交供 review。
+
+完整 provider 场景包含真实子进程、原生 bcc、三秒静默合批及后台归档，按完整场景执行到终态。
+各业务超时及三秒静默窗口保持原契约，三平台 CI 验证完整场景。
+
+验收结果：真实 wheel／sdist 两套独立安装均通过 TestChannel、独立文档及后台归档子进程、原生 bcc、
+两种 Actor mode、安静引用消息的字段与发送者传递、运行中 steer／静默合批／未接受时下轮处理、
+未读恢复、失败切换、会话文件丢失与上下文失效、后台保护及已确认审批语义。
+同一会话不同发送者排队合批后，审批保持第一条参与消息的发送者与请求定位；
+运行中 steer 后的 turn 事件只带会话路由，普通回复引用由 Agent 显式选择。
+后台归档进程在 turn 结束后实际调用原生 bcc 读取历史，存活闲置会话继续通过能力校验。
+归档进程通过 `shutil.which("bcc")` 定位会话命令，解析 Windows 的 `bcc.cmd` 入口；
+子进程错误输出继承验收进程，直接保留在 CI 日志。
+逐会话事件转发分别记录异常，沿用原 `TurnCoordinator._forward` 的参与者隔离。
+Channel 追加／移除、Harness 替换和已受理队列排空保持其他会话工作，整节点在人工审批及 bcc 回执等待中取消所属任务。
+独立 editorial Agent 使用自有配置、指令和工具完成文件任务；两个独立节点进程在同一隔离数据库上验证未读恢复。
+
+消息、协作、Reminder、Channel、invoke、时间轮、历史迁移及其余 workspace 已有验收通过；
+命令帮助的两种 mode、长短帮助选项共 60 组实际输出与原版一致，服务请求在实际执行命令时发起。
+103 个消息声明 AST 保持一致，另外的 Actor／公共行类型及可选查询预算边界逐项核对；
+附件按已确认的异步字节流导入及平铺路径调整；Harness 调用结果类型、时间轮句柄及核心分层算法保持原实现。
+Reminder 的 7 个模型／日历／响应资源文件、消息的 12 个文案资源、inbox／审批拒绝模板保持原字节；
+8 组指令渲染仅包含已确认的 Agent ID 与 Session 展示调整，6 组 inbox 渲染与原函数一致。
+全部 32 项历史版本和 21 项业务基线操作保持一致，原 src／tests 对照文件保持不变。
+workspace Ruff／format、共享锁和仓库根目录精确 Pyright LSP 检查通过，27 项 RC 版本及第三方锁记录保持不变。
+修正按各能力引入提交 amend，计划与对应实现一同提交供 review。
+
+### Task 17：agent 配置管理与会话准入审核
+
+独立发行包 `bazaar-contrib-agent-command` 提供普通 contrib 入口 `agent-command`，
+在 `bazaar_compute_node.commands` 中以 `agent` 登记 `CommandEntry(contrib="agent-command")`。
+用户经现有 `bcn contrib add bazaar-contrib-agent-command --enable` 安装并启用，
+已安装的包使用 `bcn contrib enable bazaar-contrib-agent-command`；入口的参数保存在自己的 enabled 条目中。
+CommandCatalog 按已启用入口发现顶层命令，app 按 entry.contrib 选根，插件通过 COMMANDS.register 登记原生 Click 命令树。
+
+管理入口直接接受 CONFIGURATION、COMMANDS 和 Sidecar CLIENT，并提供 AgentConfiguration／AgentManagement 及 AGENT_CONFIGURATION。
+Agent 实体沿用 `bazaar_contrib_agent` 公开的 Config／AgentConfig 模型。
+管理入口的配置模型从公共 Composition 校验上下文读取已启用的 ChannelBuilderConfig／HarnessBuilderConfig 声明，
+用各声明的 kind 和 entity_model 提供 provider 参数选择；完整候选通过 CONFIGURATION.commit 校验与条件保存。
+配置读写定位有效配置中 agent 条目的 config.agents，add 生成身份，list 展示已保存实体，
+edit 按 id／name 保留身份、provider 顺序和未修改字段，remove 保留工作区及持久数据。
+配置修改先使用现有载体读取完整候选；短生命周期命令经已声明的 Sidecar CLIENT 连接运行中的节点，
+核对 ConfigurationEnvironment 与保存修订属于当前选择的配置后，调用该节点的 CONFIGURATION.commit／apply，
+由原配置上下文热更新现有 Agent 实例。服务已在节点内运行时直接消费同一 CONFIGURATION；
+只有连接明确返回节点未运行时才在本地条件保存，已连接后的服务与应用错误保留为失败。
+列表使用带表头的对齐列，操作以 Added／Updated／Removed agent 和 Approved／Denied conversation
+报告完成结果，删除后保留 Workspace and data preserved，空 Agent 列表显示 No agents。查询写 stdout，操作提示写 stderr；
+增删改不输出启动或重启提示，在线变更通过现有更新链路立即生效，离线变更只保存配置。
+配置操作只使用声明与载体服务；运行实例继续由现有 agent／agent-execution 组合管理。
+命令使用 --name、可重复 --channel／--harness 及 --set agent.key=value／channel.key=value／harness.key=value；
+harness.env 保留环境变量名到来源名的引用。参数行为以原 app/agent_management.py、cmd/bcn/agent.py 为基线，
+管理输出沿用已确认的 uv 风格；实体和 provider 校验复用现有 Agent 模型及候选组合展开。
+README 仅给出安装、agent 管理及会话审核的命令示例，参数细节由命令帮助提供。
+各级命令与选项使用 uv 风格的简短帮助文案及明确的参数占位符。Click 原生 required／Choice
+处理必填项和 provider 选择；--set 使用普通字符串选项，经 Pydantic 模型的输入转换及字段约束集中校验，
+替代独立 Parameters 参数类型。仅保留 scope.key=value、TOML 值和 env 来源映射的语法展开及 provider 定位，
+实体字段类型与 provider 配置继续由公共 Agent 模型和完整候选校验负责。
+
+agent-command 插件在 `bcn agent review` 下登记三个基础命令：
+
+```bash
+bcn agent review list <agent-id>
+bcn agent review approve <thread-id>
+bcn agent review deny <thread-id>
+```
+
+`list` 查询所选 agent 的待审会话，返回会话 ID、渠道和名称；
+`approve`／`deny` 仅接收节点内唯一的 thread-id，经已配置 Agent 的公共 Messages.storage／get_thread
+确认会话归属，再取得对应 collaboration 服务作出通过或拒绝的决定。
+管理入口在 Contrib.accepts 声明 CLIENT；平台 sidecar 创建客户端时只持有传输资源，
+配置修改与审核首次调用才连接运行中的节点；审核经连接所属的框架 accept 消费 collaboration 公共服务。
+collaboration 持有准入规则、审核状态持久化及审计，sidecar 沿用通用转发。
+本机命令和 Bazaar Server 审核入口使用同一公共服务与同一份会话审核状态。
+后续 TUI／GUI 界面由独立 contrib 消费同一公共协作服务。
+
+本任务交付本机审核入口，消费 Task 14 已提供的 collaboration 会话准入服务：新会话默认待审，
+调用方经 sidecar 作出通过或拒绝决定，与具体控制端及上报配置解耦。保留已持久化的审核结果，
+待审会话在通过后按原执行链路参与交互，拒绝后再次入站的状态变化沿用原协作语义。
+审核操作以 `core/orchestration/commands/review.py` 和 `contrib/server/control.py` 的原调用为依据，
+沿用会话归属、并发保护与审计规则。
+
+审核由待审变为通过后，为该会话触发一次正常入站通知，沿 inbox notice 唤醒智能体，
+使原请求继续得到响应，用户无需再发送一条消息。collaboration 公共 `review_contact`
+在同一个 Messages 写事务中保存通过决定并恢复该 Thread 未消费入站消息的通知资格；
+入站时由 Messages 保留原始通知意图，静默上下文继续保持静默，群组沿用 following／mentions 规则。
+独立恢复通知资格的 Messages 操作使用普通 writer：完整查询与单次 UPDATE 在现有串行写队列内执行；
+审核决定与通知资格的组合修改继续由外层 Messages 写事务提交。
+审核结果持久化及审计完成后，collaboration 用现有 Context.announce 发布 CONTACT_REVIEWED 业务事件，
+以 ContactReviewed 携带所属 Agent、Thread 和最终 Review；通过和拒绝等实际状态变化均发布，供插件订阅。
+agent 的 loop contrib 用 listen 订阅，仅处理自身 Agent 的通过结果，通过公开上下文取得循环服务并调用现有 recover，
+由持久化未读查询与 wake 接回 Task 16 的正常 inbox notice 链路。
+待审变为通过时恢复通知资格；recover 沿用现有通知序号与消费游标，节点重启继续恢复持久化未读。
+前半段沿用现有入站、落库和审核拦截：被拦截的原处理已结束，
+审批触发的通知只凭持久化会话和消息构造，节点在入站后、审批前重启也能完成。
+本机命令、Bazaar Server 和其他公共服务调用者通过同一个 review_contact 获得该行为。
+
+独立安装验收复用 Agent 的真实 workbench 包及 TCP TestChannel：该包的 DocumentHarness 支持 env 来源映射，
+在 start_session 将配置中的来源名解析到 SessionInput.environment，由已有文档子进程的 editor 报告字段验证实际传递。
+配置验收同时保存两个 Channel provider，编辑时调整顺序并保留各自参数，再运行节点执行审核与响应。
+
+- [x] 独立 agent-command 包提供配置管理服务并通过现有命令入口登记 `bcn agent add`、列表、编辑、删除命令，按当前载体读写配置。
+- [x] 命令读取已启用 builder 的 provider 选择和实体模型，填写 agent 信息、channel／harness 参数与凭据引用，更新 agent contrib 条目的 config.agents；模型边界校验及组合展开后条件提交完整候选。
+- [x] 节点未运行时通过短生命周期命令入口完成 agent 管理，模块选择与业务参数统一保存在相应 contribs[].enabled[].config，默认 agent 的实体参数由其 config.agents 持有。
+- [x] 节点停止时，管理模式启用配置、命令及所需共享登记服务，完整业务候选只执行资源启动前校验；后续 bcn run 才创建 AGENT／CHANNEL／HARNESS 实例。
+- [x] 登记 `bcn agent review list <agent-id>`、`approve <thread-id>` 和 `deny <thread-id>`，经 sidecar 消费 Messages 公共查询确认归属及 collaboration 服务；状态更新持久化并发布原审核审计事件。
+- [x] 审核通过并持久化后，从数据库读取该会话及入站消息，触发一次正常入站通知，经 inbox notice 唤醒响应；本机命令、Bazaar Server 和公共服务调用共用实现。
+- [x] 各子命令按实际操作选择依赖和生命周期：配置管理使用原短生命周期组合，会话审核连接运行中的节点及其协作服务。
+- [x] 配置增删改复用运行节点的 CONFIGURATION.commit／apply 即时更新；离线仅保存，并在独立 venv／tool 中验证运行中新增、修改、删除及输出流与列表格式。
+- [x] agent-command 使用普通 contrib 的安装与启用流程、命令元数据和公开服务声明，独立安装的命令树由既有通用分发消费；配置保存复用 CONFIGURATION，node-management 保持节点管理职责。
+- [x] 在未配置 Bazaar Server 的真实隔离节点上，通过 TestChannel 注入新会话，使用三个基础命令验证待审列表、本机通过后交互、拒绝后的状态变化和重启后审核结果；通过公共服务读回同一结果，并验证不同 agent 的会话归属。
+- [x] 用 TestChannel 发送自然用户请求，待审拦截后重启隔离节点，再通过本机命令或公共服务批准；观察正常 inbox notice 和实际响应，全程只发送原请求。以相同控制面验证正常审批及两种 mode 的会话归属。
+- [x] 在隔离 tool／venv 和真实示例包中完成安装、add --enable、agent add、读取保存配置、bcn run 及退出流程，完成独立安装与检查，提交供 review。
+- [x] 统一 agent 命令帮助文案和参数占位符，使用 Click／Pydantic 原生校验并精简 --set 解析，通过真实独立安装的配置管理流程验收。
+- [x] 以统一 CONTACT_REVIEWED 事件发布通过与拒绝结果，在真实节点订阅并验证所属 Agent、会话和审核状态，同时验证通过后恢复原请求。
+
+验收完成：独立 wheel／venv 与 sdist／uv-tool 的管理、在线增删改及单会话 ID 审批流程共 2 项通过（248.94 s）；
+既有 Agent、Collaboration、Messages 的独立 wheel／sdist 验收分别通过（336.32／64.67／87.66 s）。
+新包的 wheel／sdist 导入与共享 LICENSE 完整性检查、workspace Ruff／format、锁文件一致性，
+以及仓库根目录精确 `uv run --quiet scripts/pyright_lsp_check.py .` 均通过，Task 17 提交供 review。
+
+本轮 review 修订验收：命令插件独立 venv／tool 共 2 项通过（326.55 s），
+Collaboration 和 Agent 的独立 wheel／sdist 验收分别通过（63.91／339.99 s）；
+真实独立订阅方收到通过与拒绝事件，Agent、Thread 和审核状态与持久化审计一致。
+九份真实命令帮助、workspace Ruff／format、锁文件及根目录精确 Pyright LSP 检查通过。
+
+### Task 18：首阶段完整验收与合入
+
+- [ ] 从源码 workspace 完成未发布模块的联调、入口／依赖变更后的 lock／sync 与实际宿主重启，再从逐包构建的独立 wheel 在 workspace 外完成同一流程。
+- [ ] 从干净环境完成“安装 BCN → 安装日志模块 → 启用 → 启动 → 事件输出 → 退出 → 升级再启动”。
+- [ ] 验证全部默认基础包的正式依赖与初始启用组合，空 agent 时的节点管理及真实示例 provider 的 add --enable／agent add／run 流程；具体 Codex／Telegram 的真实首次使用流程随其交付阶段及最终发行复核。
+- [ ] 在 core 完成插件开发指南，明确入口分组与社区插件登记约定，补齐服务契约、配置、安装和资源生命周期说明，给出可实际执行的最小模块示例。
+- [ ] 运行各成员的新测试与 Ruff、根目录 `uv run --quiet scripts/pyright_lsp_check.py .` 的逐包检查及包构建。
+- [ ] Linux、macOS、Windows 独立 CI 完成安装与生命周期验收；native service 验收在隔离 CI runner 执行。
+- [ ] 登记本仓库 app、core 与首阶段 contrib 的发行清单、共同版本和正式依赖；验证入口组、contribs 配置、contrib_indexes 与 bcn contrib 命令采用统一命名。
+- [ ] 在当前特性分支提交，review 通过后按依赖合入 `0.3`，以该集成点开始路线图下一分支。
+
+#### 当前 Codex 迁移与公共契约修订
+
+2026-10-22 已确认的 review 修订：共享 sidecar 流协议新增带调用编号的 Cancel 帧，
+客户端超时或任务取消时通知服务端取消该编号对应的分派任务，保留同连接的其他调用。
+参照 [Python asyncio streams](https://docs.python.org/3.15/library/asyncio-stream.html#asyncio.StreamWriter.write)，
+write 同步提交完整帧至传输缓冲，drain 等待流量控制。取消路径只同步写入 Cancel 帧，
+不等待发送锁或 drain，使传输背压下的请求仍能按原时限退出；服务端恢复读取后继续处理该帧。
+任务取消沿已有业务资源清理执行；已经提交的写入保持实际结果，调用方不自动重放。
+同一远端引用的 enter／exit／release 使用对象所属的锁串行执行，普通成员调用继续并发。
+参照 [Python asyncio.shield](https://docs.python.org/3.15/library/asyncio-task.html#shielding-from-cancellation)
+及 core 现有清理逻辑，保留清理任务的强引用，等待所属 AsyncExitStack 清理完成后传播调用取消；
+清理结束前保留 entered 归属，连接退出也使用同一清理规则。
+补充独立安装的实际 TCP、文件和 timer-wheel 验证：exit／release 在取消或超时、随后断开连接时，
+计时清理正常到期、文件关闭，期间普通查询继续完成；并发进入与释放文件也完成清理。
+本轮原生／TCP 四项独立安装验收通过（18.52 秒），Agent wheel／sdist 完整验收通过（234.19 秒），
+Ruff／格式及根目录完整 LSP 通过。
+文件配置载体在 Pydantic 输入边界解析绝对路径，自举环境序列化校验后的参数，
+使工作区内启动的 bcc 使用原启动目录所选择的同一配置文件。
+公共 ApprovalRoute 统一核对返回的 request_id 和批准范围；超出 allowed_scopes 时记录原因并拒绝。
+Agent 自动批准从请求支持的范围中选最小范围，Codex provider 只处理原生协议映射。
+独立安装验收覆盖真实流连接的单次取消与其他调用并行、相对配置路径的跨进程读取及范围审批。
+Codex 发行入口仅公开 codex-builder，实例由 builder 在 Agent 局部组合中创建，安装后使用裸 --enable。
+Codex 删除 env 别名配置及映射，子进程直接继承节点完整环境，再覆盖 SessionInput.environment。
+
+通用插件查询沿 0.2 IRuntimeBuilder.inspect／models 的实际能力补齐，按 2026-10-22 确认合并为
+HarnessBuilder.inspect(workspace, timeout)，返回 HarnessInspection：可用性、CLI 版本、模型与推理档位、
+skills 和查询错误。删除运行实例的 describe 契约与实现，查询只依赖工作区，不要求 Agent 或会话。
+Codex 在指定工作区启动独立 app-server，初始化后执行 model/list 和 skills/list，沿公共预算释放所属进程。
+
+2026-10-22 MCP 查询补充（开发线程 `f76e00b5-364c-5de4-a648-b8c0a87738b0`）：
+现有 HarnessInspection 只有可用性、版本、模型／effort、skills 和查询错误，公共契约增加
+`mcp_servers: tuple[HarnessMcpServer, ...] = ()`。HarnessMcpServer 保存服务名、原生认证状态及
+工具清单；HarnessMcpTool 保存工具名、可选描述与实际 JSON input schema。
+依据 [OpenAI App Server API](https://developers.openai.com/codex/app-server#api-overview) 的
+`mcpServerStatus/list`，Codex 可在指定工作目录的独立 app-server 查询清单并分页，不需要创建
+Agent、thread 或模型 turn。工具来自原生发现结果，认证状态原样保留，不从配置推断连接成功。
+查询失败保留此前取得的元数据，并沿现有 HarnessInspection.error 报告原因。
+
+- [x] 补充公共 MCP inspect 类型、导出与说明，使用真实独立 MCP 清单核对契约，完成根目录检查后停下 review。
+- [ ] 公共契约可安装后，Codex inspect 接入原生分页查询，并在最小 MCP 场景核对服务与工具实际发现。
+
+公共契约实测使用新构建的 Harness wheel、现有 Codex provider wheel 和真实本地 notes MCP，
+Codex 0.163.0 原生查询返回 notes 服务、unsupported 认证状态和 save_note 工具的描述及参数 schema；
+这些原生数据通过新增公共类型校验。查询未创建 thread／模型 turn，也未执行保存便笺工具。
+所属 app-server 退出码为 0，自有存活子进程与待处理请求、交互全部为零。
+此结果验证公共类型与真实原生清单的匹配，具体 provider inspect 适配登记在下一项。
+Harness wheel／sdist、受影响包 Ruff、根目录 686 个文件格式检查与完整根目录 LSP 检查均通过。
+
+实测在未创建 thread／turn 时查询到 8 个模型、9 个 skills，包含隔离工作区实际创建的 skill，进程正常退出。
+CLI 版本通过实际 codex --version 读取；provider 的初始化 clientInfo 继续使用自身发行版本。
+本轮 Agent 独立 wheel／sdist 完整验收通过（217.83 秒），同时验证独立 provider 的公共 inspect。
+真实原生／TCP sidecar 四项验收通过（24.99 秒），取消和超时均终止远端计时器等待并保留其他调用。
+真实应用从 ./node.toml 启动后，在另一工作目录重建 bcc 配置载体，读取到相同修订；文件载体两项用例通过。
+Ruff／格式及根目录完整 LSP 通过。独立 Codex wheel 的 inspect 和三类实际文件变更验证通过：
+工作区 AGENTS.md、CODEX_HOME/AGENTS.md、skills 均将原生通知转换为 HarnessExpire，所属进程正常退出。
+此轮原生验证只创建 thread，不启动模型 turn；正在执行及后台任务期间的会话延后替换沿 0.2 的规则核对。
+
+2026-10-21 的调整统一维护在本 0.3 计划。审批沿用 0.2 的 approved／rejected 与
+dangerous_individual 无条件自动批准；按已确认要求增加 `ApprovalScope(StrEnum)`，
+取值为 ONCE／SESSION／ALWAYS。ApprovalRequest.allowed_scopes 是可选范围元组，默认只有 ONCE；
+ApprovalResult.scope 是实际选择，默认 ONCE。具体 provider 只提供原生请求支持的范围，并负责协议转换。
+新增的 MCP 工具审批沿用同一审批路由，由请求所属 Agent 和 Channel 处理。
+
+独立 Codex provider 使用公共 HARNESS／HARNESS_BUILDERS 与 core 契约，保留 0.2 的持久 app-server、
+线程／turn、原生模型与 skills 发现、workspace-write 与默认网络访问、dangerousFullAccess、
+steering、后台状态、两次初始化／恢复尝试、上下文监听、原始事件与时间戳及所属进程退出。
+子进程继承完整节点环境，再覆盖显式命名绑定及 SessionInput.environment；
+provider 原样接受 agent 给出的工具通信配置，原生 Codex 协议细节留在独立实现。
+以只读保留的 0.2 Codex 源码和 Codex 0.163.0 实际 app-server schema 为对照。
+
+2026-10-25 最终 review 修订：mode 和 `session.config.sandbox.policy` 均保留在 Agent，
+所有 Harness 共用 `SandboxPolicy.WORKSPACE_WRITE／DANGER_FULL_ACCESS`，在 AgentLoop.start_session
+通过 SessionInput 传入实际沙箱策略。移除独立 ApprovalPolicy 与 network_access 开关，网络固定开启。
+provider 保留原生审批请求，宿主按实际沙箱策略选择自动批准或 Channel 人工审批。
+配置在 Actors 构造处转换一次；AgentLoop 不再保存整份 AgentConfig，内部业务不传递 mode。
+ApprovalRoute 持有该回合的实际 SandboxPolicy，full access 自动批准，其余沿人类消息路由审批。
+bcc 在进程入口将环境身份恢复为 Actor，按 Agent 实例登记 inbox；独立 launcher 保留会话绑定前的帮助输出。
+指令模板和进程环境在输出边界将实际 Actor 转回 mode；provider 不接收 mode。
+Codex 的 thread/start、thread/resume 和 turn/start 保留沙箱策略及审批回调，后续 Claude 同样实现这些规则。
+AgentConfig 保存 session 配置，Harness 条目只保留 provider 参数；具体 provider 配置默认忽略未使用字段。
+按 2026-10-22 review 移除 provider 的 extra="forbid" 及上游为其新增的策略字段过滤；
+V4→V5 在 session 模式只取第一个历史 runtime.sandbox_mode 作为 Agent 的 session.config.sandbox.policy，
+individual 丢弃 session 配置；各 runtime 的 provider 参数继续分别保留，网络不再作为用户配置迁移。
+未支持的交互记录日志并返回原生默认回复，审批默认拒绝；版本读取 provider 自身已安装发行元数据。
+逐项对照 0.2 的请求／审批预算、两次初始化和恢复、60%／20%／10% 退出阶段及会话归属检查；
+删除 provider 自设的 60 秒默认清理预算，使用所属连接实际收到的调用预算，避免跨会话共用最后一次调用的值。
+移除未使用的 32 行 stderr 截断，改为原生日志；bcc 配置边界使用 Pydantic，移除内部重复的类型防御。
+Actor 修订后 Agent 独立 wheel／sdist 场景通过（219.37 秒），覆盖实际配置选择的原生和 TCP sidecar；
+两种身份在绑定会话及独立 launcher 中共 18 次实际帮助调用通过，inbox 按 Agent 实例可见；
+历史配置转换 3 个用例通过，迁移后的多 Harness 不同策略通过实际 Codex builder 的配置校验；
+Ruff、根目录完整 LSP、provider 联合源码检查及 workflow 检查通过。
+
+先完成上文 Task 12.1 的 bcc 通信边界修订，沿原生 Click 入口验证帮助、stdin、附件、
+消息／thread／Reminder、会话能力及工具资源退出。真实外部 provider 验收继续使用 TCP TestChannel，
+由其注入自然用户请求、观察真实输出和处理审批；实际 MCP 出版服务读取草稿并写出回执。
+验证授权范围、dangerous_individual、消息实际送达、steer、连续会话、环境继承、恢复、上下文刷新和进程清理。
+开发联调使用独立外层 bcn-dev 项目，以 workspace = "../bcn" 引用 BCN 成员，独立 provider 使用相邻可编辑源码。
+
+- [x] 完成 Agent 所属 bcc 工具按实际配置装配 CLIENT 及调用方迁移，验证独立安装与真实命令，然后停下 review。
+- [ ] 完成 Codex 的 0.2 行为对照与真实控制面联调，分别维护 BCN／provider 草稿 PR，明确已完成和待完成验收。
+- [ ] 人工 review 与合入后，通过既有流程发行 rc2，再提高 provider 的已发布依赖下限并完成独立安装与真实模型 CI。
+
+2026-10-21 本轮 Linux 独立安装验收通过：Agent 的 wheel／sdist 完整场景耗时 258.11 秒，
+默认 Agent 使用配置中的原生 sidecar，替换 Agent 使用配置中的真实 TCP sidecar；
+bcc 均从同一真实配置载体装配 CLIENT，完成命令、审批、报告交付、热更新、恢复及在途退出。
+Messages 与 Reminder 的 wheel／sdist 场景分别通过（57.63 秒、49.55 秒），控制客户端也由实际配置装配。
+仅安装 Agent 及公共依赖的独立环境通过两个模式的固定命令帮助；Ruff、格式检查及根目录 LSP 通过。
+真实 Codex 的既有节点已完成出版、追加输入、连续对话、app-server 恢复、上下文刷新和实际消息送达，
+且正常退出并清理所属进程。该节点使用修订前的工具启动方式和 20000 压缩阈值；
+当前装配方式及 24576 配置的新节点验收继续单独完成。
+
+provider CI 使用最新 Codex 和已合入的 setup-ai-gateway Action，消费其标准环境变量与模型输出。
+按本轮确认，CI 在隔离 CODEX_HOME/config.toml 顶层统一配置 model_context_window=32768、
+model_auto_compact_token_limit=24576，所有测试会话读取这一全局配置。
+依据 [Codex 配置参考](https://developers.openai.com/codex/config-reference/)，前者表达实际模型窗口，
+后者触发原生历史自动压缩；保持该设置归 CI 应用准备流程，provider 沿用 Codex 原生配置加载。
+独立安装沿用 uv 应用安装、插件安装和实际 bcn run；发行和合入在人工 review 后进行。
+
+### 2026-10-22：Harness 失败原因与恢复控制
+
+依据本开发线程 8f08e554-14b0-510d-88d0-7653735761b4 的确认及
+090c2b84-3116-5a02-950f-7fa713e02c9b 对重试行为的要求，统一执行失败的表达及传播。
+已核对 v0.2.3 与只读 0.2 实现：orchestrator._recover_turn 在 RECOVERING 时恢复原会话，
+_hand_turn_to_another_runtime 对 failed／unknown 选择本轮未尝试的执行器，cancelled 不切换；
+Codex.reconcile_session 仅对进程退出、进程不可用及请求超时作两次尝试，协议及原生拒绝直接失败。
+0.3 已确认的会话建立重试次数、退避、执行前不可用恢复及一小时隔离保持现有规则。
+
+Harness 的调用结果保留 confirmed／failed；失败输出统一使用 failed，携带 frozen／slots
+HarnessFailure。reason 使用少量公共枚举：timeout、connection_lost、interrupted、unavailable、
+state_mismatch、protocol、execution、internal；message 和可选 code 保留实际错误。
+needs_reconciliation 独立表达原先 unknown 所携带的结果确认需求；Agent 据此进入 Recovering，
+不根据原因名称或文案猜测是否恢复。恢复失败更新最终失败，避免被初次断联等错误覆盖。
+原生 interrupted 是明确失败；主动取消继续走 cancelled。Codex 恢复的异常重试分支保持原有边界。
+会话及轮次身份冲突、缺少执行上下文和审批处理对象分别说明实际原因，关闭所属进程沿现有规则执行。
+按本线程 96a3531b-2bd5-5a4f-ab17-a16ea84086ff 的补充，中间失败及恢复／重试只写 Audit／Log；
+Channel 最终只展示最后一次失败的原因、原始错误及可选错误码，恢复或重试成功正常结束。
+
+- [x] 完成公共失败结构、Agent 全链路与 Codex 映射，验证恢复及执行器切换、独立发行包和根目录完整 LSP，然后停下 review。
+
+Agent 独立 wheel／sdist 完整验收通过，实际文件写入冲突验证另一执行器完成、最后失败反馈和后续请求成功；
+已有执行前不可用恢复、上下文刷新、后台保护、审批和取消退出继续通过。Codex 独立 wheel／sdist 的真实
+model/list 查询在所属进程组暂停时超时，恢复进程后再次查询成功，实际进程退出按 connection_lost 报告；
+这些传输验证没有启动模型 turn。Ruff、格式、根目录完整 LSP、provider 联合源码检查及发行包构建通过。
+0.2 重试相关 8 个方法与 v0.2.3 发布标签 AST 一致，旧源码保留只读。
+
+Windows CI 发现新增反馈验收直接匹配完整路径，未考虑原生 traceback 对反斜杠的转义。
+验收改为核对最终失败的会话目录名及文件名，既保留对最后一次失败归属的验证，也独立于平台的路径表示。
+
+按 PR #114 的后续复审补齐输出边界：HarnessOutput 仅允许 failed 携带 HarnessFailure；
+最终失败发送到 Channel 前，使用本次尝试保存的会话绑定脱敏错误消息、文本和字符串错误码，
+脱敏不再依赖关闭后的会话状态，终态事件与错误反馈使用相同的脱敏结果。
+provider 继续按已确认约定忽略未使用字段，上游不剥离公共执行策略。
+本轮修正的独立 Agent wheel／sdist 完整验收、根目录完整 LSP 及 Ruff 检查通过；
+真实 Codex builder 的两组沙箱／网络配置通过公共校验和组合。
+
+CI 逐项显示测试名称并关闭 pytest 输出捕获，Python 子进程使用无缓冲输出，结束时列出最慢的十项。
+独立安装验收的构建、安装及工作流进程直接输出到 CI；需要解析的 CLI 结果保留返回值，调用前打印命令、完成后打印结果。
+在线 manager 节点的 stderr 直接输出，避免运行期间积压；就绪协议继续使用独立 stdout。
+独立 Agent 验收在开始请求前确认配置组合中的实例均已运行；document provider 的共享上下文缓存读写使用同一锁，
+避免多个实例并发替换缓存时在 Windows 产生访问拒绝，以及部分实例启动失败却继续宣布验收通过。
+manager 的配置迁移、远端 wheel 与本地 wheel／源码来源恢复直接执行真实命令，检查实际输出与安装元数据，
+省去启动自举已经补装后的第二次完整同步；四条独立安装流程的显式同步由十六次降为八次。
+独立 manager 验收使用真实带 SHA256 的包索引链接，wheel 响应声明不可变缓存，索引元数据按 PyPI 缓存时效提供。
+验收在原有索引发布新版本，分别执行普通同步和显式 `sync --upgrade`，观察锁定版本保留和实际版本升级，
+让真实 uv 解析和安装复用相同文件，避免普通管理操作强制刷新全部依赖。
+宿主目标 wheel 从当前源码构建，首次安装时只在索引列出旧宿主；缓存建立后再发布目标版本，
+由两种安装模式的真实升级入口执行安装，并读取宿主发行元数据确认版本提高。
+已保存配置的核验直接读取实际 TOML，每条安装流程省去十三次仅为读配置而启动的 manager；
+配置转换、包安装、升级和生命周期验收继续通过公共服务及真实进程执行。日志分别记录 manager 的启动、操作和退出耗时。
+
+## 后续安全待办
+
+2026-10-18 将 contrib 存储权限与 Sidecar 授权边界记为后续待办：记录风险和设计方向，暂缓实施，后续单独设计及拆分任务。
+保留 Task 15.1 的 Legacy Node Migration 与业务各自登记方案，继续按现有串行 Tasks 推进和 review。
+迁移下放解决表结构、业务数据和版本链的维护归属；当前进程内 contrib 的运行权限是另一层边界。
+
+### 已确认的现状与风险
+
+- contrib 在同一 Python 进程、同一系统权限下执行。恶意代码即使绕过 Schema，也可以自行尝试连接和修改数据库；
+  把迁移重新集中管理不能消除这个既有风险。公共接口的表权限约束与不可信代码的执行隔离需要分别评估。
+- Schema 已持久化表归属并检查登记冲突，MigrationSession 限制迁移写入的目标表；
+  运行期 DB 仍共享后端对象，尚未按消费 contrib 的登记结果限制访问，迁移查询也没有完整的跨表权限检查。
+  登记包身份由框架提供的发行来源自动取得；predecessor 和 Progress 的历史来源仍由调用方声明，不能直接当作授权凭据。
+- 公共 DB 使用结构化请求，查询和增删改的 table 字段是表名，通常来自 TABLE.name；Table 对象用于结构定义和建表。
+  公共 Database／Session 契约没有裸 SQL 入口，因此可在通用 storage 层分析请求并统一执行表权限约束。
+- 当前 Sidecar 能为连接创建接受指定可见服务的消费实例。隔离的真实 Hub、SQLite 与 Unix socket 验证了远端可取得
+  DB、STORAGE、SCHEMA，并读取另一 contrib 登记的表；该观察证明当前服务可达和共享 DB 访问，未来的表授权机制尚未实现。
+  讨论重点还包括：Sidecar 是否能调用内部管理能力，给调用者追加可访问表。仅给未登记表的连接分配空权限，仍需核对授权管理入口。
+- Sidecar 对远程引用对象使用公开成员读取和调用；正常方法名禁止以下划线开头，但 Symbol／Construct 路径没有相同限制。
+  Symbol 按路径导入 Python 对象，Construct 导入后直接用字段参数调用目标，当前没有限制目标必须是请求数据模型。
+  需核对通过服务属性、动态导入和构造取得管理能力的路径；构造一个普通对象本身不能成为真实 DB 的授权依据。
+
+### 讨论过的方案与约束
+
+- 最初考虑为每个 contrib 分配命名空间，随后倾向沿用现有表名和归属，按成功登记的表集合分配访问范围，
+  减少表名映射和额外授权清单。未登记表的调用者取得空权限，跨 contrib 的业务操作通过数据拥有者的公开服务完成。
+- 权限控制由通用 storage contrib 内部持有和执行，业务 contrib 只提交表及迁移声明、使用受限 DB。
+  授权管理对象、修改归属、追加访问表和切换调用身份的能力需要与普通 DB 操作分离，覆盖 Sidecar 的自我授权路径。
+  Schema 负责业务迁移编排，依赖方向保持 Schema → storage；Sidecar 继续采用通用框架转发与访问规则。
+- 表声明需要在候选组合激活、执行迁移和发放权限之前检查同名冲突及已有归属。
+  同一候选中的冲突应拒绝该次激活，避免先启动者抢占；归属与授权应绑定可信的 contrib 身份。
+  当前在 lifespan 内逐个 register 的流程不足以完成整体预检，声明收集阶段和身份确认方式需要后续确定。
+- 统一校验需覆盖直接操作及 read／write／transaction 回调中的会话，并递归分析联表、CTE、子查询、复制来源、搜索及结构变更。
+  CTE 别名需要与物理表区分；删除索引、触发器等还需核对对象的实际归属，不能只相信请求填写的 table。
+  已发布历史迁移中的跨表步骤和 Legacy 归属交接也需要纳入设计，保留原数据与版本账本。
+- 讨论的候选接口是由 Schema 注册成功后返回 storage 创建的受限 DB，例如 register(MODULE) as db；
+  当前 accept(DB) 返回共享服务对象。授权发放接口、内部管理能力的装配方式和生命周期撤销规则仍待设计。
+- 原生数据库授权会引入后端差异：[PostgreSQL 使用角色管理对象权限](https://www.postgresql.org/docs/current/user-manag.html)，
+  [SQLite 没有 GRANT／REVOKE](https://www.sqlite.org/omitted.html)。倾向先评估结构化存储接口上的统一约束；
+  对抗同权限任意 Python 代码则需进一步评估执行、系统文件权限或数据库凭据的隔离边界。
+
+- [ ] 后续分别定义可信 contrib 的存储接口约束、Sidecar 调用者授权与不可信代码执行的信任边界，形成可 review 的独立设计。
+- [ ] 在独立设计中明确声明预检、可信身份、权限授予与撤销、远程管理能力及历史归属交接，再拆分实现与隔离验收任务。
+
+讨论来源：本开发线程 2026-10-18，50526714-b36b-5da8-8cf6-76eb2f7d0ba2（登记决定表权限）、
+c12f11c9-f8f1-5ce3-90d7-789f16439c17（同名冲突提前检查）、0385a1ee-cb4b-5f03-a0ba-7fdc177674b5（控制归 storage）、
+1426c7b2-67ad-5cbf-9a93-f5d9b4088b0f（Sidecar 自我授权）、ec415eb9-9fca-5c2e-a964-83435f2fb8e0（既有执行风险）、
+c90205ac-16c8-524c-99b9-7b94d9968923 与 f7caa6e3-9eae-51e3-b994-e36a506db015（暂缓并保存讨论）。
+
+## 首阶段验收结果要求
+
+新写的独立模块包可以声明新服务、消费现有服务、订阅业务事件，并通过配置与统一入口启用。
+用户统一在顶层 contribs 启用入口并填写参数，组合明确创建具体实例，服务与事件的 local 绑定决定私有范围。提供者和实际创建者决定依赖顺序，provider 由业务 builder 按输入选择。
+模块以独立函数声明 lifespan 与固定事件处理器，运行时操作通过显式 Context 参数完成。
+lifespan 到达 yield 后服务与监听器就绪，回调结束后退出生命周期并撤销服务。
+乱序配置仍按依赖装配；不同 agent 的服务和事件范围明确；子资源随创建实例结束。
+按配置计算的依赖在启动前展开，所选后端就绪后才启动 DB 选择层，缺失及冲突诊断定位到具体配置。
+同一模块多次启用时，各实例的配置与资源独立，宿主返回的句柄可以分别释放所属实例。
+用户只选择模块入口与参数，组合按业务输入声明实例，宿主创建上下文和内部运行标识；配置列表与派生实例分别展示。
+`bazaar-contrib-logging` 从独立 wheel 加载，实际节点输出正确；包安装、启用和节点升级共用 `bazaar-contrib-manager` 的 uv 与依赖组合。
+官方与额外索引条目经包名和来源交给 uv，已安装发行元数据将包关联到入口，CLI 与页面保存相同的运行配置。
+首次配置生成、保存后加载、更新已有选择条目和完整组合升级均保留用户参数与后端选择。
+ConfigStore 来自启动输入选中的已安装载体入口，默认 filesystem，配置中心组合可在无本地 config.toml 的环境读写配置并在部署重建后恢复。
+新建配置使用 V5；历史版本经发行自举的五版本模块链产生候选，所需包安装及配置依赖校验后经载体保留原内容、条件提交；修订冲突直接报错，由调用者重新读取和校验。
+各能力的参数随对应阶段映射到所属模块；最终组合从真实历史配置验证 provider、凭据引用和用户选择保留。
+app 的普通 Python 入口提供启动输入和默认资源，core 的运行接口完成发现、自举装配、就绪与完整退出。
+配置加载使用配置包公共逻辑与 core 的通用候选校验接口，具体读写和转换由载体／版本模块提供。
+公共宿主机制保持业务无关，新功能契约由功能包定义。
+
+所有测试使用测试专用配置、临时数据和隔离进程。真实外部 provider 使用现有 TestChannel 控制面；
+三平台 native service 测试使用独立 CI runner。测试观察有效业务流程与资源行为，使用真实实现和构建产物。
+
+## 0.2 行为对齐（2026-10-28）
+
+本线程按 0.2.3 逐块对照 0.3 的实际行为，裁决记录在本开发线程 `3c0949a7`。
+对齐口径是同样的输入得到同样的结果与副作用；内部重构且最终结果相同的差别不处理。
+下列 Tasks 串行交付，每个 Task 完成后停下等待 review。
+
+### Task 19：sidecar 远程调用边界
+
+现有 sidecar 会话把实例 Context 整体交给连接方：`accept` 可取任意服务 key，取得的对象可调用任意公开成员，
+协议中的 import／construct 可在节点进程内按路径导入并构造对象。0.2 的 `bcn.sock` 只接受命令与控制请求，
+命令入口按 `app/agent.py::_validate_actor_binding` 校验 agent、会话与 capability。按以下方式收敛，core 与 `Contrib` 不变：
+
+- 包在 `bazaar_compute_node.remotes` entry point 分组声明 `RemoteEntry(服务 key, 允许的成员)`，装了即公开；
+  业务插件的 accepts 不变，也不依赖 sidecar 运行。sidecar 启动时读取该分组，同名重复声明报错。
+- 协议只有服务名、成员名与 JSON 参数。会话按声明查表，未声明的服务或成员返回 `LookupError`；
+  每次调用按声明的 key 取服务、调用结束释放，目标服务未运行时把框架错误返回调用方。
+  参数按方法签名经 pydantic 校验，返回值转成 JSON；移除远端对象引用与任意路径导入、构造。
+- 当前声明：messages `request`；reminder `request`；collaboration `pending_contacts`、`review_contact`、
+  `setting`、`set_setting`（key 限 `review.reply`，读直接查存储，写交给运行中的 agent，与 0.2 control 接口一致）；
+  configuration `environment`、`read`、`commit`、`commit_preview`、`apply`。
+- bcc、agent-command 与 manager 按名字调用，配置快照按值传递；`bcn agent review` 的会话归属由节点内 collaboration 查找。
+- 命令入口恢复 agent_id、Thread 存在性、runtime session 与 capability 校验，失败分别返回
+  `SESSION_BINDING_FAILED` 与 `SESSION_NOT_FOUND`，文案沿用 0.2。
+
+已知差异：`review approve` 的会话所属 agent 已配置但未运行时，报 conversation not found（原为 Agent is not available）。
+测试依赖旧远端对象图翻节点内部状态的断言删除，业务结果改由公开命令、只读测试库与真实回信观察。
+验证使用真实 Unix socket 安装态场景及受影响包的安装态业务测试。
+
+### Task 20：恢复 0.2 的中立执行事件模型
+
+`HarnessOutput` 当前只有 `kind`／`text`／`metadata`／`raw`，provider 的原生语义无法以公共类型表达。
+按 0.2 `core/models/events.py` 恢复公共载荷：
+
+- `ContentDelta` 四类内容（agent_message、plan、reasoning_text、reasoning_summary）及 `index`；
+  `ToolCall` 的 `call_id`、`name`、`parent_call_id`、`input`、`output`；`ToolCallTextDelta`、`ToolCallPatchUpdated`、
+  `FileChangeEntry`、`ToolCallInteraction`；工具开始／完成／失败；`TokenUsage`／`UsageUpdated`；上下文压缩开始／完成。
+- 回合级事件沿用已确认的 `HarnessFailure` 与取消表达，`TurnFailed` 携带结构化失败。
+- 载荷以公共 Pydantic 联合类型承载，事件类型标识用于 JSON 序列化与还原；provider 在边界完成原生投影，
+  `raw` 只作诊断，不代替语义。Agent 与 Channel 消费对应中立类型。
+- Codex 与 Claude Code 的投影修订随各自 provider 仓库交付，主仓只提供契约与消费。
+
+验证使用独立 wheel／sdist 与真实 TestChannel 场景，核对推理分类、工具输入输出、文件变更、用量与压缩事件
+经公共模型往返后语义不变，审计与 Channel 消费一致。
+
+### Task 21：channel 与 agent 的聚合边界
+
+0.2 的 `Channels` 与单个 `Channel` 遵守同一接口，`app/agent.py::_backfill_channel_identity` 在启动时按配置顺序回填旧会话。
+当前聚合缺少回填委托，`get_identity` 返回 Agent 身份，审批请求丢失渠道与 bot 身份，回合事件丢弃消息锚点，
+同一 Agent 重复配置同一 bot 不再于启动时拒绝。
+
+- 公共 `Channel` 保留 `backfill_provider_thread_id`，聚合按同一渠道选择规则委托给底层实现；
+  Messages 暴露 `list_channel_sessions_without_identity` 与 `backfill_channel_identity`。
+- 渠道就绪后按配置顺序完成身份与 provider thread 回填，再恢复未读与接收入站。
+- 重复 kind／bot identity 在登记时拒绝，通过既有失败信号结束所属执行组合。
+- 入站与主动 DM 地址按 `uuid5(bcn:{agent_id}:{kind}:{原 ID})` 转换 channel-session／bcn-session 身份；
+- `get_identity` 返回第一个运行中渠道的身份；审批请求携带可选的 `channel`／`channel_identity`，按 bot 身份选择渠道，
+  不可用时返回 rejected／`channel_unavailable`；
+  `ChannelTarget` 的消息锚点随回合事件保留，供 channel 的活动状态使用。
+- 单渠道与聚合的业务状态由 provider 自持，消费者通过服务查询或订阅状态事件，跨进程沿 sidecar 转发；
+  插件加载与运行状态继续由 core 的 status 服务提供。
+
+验证使用真实配置启用、消息持久化、主动 DM、审批、旧会话重启回填与退出；重复 bot 配置须在启动时被拒绝。
+
+### Task 22：审计全量发布与日志订阅
+
+`NodeAudit` 已按完整 payload 发布，但默认组合没有订阅者，turn、工具、agent 变更与健康心跳不再进入日志。
+0.2 的 `LoggingAudit` 将脱敏后的事件以 JSON 写入 stderr。
+
+- `bazaar-contrib-logging` 订阅 `AUDIT_EVENT`，按事件级别写入现有日志管线，payload 为单行 JSON。
+- provider 在原生收发处保留源事件：连接来源标识、收发顺序、原始 JSON 行与源端时间，先记录再分发与投影；
+  原生进程结束后发布来源关闭与最终序号。Agent 继续发布自身执行与中立输出审计。
+- 凭据字段沿用既有排除规则；审计异常边界保持只隔离事件投递。
+- `AuditEvent` 为 `AuditInfo | AuditFailure`，以 `level` 区分；`publish(..., error=AuditError(kind, message))` 发布失败事件，
+  与 0.2 携带 error_kind 即为 ERROR 一致。logging 对 `AuditFailure` 记 ERROR，其余记 INFO。
+
+验证使用真实 Provider 退出的完整顺序，核对源序号连续、关闭记录齐全、中立输出逐一匹配订阅端记录；
+默认节点启动后 journal 中出现 agent 变更、turn 与工具事件。
+
+### Task 23：消息会话与 bcc 契约
+
+- `bcc message check` 未取满 100 条时把游标推进到全部入站消息的最大 seq，取满时停在本批最后一条，
+  保留 0.2 的返回内容与 seq 语义。
+- bcc 恢复 0.2 错误码与文案：绑定失败与未知 Thread 使用 `SESSION_BINDING_FAILED`／`SESSION_NOT_FOUND`，
+  agent 缺失或未运行使用 `AGENT_REQUIRED`／`AGENT_NOT_AVAILABLE`，意外异常不再带异常类型前缀；
+  插件化新增的服务未就绪情形使用独立错误码。
+- bcc 子进程配置在会话建立时固化：写入当前 sidecar 客户端入口与 `endpoint` 参数，不再加载配置插件与读取 `config.toml`；
+  `TOOL_CONFIG_REQUIRED` 不再出现。
+- `search --sender <id>` 保留 0.2 的 `sender IS NULL` 前提；路由选不到成员时沿用 0.2 的错误文案与回退。
+- Unix socket 端点无人监听时删除残留并重建，有人监听时以 0.2 文案拒绝；父目录不强制 0700。
+  默认端点保持 0.3 的 `sidecar.sock` 与 Windows `bcn-sidecar-<uuid5>`；bcc 中断退出码恢复 1。
+- Windows 管道的 busy 重试由 asyncio `connect_pipe` 提供；0.2 的就绪／停止时限属于其线程实现，0.3 无对应线程。
+  0.2 Windows 的 1 MiB 消息上限无记录依据，与 Unix 的无上限不一致，两平台均保持无上限。
+
+验证使用真实 bcc 调用：unread 超过 100 条时分批取完、不丢消息；配置文件在运行期被改坏后 bcc 仍可用；
+错误码与 `Next action` 逐项对照 0.2 模板。
+
+### Task 24：SQLite 与历史迁移
+
+- 每次打开数据库时，空闲页大于 0 即 VACUUM，再 `wal_checkpoint(TRUNCATE)`；全部在 SQLite 插件内部，不进入公共接口。
+  迁移在各插件 schema 登记中执行，删除表后释放的空间在下次启动回收。
+- 打开数据库的入口使用一个 60 秒预算包住建目录、连接、权限与回收，不逐迁移限时。
+- 退出预算恢复 0.2 的 5 秒。
+- v9 迁移恢复 `schema_migrations` 的 `compaction_completed_at_ms` 加列，保留 0.2 的实际结构与数据变更。
+- v27 合并 DM 时，同一 peer 的多个 handle 取被合并线程的全部游标下限，与 0.2 的实际结果一致。
+- FTS 的 update 触发器限定 `body`、`seq` 两列，与 0.2 一致。
+- 账本按 0.2 校验每个版本的 name，并保留版本连续性检查。
+- 数据库所在的 `.bcn` 目录在每次打开时收紧为 0700。
+
+验证以 0.2 的 SQL 构造 v1…v31 数据库再用本实现升级，与 0.2 自身升级结果逐表逐行比对；
+另用 PyPI 上可取得的 0.1、0.2 发行包创建的真实数据库跑两条升级路径并重启核对业务数据。
+
+### Task 25：命令行、状态与默认组合
+
+- `--config` 与 `--configer-options` 在根命令、命令组与各子命令均可使用；`bcn run --config <路径>` 恢复可用，
+  0.2 安装的 supervisor 启动方式继续成立。
+- `-h` 与 `--help` 等价；无参数执行 `bcn` 的帮助输出与退出码恢复 0.2。
+- V4 读取忽略未知键，`[node.logging]` 表按 0.2 处理；迁移后的 V5 内容保持现有结构。
+- `agent-command` 加入默认组合与 V5 迁移，升级后 `bcn agent` 直接可用。
+- `bcn run` 就绪后输出各插件的状态与结果表格：插件、状态、结果；失败的插件以独立行展示，
+  不再只输出单行 warning。数据取自生命周期快照。
+- `bcn agent list` 输出 Name、Channels、Harnesses、State、Today、Last event；多个 channel 与 harness
+  按配置顺序以逗号连接；失败原因单独一行，对齐 State 列。Today 为 `输入/输出/缓存/$费用`，口径与 Bazaar Server 的
+  当日用量一致，provider 未报费用时省略费用段。数据归 `agent` 包新增的 `agent-activity` 插件：
+  订阅审计、只存内存，经 sidecar 开放只读查询，`agent-command` 只调用查询并渲染；节点未运行时 State 为 offline。
+- agent 配置要求至少一个 channel 与一个 harness；agent id 不强制 UUIDv7。
+- 节点健康心跳由 `node-management` 包新增的 `node-health` 插件发布：就绪后每 60 秒一条 `node.health` 审计，
+  经日志订阅写入日志。
+
+验证使用真实安装的 wheel 与 systemd 单元启动，核对 supervisor 命令行、表格输出、`bcn agent` 可用性
+及带未知键的 V4 配置升级。
+
+### Task 26：故障处理与提示词细节
+
+- 失败回复恢复 0.2 的 `Execution failed: {error}` 与 `Execution status is unknown: {error}` 语义，
+  不额外拼接原因码，不把内部异常原文写入聊天；结构化失败继续由审计记录。
+- Codex 回合 interrupted 按 0.2 处理：封禁该 provider 一小时并在有可用 provider 时切换重试。
+- 联系审核通过只唤醒该会话；配置变更不再触发全量 `recover()`。
+- 启动阶段的未读唤醒不依赖 priority 0 provider：有任一可运行的 harness 即开始回合。
+- Agent 停止时恢复 0.2 的在途命令排空：Messages 与 Reminders 提供 `drain(owner, timeout)`，
+  先停止接收该 Agent 的 bcc 与 reminder 命令，等待 30 秒后取消未完成的命令；
+  整节点退出时各 Agent 在进入停止状态即同时开始排空，总等待不超过 30 秒。
+
+验证使用真实 Channel 与 Agent 安装态场景，核对错误回复文本、provider 切换、审核与配置变更的唤醒范围，以及停止时在途命令的排空与超时取消。
+
+### 升级提示（延后）
+
+主体与插件的升级提示在 0.3 发布前统一设计：检查兼容版本范围内的新版本，节点与各插件分别提示，
+保留 `bcc node upgrade`／`bcc node version` 与升级后的汇报提醒。本阶段不实现。
+
+### 系统服务（延后）
+
+`bcn system-service` 与 runtime.env 加载作为独立插件交付，本阶段不实现。
+
+## 编辑后的入站消息（2026-10-31）
+
+用户在 channel 中编辑已发送的消息时，节点把编辑后的内容作为一条新的入站消息落库，原消息保持不变，变更历史得以保留。
+对 agent 而言这是一条新消息，消息头带明确的编辑标记并指向原消息，不附带原消息内容。
+下列 Tasks 串行交付，每个 Task 完成后停下等待 review。
+
+| Channel | 编辑事件 | 编辑版本 |
+| --- | --- | --- |
+| Telegram | `edited_message` | `edit_date` |
+| 企微话题 | `topic_event`、`topic_reply_event` 的 `type=2`（[101918](https://developer.work.weixin.qq.com/document/path/101918)），事件不带内容与变更时间，内容按 id 拉取 | 拉取内容中的 `modify_time` |
+| 企微群聊（智能机器人） | 无，长连接（[101463](https://developer.work.weixin.qq.com/document/path/101463)）与回调（[101027](https://developer.work.weixin.qq.com/document/path/101027)）均无编辑事件 | — |
+| 飞书 | 无推送，[事件列表](https://open.feishu.cn/document/server-docs/event-subscription-guide/event-list)的消息事件只有接收、已读、撤回与表情回复，lark-oapi 1.7.5 相同 | — |
+
+Telegram 在 Task 28 接入。企微话题在其插件迁移时改用 edit_version，去掉 0.2 中的 `[Content updated]` 正文前缀与
+`:event:<msgid>` provider id 后缀。企微群聊不推送编辑事件；飞书只能靠轮询消息的 `update_time` 发现编辑，暂不支持。
+
+### Task 27：入站编辑的契约、落库与渲染
+
+- Channel 契约：`InboundMessage` 增加 `edit_version: str | None = None`。为空表示普通消息；非空表示这是对
+  `provider_message_id` 所指消息的一次编辑。同一条 provider 消息的不同编辑取不同的值，同一次编辑的重复推送取相同的值。
+  编辑消息的 `id`、`provider_message_id` 与原消息相同，其余字段按编辑后的内容组装，`occurred_at_ms` 为编辑时间。
+- 身份与去重：入站消息的 provider 身份为 (agent, channel, provider_thread_id, provider_message_id, edit_version)，
+  原消息的 edit_version 为空串。`find_message`、`record_inbound` 与 `_save_inbound_message` 按这一身份去重：
+  同一次编辑重复推送只落一次，多次编辑各落一条。
+- 消息 id：编辑行的 message_id 为 `uuid5(NAMESPACE_URL, f"{原消息 id}:edit:{edit_version}")`，再按现有规则做
+  agent 作用域。原消息 id 不变，reply_to 与引用解析仍落到原消息。
+- 原消息关联：落库时按 (provider_message_id, 空版本) 查找原消息，把其 message_id 写入 `edit_of_message_id`。
+  原消息未落库时该列为空，编辑行按普通消息呈现。多次编辑都指向原消息。
+- 渲染：messages-node 与 bcc 客户端（agent 包的 `cli/messages`）各有一份 `check_message.tpl` 与
+  `read_message.tpl`，在 `edit_of_message_id` 非空时分别输出 ` edit_of=<id>` 与 ` editOf=<id>`，与各自的
+  `reply_to=`、`replyTo=` 写法一致。消息自身的 reply_to 照常保留。
+  `developer_instructions.md` 的 Header fields 增加一行：
+  `` `edit_of=` — ID of the original message. ``
+- 回复：agent 回复编辑行时，outbound 目标沿用该行的 provider_message_id，即 provider 上的原消息。
+- Schema：messages-node 的 `MODULE.migrations` 追加 `Migration(version=2)`：`AddColumn` edit_version（text，非空，
+  默认空串）、`AddColumn` edit_of_message_id（text，可空）、`DropIndex` idx_messages_inbound_provider_identity，
+  再 `CreateIndex` 加入 edit_version 的同名唯一索引，条件仍为 inbound。定义放在 `schema/definitions.py`。
+  新库先建 baseline 再执行版本 2，已有库只执行版本 2。
+
+验证：messages-node 安装测试覆盖原消息去重不变、同一编辑重复推送只落一次、多次编辑各落一条且都指向原消息、
+编辑后回复原消息仍解析到原消息、原消息缺失时 edit_of 为空，以及 check 与 read 的渲染结果。已有库的升级用
+0.3.0rc10 节点的真实数据库副本在本地验证。legacy-node-migrations 的迁移用例只比对已发布 schema 与快照原有的列，
+新库账本按各模块版本链核对。发布含上述包的 rc。
+
+验收结果：channel、messages、agent、messages-node 四个包的 `scripts/ci.py check` 通过，messages-node 与 agent
+的 `scripts/ci.py test` 通过，wheel 与 sdist 各执行一遍。用本地 0.3.0rc10 测试节点的数据库副本（messages-node
+schema 版本 1，119 条消息）启动新版本节点：版本 2 迁移执行，119 条旧消息的 edit_version 均为空串、
+edit_of_message_id 均为空，`idx_messages_inbound_provider_identity` 含 edit_version。
+
+### Task 28：Telegram 订阅编辑
+
+在 contrib-telegram 交付，依赖 Task 27 发布的 `bazaar-contrib-channel`。
+`getUpdates` 的 allowed_updates 加入 `edited_message`。`_dispatch_update` 对 `edited_message` 使用与 `message`
+相同的读取、激活、引用回填与附件规则，`edit_version` 为 `str(edit_date)`，`occurred_at_ms` 与历史判断均以
+`edit_date` 为准。
+
+e2e 增加一例：驱动 bot 在测试话题发送 `@bot <marker> draft`，再用 `editMessageText` 改为 `@bot <marker> edited`。
+worker 对 `edited` 指令读取消息头中的 edit_of，用 `bcc message read --around <edit_of>` 确认原消息正文含
+`<marker> draft`，再回复 `<marker> edited`；测试断言收到该回复。
+
+## 事件队列分发（2026-10-31）
+
+现有 `ContribHub._announce` 为每个符合条件的监听器创建一个回调任务，等待全部回调结束，并把监听器异常汇总抛回发布方。
+发布方因此被最慢的监听器拖住：内容增量等高频审计事件逐条等待 agent-activity 与 logging 处理完；
+监听器异常还会让已经完成业务写入的发布方报错，collaboration 在审核落库后发布 CONTACT_REVIEWED 即属此类。
+本节把事件发布改为入队即返回，由每个监听器自己的分发任务处理，作为回合事件与审批改走事件订阅的前置改动。
+Task 完成后停下等待 review。
+
+### Task 29：announce 入队与按监听器分发
+
+- 监听器：一个实例对一个事件的处理函数，沿用现有（事件，绑定身份）索引。每个监听器持有一条不设上限的 FIFO 队列，
+  同一监听器的事件按发布顺序逐个处理，不同监听器之间互不等待。
+- 发布：`announce` 按现有资格（Running，或处于 stopping 阶段、没有故障、已就绪且自身停止信号未发出）把值追加到
+  各监听器的队列后返回，不等待处理，监听器异常不返回发布方。发布方只会收到框架错误：宿主未进入、发布方实例已停止。
+- 分发任务：值入队时该监听器没有分发任务，就在宿主任务组中创建一个。任务沿用 eager start，进入异常与清理逻辑后
+  先让出一次，发布方返回前不执行监听器代码。任务按入队顺序逐个调用处理函数，调用期间 CURRENT_CONTEXT 为该实例的
+  Context；队列取空后任务结束，下一次入队再创建。空闲的监听器只保留一条空队列。
+- 异常：处理函数的异常由宿主记录 ERROR 日志，包含实例标签与事件名，分发任务继续处理下一个事件。
+- 停止：实例停止信号发出后不再入队，分发任务处理完已入队的事件后结束，lifespan 随后退出；依赖者收尾时发布的
+  事件因此在提供者退出前处理完。实例故障或关闭被取消时取消正在执行的处理并清空队列，与现有在途回调的取消方式相同。
+  在监听器内关闭所属组合或宿主时报错的判断，改为以分发任务识别当前监听器。
+- 配置准备：bazaar-contrib-config 增加 `CONFIG_PREPARED = EventKey[None]("config.prepared")` 并导出。准备插件处理完
+  CONFIG_PREPARE 后发布 CONFIG_PREPARED，表示处理结束，成败由 preparation_error 表达。manager 的 `prepare` 在
+  finally 中发布；`sync` 记录操作时的文件错误等会让它抛出异常，此时先把异常文本写入 preparation_error 再继续抛出，
+  启动按准备失败处理，与 `sync` 返回失败结果时相同。app 的 node-dependencies 条目监听 CONFIG_PREPARED 并释放一个
+  初值为 0 的 asyncio.Semaphore；`prepare` 发布 CONFIG_PREPARE 后按 `initial` 组合中监听 CONFIG_PREPARE 的条目数
+  acquire，全部完成后调用 `select`，没有准备插件时直接 `select`。
+  测试用的替代准备插件 example-preparation 写出检查结果后同样发布 CONFIG_PREPARED。
+- 审计与协作：监听器异常由宿主隔离，NodeAudit.publish 去掉 `ctx.announce` 外的异常捕获，取代本目录 README
+  「Codex 行为对照后的宿主契约（2026-10-25）」Task 1 中 publish 隔离事件投递异常的边界。
+  collaboration 发布 CONTACT_REVIEWED 后，`review_contact` 的结果不受监听器异常影响。
+- 安装测试环境：`uv run --isolated --with` 把本地构建放在下层环境，节点启动时 bootstrap 的 `uv pip install`
+  看不到它们，会把 PyPI 上同版本的 bazaar-core、config、sidecar、timer 装在上层覆盖本地构建，安装测试因此测不到
+  这些包的本地改动。`tests/run_installed.py` 按当前环境的发行原样建普通 venv（本地构建按 direct_url，其余按版本），
+  在其中运行 `--help` 与冒烟脚本。
+
+验证：core 安装测试覆盖同一监听器按发布顺序收到事件；一个监听器阻塞时发布方立即返回、其他监听器照常处理；
+监听器抛错后发布方正常返回、该监听器继续处理后续事件，日志含实例标签与事件名；处于 stopping 的提供者继续收到
+依赖者的收尾事件并在退出前处理完；实例故障时正在执行的处理被取消。既有用例中依赖 announce
+等待处理结束、或依赖发布方取消联动监听器的，改为等待监听器自身发出的信号。app 的 configuration_smoke 在 manager
+与 example-preparation 两种准备插件下，`node()` 进入时补装与检查结果已经生效。collaboration 安装测试中
+CONTACT_REVIEWED 监听器抛错时，`review_contact` 正常返回且审核已落库。core 改动影响的全部包（CI 按依赖闭包选择）
+`scripts/ci.py check` 与 `test` 通过，wheel 与 sdist 各执行一遍；仓库根目录 `uv run --quiet scripts/pyright_lsp_check.py .`
+通过。发布含上述包的 rc。
+
+验收结果：core 的 `scripts/ci.py test` 47 个用例通过，含新增的按发布顺序处理与提供者故障取消在途处理两例，
+连续多次运行结果一致。core、config、audit、manager、collaboration、app 的 `scripts/ci.py check` 与 `package`
+（wheel 与 sdist）通过，仓库根目录 pyright 检查通过。修正安装测试环境后，app、collaboration、schema、
+node-management、reminder、messages-node、legacy-node-migrations、agent 的 `scripts/ci.py test` 通过，
+status、invoke、config-versions、agent-command、manager 同样通过。collaboration 的 CONTACT_REVIEWED 观察者在记录后
+抛错，`review_contact` 正常返回、通知齐全；修正环境前，同一用例的节点进程加载的是 PyPI 上的 bazaar-core
+0.3.0rc11，按旧语义把观察者异常返回给了 `review_contact`。
+
+## 回合事件订阅（2026-11-01）
+
+Agent 每收到一个 Harness 事件，`events.forward` 先发布 `harness.<type>` 审计，再经 `Channels.accept_turn_event`
+按 `turns[(session, turn)]` 登记的连接与目标逐个调用 `channel.accept_turn_event`；回合终结事件在收尾时由 loop
+再调用一次。这是 0.2 方法透传的延续，事件沿 agent 的方法链逐个送到 channel。Task 29 之后 announce 只入队、
+不阻塞发布方，本节把回合事件改为事件订阅。
+Task 完成后停下等待 review。
+
+### Task 30：回合事件改为每个连接私有的事件
+
+- 契约：bazaar-contrib-channel 新增 `events.py`，定义 `ChannelTurn`（frozen dataclass，字段 `target: ChannelTarget`、
+  `event: HarnessOutput`）与 `CHANNEL_TURN = EventKey[ChannelTurn]("channel.turn")`，从包入口导出；
+  `Channel` 协议删除 `accept_turn_event`。
+- 私有绑定：agent 的 `channel_lifespan` 启用 provider 子组合时使用 `local=(CHANNEL_INPUT, CHANNEL, CHANNEL_TURN)`，
+  同一子组合中的 `connect` 条目把自身 Context 存入 `Connection.context`。agent 通过这个 Context 发布
+  `CHANNEL_TURN`，事件只到达该连接的 provider，provider 不需要按 agent 或 bot 身份过滤。
+- 发布：`Channels.accept_turn_event` 改为 `async def announce(self, event: HarnessOutput)`，向
+  `turns[(event.session_id, event.turn_id)]` 中状态不是 STOPPED 的每个连接发布 `ChannelTurn(目标, event)`。
+  STOPPED 由 `retire` 在连接退出 lifespan 前设置，此后该连接的 Context 不再接受发布。`events.forward` 在
+  `deliver` 时 await 它，`channel` 参数改为 `Channels`、`target` 参数删除，loop 中只为它计算首个目标的表达式随之删除；
+  回合收尾处的终结事件同样改为 await `announce`。原先包在这三处调用外的 `except Exception` 删除，
+  provider 处理事件的异常由 core 按监听器隔离。
+- Provider：提供 `CHANNEL` 的 Contrib 声明 `listen={CHANNEL_TURN: ...}`，处理函数用 `ctx.accept(CHANNEL)`
+  取得自身提供的 channel 处理事件。主仓库 workbench 的 `channel` 与 `secondary_channel` 照旧把事件与目标写入
+  outbound 包；editor 夹具启用 channel 时把 `CHANNEL_TURN` 加入 local，由 `process` 的 Context 发布。
+- 外部仓库在主仓库发布含本 Task 的 rc 后各自交付：contrib-telegram 的 channel Contrib 监听 `CHANNEL_TURN`，
+  typing 规则不变；contrib-wecom 删除 `accept_turn_event` 空实现；contrib-codex、contrib-claudecode 的测试 channel
+  监听 `CHANNEL_TURN`，照旧把事件转给测试。
+
+验证：agent 安装测试 consumer_smoke 中 workbench provider 与 editor 自定义 agent 两个场景对回合事件的现有观察
+（started、content.delta、completed 及工具调用事件，经 workbench channel 的 outbound 包读取）照常通过。
+channel、agent 包的 `scripts/ci.py check` 与
+`test` 通过，wheel 与 sdist 各执行一遍；仓库根目录 `uv run --quiet scripts/pyright_lsp_check.py .` 通过。
+发布含上述包的 rc。
+
+验收结果：channel、agent 的 `scripts/ci.py check` 与 `package`（wheel 与 sdist）通过，仓库根目录 pyright 检查通过。
+agent 的 `scripts/ci.py test` 通过，consumer_smoke 中 workbench provider 与 editor 自定义 agent 两个场景经 outbound
+包读到的回合事件照常；agent-command 与 app 的 `scripts/ci.py test` 同样通过。
+
+## 审批直达回合连接（2026-11-01）
+
+审批是一问一答，需要等待结果、随回合取消并报告失败，继续使用方法调用。ApprovalRoute 只依赖 `Channel` 接口，
+Channels 聚合与单个 channel 遵守同一接口；回合开始时 agent 已知锚点所在的连接，而当前传入 ApprovalRoute 的是聚合，
+它在每次审批时按 kind 与 bot 身份遍历连接重新查找。
+Task 完成后停下等待 review。
+
+### Task 31：ApprovalRoute 使用回合连接的 channel
+
+- 回合开始创建 ApprovalRoute 时传入锚点连接的 `connection.channel`，取代 `self.channels`，审批直接调用该连接的
+  `request_approval`。聚合及其 `request_approval` 保持不变。
+- 连接处于 STOPPING 排空时，审批照常送到原连接，与「Stopping 保留既有请求所需的事件、审批、回执及回复通路」一致；
+  整节点停机后连接已 STOPPED 时，由 provider 自身报告不可用。
+
+验证：agent 安装测试中现有的审批场景（provider_smoke 的审批包与 session_routes 的审批路由）照常通过；agent 包
+`scripts/ci.py check`、`test` 与 `package`（wheel 与 sdist）通过，仓库根目录
+`uv run --quiet scripts/pyright_lsp_check.py .` 通过。发布含上述包的 rc。
+
+验收结果：agent 的 `scripts/ci.py check`、`test` 与 `package`（wheel 与 sdist）通过，consumer_smoke 中的审批场景照常；
+仓库根目录 pyright 检查通过。
+
+## 附件不设大小上限（2026-11-01）
+
+入站附件按块流式落盘，内存中只保留一块；文件大小由各平台自身的上限约束。消息层的单文件上限（25 MiB）与各
+Channel 插件自带的下载限额都没有平台依据，一并去掉；本节取代 Task 12 中 Telegram 与 Lark 保留下载限额的要求。
+Task 完成后停下等待 review。
+
+### Task 32：去掉附件落盘的单文件上限
+
+- messages-node 的 `AttachmentMaterializer` 去掉 `max_file_bytes` 参数及写入时的累计大小检查。
+- Telegram 与 WeCom 插件在各自仓库去掉下载限额；Lark 迁移时不再设限额。
+
+验证：messages-node 包 `scripts/ci.py check`、`test` 与 `package`（wheel 与 sdist）通过，仓库根目录
+`uv run --quiet scripts/pyright_lsp_check.py .` 通过。发布含该包的 rc。
+
+验收结果：messages-node 包 `scripts/ci.py check`、`test` 与 `package`（wheel 与 sdist）通过，仓库根目录
+pyright 检查通过。
+
+## 运行时环境变量不再按 agent 配置（2026-11-01）
+
+harness 继承节点的完整环境，0.2 的 `[agent.runtime.env]`（`--set runtime.env=名字=来源变量`）不再支持，
+V4 转 V5 时不再迁移这张表。Task 完成后停下等待 review。
+
+### Task 33：V4 转 V5 丢弃运行时环境变量
+
+- V4 到 V5 的转换像 `sandbox_mode`、`network_access` 一样丢弃每个 harness 的 `env`；V1 到 V4 的历史转换保持不变。
+
+验证：config-versions 包 `scripts/ci.py check`、`test` 与 `package`（wheel 与 sdist）通过，仓库根目录
+`uv run --quiet scripts/pyright_lsp_check.py .` 通过。发布含该包的 rc。
+
+## sidecar 客户端断开后重连（2026-11-01）
+
+共享流客户端在连接断开后保留首个错误，之后每次调用都报告连接已关闭，长期持有 CLIENT 的进程只能重启才能恢复；
+0.2.3 的本机命令客户端每次请求新开连接，没有这一状态。改为由断开后的下一次调用重新建立连接，建立失败时按次数退避重试；
+连接故障仍只向写到该连接上的调用返回错误。Task 完成后停下等待 review。
+
+### Task 34：sidecar 客户端由下一次调用重新建立连接
+
+- 每条已建立的连接持有自己的写端、读取任务和在途调用表；读取任务结束时关闭写端，并让这条连接上未完成的调用失败。
+- 调用发现没有连接，或现有连接的写端已关闭时，等待旧连接的读取任务结束后建立新连接；建立连接及其间的退避都在
+  连接锁内，并发调用依次等待，连上后共用同一条连接。
+- 建立连接最多尝试 3 次，两次尝试之间的等待从 0.25 秒起翻倍、最长 4 秒，取 Channel 共享发送器的重试参数；
+  退避跨调用累计，建立成功后回到 0.25 秒；3 次都失败时向调用方抛出最后一次的连接错误。Client 的等待预算照旧覆盖整个调用。
+- 退避等待消费公共 TIMER。Connection 接收可选的 Timer，未传入时以 asyncio.sleep 等待，重试次数与间隔不变，
+  按原签名构造的平台插件照常可用；本 rc 发布后，sidecar-unix、sidecar-windows 及 consumers 测试的 TCP 夹具传入
+  各自已接受的 TIMER，sidecar 依赖下限提到本 rc。按消息 `8b420362-7808-5dd2-af7b-e852cca54cce`，Timer 保持可选。
+- 重试只覆盖建立连接，调用帧写出后不再重发；写出时对端已断开、本进程尚未收到断开的调用同样按在途调用失败。
+- 关闭客户端后的调用，以及退避等待中遇到关闭的调用，报告连接已关闭。
+
+验证：sidecar 包 `scripts/ci.py check` 与 `package`（wheel 与 sdist）通过，仓库根目录
+`uv run --quiet scripts/pyright_lsp_check.py .` 通过，主仓库 CI 的安装测试在已发布的平台插件上通过。发布含该包的 rc 后，sidecar-unix 与 sidecar-windows 的
+installed_smoke 让同一个 CLIENT 跨隔离节点的重启继续调用，原生传输与 TCP 夹具在各自 CI 上通过。
+
+验收结果：sidecar 包 `scripts/ci.py check` 与 `package` 通过，仓库根目录 pyright 检查通过；主仓 CI 的安装测试在已发布的
+sidecar-unix、sidecar-windows 0.3.0rc10 上通过，随 0.3.0rc14 发布。sidecar-unix #2 与 sidecar-windows #2 的 installed_smoke
+在 Linux、macOS、Windows 的原生传输及 TCP 夹具上，以同一个 CLIENT 调用重启后的节点通过，两包随后发布 0.3.0rc11。
+
+## manager 安装只交给 uv（2026-11-02）
+
+manager 现在把完整候选组合解析成 pylock，在临时环境中安装预检，再把锁中每个产物写成 `名称 @ URL#sha256`，
+交给 `uv tool install` 或 `uv pip sync`。从索引安装的已有包与直接引用来源不符，uv 在首次补装时卸载并重装全部包；
+`uv tool install` 每次重装 bin 下的入口，Windows 上运行中的 bcn.exe 无法替换，uv 失败后的清理删除整个 tool 环境，
+干净的 Windows 上 `uv tool install bazaar-compute-node` 后首次运行即损坏。uv 的原始输出见 contrib-system-service
+分支 `diagnose/20261102-windows-tool-sync` 的诊断 workflow。按消息 `22b024c4-c7ad-5924-bfce-5b85feee75e8`，
+保留每个插件自己的包源，去掉预先解析、临时环境预检、恢复用的锁与版本偏好，解析与安装交给 uv。
+本节取代「完整组合的版本与来源解析」中的 pylock 解析、临时环境与直接引用安装，以及「uv tool 部署」「自管 venv 部署」两条。
+Task 完成后停下等待 review。
+
+### Task 35：manager 的包操作统一交给 uv pip
+
+- 启动准备按已装元数据检查配置声明，全部满足时不调用 uv。需要安装时，按消息 `83fb1a1b-c6f1-5fd0-b2ca-a9f70df02969`，
+  manager 在临时目录生成 pyproject.toml，`project.dependencies` 包含宿主 `bazaar-compute-node==<已装版本>` 与配置中
+  全部生效的插件要求，再执行 `uv pip install --python <节点解释器> -r <临时目录>/pyproject.toml`：uv 一并解析整张依赖图，
+  已满足的包不重装，依赖冲突时报错且不改动环境；按消息 `bcdc57e8-649f-5243-a9f1-c5f34fb0b016`，冲突检测由这一次解析承担。
+  按消息 `9812d311-0c0b-570c-8a84-23377234eb3d`，临时目录只在这次 uv 运行期间存在，结束后不论成功失败都删除。
+  uv tool 部署与自管 venv 部署使用同一条命令，不再执行 `uv tool install` 或 `uv pip sync`，bin 下的入口不变。
+  manager 装入的包不记入 uv 的 tool 回执，用户自行执行 `uv tool upgrade` 后缺少的包由下一次启动准备补装。
+- 各插件配置的 `source` 在临时 pyproject 中写成 `tool.uv.index`，`tool.uv.sources` 把每个声明的包绑定到自己的源，
+  宿主与未配置来源的包绑定到 manager 的 `host_source`。按消息 `a116394f-439a-55d9-97d5-cada0c22b1cb`，这些 index 都不标
+  explicit：私有源（插件声明的、既不是 `host_source` 也不是 PyPI 的源）按配置顺序排在最前，其后是 `host_source`，
+  再后是插件声明的 PyPI；临时 pyproject 不覆盖 uv 自身的默认源（未配置时为 PyPI），它始终最后。传递依赖按 uv 默认的
+  first-index 规则依次查找，私有插件依赖的其他私有包不必在配置中声明，也不会被公共源上的同名包顶掉。
+  uv 0.13 实测 `uv pip install -r pyproject.toml` 按 sources 取包，且不重装已满足的包。自举沿用同一方式。
+- add 与 `bcn contrib sync` 使用同一份临时 pyproject，新包及启用入口所需的包一并加入；remove 保留现有的停用检查，
+  再按消息 `fd5e487e-ace7-5b2b-85f9-59afb544cf7c`，把删除之后的配置（宿主、其余声明连同各自请求的 extra、
+  提供节点启动所选入口的包，例如当前配置载体）沿已装元数据展开，要删的包仍在其中时拒绝，展开逻辑与启动准备的满足检查共用；
+  通过后执行 `uv pip uninstall`。`bcn contrib sync --upgrade`
+  与宿主升级 `bcn contrib upgrade VERSION` 把对应要求连同 `--upgrade` 交给 uv，宿主升级同样不经过 `uv tool install`。
+- 删除 pylock 的生成、临时环境的安装与预检、`URL#sha256` 转写、before.json 与 before.pylock.toml，
+  以及以 pylock 作版本偏好。安装后按实际环境检查入口并校验候选配置，失败时保留原配置。
+- 操作记录写入 uv 或校验的原始错误；安装失败的处理路径不再重新检查环境，原始错误不再被覆盖。
+  uv 安装或卸载完成、重新检查环境后，立即记录已安装、环境是否变化与是否需要重启，再校验配置；
+  校验失败时操作记录与输出照样反映环境已经变化。
+
+验证：manager 现有 venv 与 uv tool 两种部署的安装、同步、升级与 live 回归通过；uv tool 部署新增经 `bin` 下 bcn 入口
+发起的首次运行，默认插件装好后命令正常完成，Windows 上同样通过。按消息 `33d1f428-df57-5ac9-8824-f26d1fd6d3c1`，
+uv tool 部署再新增一例：manager 装好插件后执行 `uv tool upgrade --reinstall bazaar-compute-node`，再次运行 bcn 时
+启动准备补装缺少的包，命令正常完成。测试夹具中第二个源上 example 0.2.0 的 `text` 额外依赖一个只发在该源上的包，
+配置不声明它，两种部署的迁移节点首次运行时一并装上。删除当前配置载体被拒绝后，以该载体启动的节点照常运行。
+按消息 `2bb205de-afe8-5c9e-adcd-5fd032342553`，再加两例反向用例：另一声明经 extra 仍需要的包，remove 被拒绝且包仍在；
+配置含无人提供的入口时 add 新包，包装上后校验失败，操作记录仍写明已安装与环境已变化。manager 包 `scripts/ci.py check`、`test` 与
+`package`（wheel 与 sdist）通过，仓库根目录 `uv run --quiet scripts/pyright_lsp_check.py .` 通过，PR 的三平台 CI 通过；
+发布含该包的 rc 后，contrib-system-service 的 Windows system 测试通过。
+
+验收结果：#138 的计划 e4e9893、Task 35 e77c58b 与 AGENTS.md 第 15 条改写 c9e035c 合入 4d78cd4，三平台 CI 通过，
+Windows 上经 `bin\bcn.exe` 的首次运行与 `uv tool upgrade --reinstall` 两例通过；随 0.3.0rc15（4ca6526）发布。
+contrib-system-service PR #1 修正插件自身 PowerShell 输出的编码后，Windows system 测试从 PyPI 安装 0.3.0rc15，
+在含非 ASCII 字符的路径上完成安装、启动、状态、重启、停止与卸载（run 41447516453）。
+
+## 插件与本体升级（2026-11-02）
+
+Task 35 把 `bcn contrib sync --upgrade` 与宿主升级 `bcn contrib upgrade VERSION` 都以全局 `--upgrade` 交给 uv，
+uv 因此把环境里所有可升级的包一并升到最新，包括 pydantic 等多个插件共用的依赖。按消息 `21e4e57b-4d5a-58bf-81d4-945ff341b892`，
+升级只把目标包升到最新，依赖只在新版本要求时随之升级；按消息 `587d596c-304c-5c60-b6ab-7621a7daa29e`，
+sync 回到按配置安装缺少的包的原义，`bcn contrib` 保持插件管理。按消息 `03333557-df0a-520e-98ab-a8a9e9a64e14` 与
+`86dc0175-1bd2-52d5-b89c-5490aca60164`，本体照 0.2 以 `uv tool install bazaar-compute-node==<版本> --refresh-package bazaar-compute-node`
+升级，uv 把工具环境同步为本体及其依赖，安装随即按同一份插件声明把插件装回；版本检查与 agent 提示只针对本体；`bcc node upgrade` 先预检，
+配置中的插件声明与新本体不兼容时拒绝执行；手动 `uv tool upgrade` 造成插件不兼容时，启动时该插件不启动，其余照常运行。
+按消息 `afa1bdb2-59e2-59e3-914e-46d5060bd5d0` 与 `4776aeab-4030-5e81-8340-5161fc04eec6`，本体升级是节点级服务，
+经 sidecar 开放版本、可升级版本、升级与失败原因，供 GUI 与后续 server 调用，失败原因经审计事件上报。
+按消息 `07a71f3e-defb-5420-97e8-e7a5b6d2914d`、`bfce5ed9-2ded-5c7c-be3f-90ea0217dc0c` 与 `fec64f07-245d-507f-a0db-c62c0764518a`，
+node-management 提供安装与重启，`bcc node upgrade` 是 bcc 经 sidecar 依次调用安装、提醒与重启编排出的命令，
+跨插件的能力都经 sidecar 调用。按消息 `16db3bc0-8a76-57bc-a971-e5dfee1fce6e`，uv 没有保留环境中其他包的参数，因此安装本体后装回插件。
+按消息 `9c005413-f572-5a68-9306-7a8b8b863b57`，版本一律取运行实例内存中的值，只有 `bcn --version` 读磁盘上的元数据。
+按消息 `e957dc98-7897-5004-8a64-992db0b4c087`，节点自行升级只针对系统服务托管的运行方式，前台运行由用户停机后升级：
+Windows 上 uv 替换不了正在运行的工具入口 bcn.exe，失败后连工具环境一并损坏；托管时运行的是复制出的 bcn.running.exe，
+不受影响（contrib-system-service 诊断 run 41581671112）。按消息 `070ee46a-93b7-5591-b6ca-4b49011d5466` 与
+`041c5ed1-33cb-5697-8441-41ce8edc4495`，Windows 上的前台节点拒绝自行升级，由 agent 转告用户停机后手动升级；其他平台不拦。
+本节取代 Task 35 中这两处 `--upgrade` 与 manager 的宿主升级。Task 完成后停下等待 review。
+
+### Task 36：插件升级只动目标包，本体照 0.2 升级
+
+- `bcn contrib upgrade PACKAGE` 把配置中声明的一个插件升到兼容范围内的最新版：传 `--upgrade-package <发行名>`，
+  不传全局 `--upgrade`。uv 对 `--upgrade-package` 同时刷新该包缓存的索引，刚发布的版本因此可见。
+  未在配置中声明的包按 remove 的方式拒绝。
+- `bcn contrib sync` 去掉 `--upgrade`，只按配置安装缺少的包；启动准备、add 与 remove 不变。
+- 按消息 `04d08d9c-87f5-5629-8edc-bd6bdfa43991`，manager 调用的 uv 命令被取消时不再杀掉 uv，而是继续读取输出、等它自行结束，
+  再删除临时 pyproject 并传出取消；环境不会停在半装状态，Windows 上临时目录也不再被残留进程占用。关停因此等候手头的 uv 命令。
+- manager 去掉宿主升级操作与 `bcn contrib upgrade VERSION`，改为提供本体升级的底层操作：
+  - 最新可装版本：临时 pyproject 中宿主要求为 `bazaar-compute-node>当前版本`，其余为配置中的插件声明，执行 `uv pip compile`
+    并刷新宿主的索引；解析通过时取宿主的解析版本，无解时没有可升级版本。预发布版本按 uv 的语义，只有当前为预发布版本时才考虑。
+  - 预检：宿主要求为 `==目标版本`，同样只解析不安装；无解时报错，附 uv 的原始输出，其中列出冲突的插件。
+  - 安装：只支持 uv tool 部署，即环境中存在 `uv-receipt.toml`，其他部署在预检前报不支持；执行
+    `uv tool install --refresh-package bazaar-compute-node bazaar-compute-node==<目标版本>`，host_source 不是 PyPI 时以 `--index` 加入。
+    uv 把工具环境同步为 receipt 所列的本体，经 `uv pip` 装入的插件随之移除，uv 没有保留它们的参数，`--with` 会把插件写进
+    receipt、与配置同时管理插件。安装因此紧接着以预检的同一份声明执行 `uv pip install` 装回插件，未重启的节点只是待重启。
+    操作记录的 kind 为 upgrade；本体装好即记录已安装、需要重启与目标版本，之后装回插件失败时这些记录保留；
+    失败时错误为 uv 的原始输出。
+- 按消息 `6e344175-68b7-5c7d-851c-c7e5b5cc8877` 与 `8617de0d-ae9f-5b4b-b59e-703357dad90e`，`bcn run` 不依赖 manager：
+  node-management 的 `node-management` 入口仍只依赖 COMMANDS 与 CONFIGURATION，另提供 RUN，即 `bcn run` 等待的停止事件；
+  同一包新增 `node-upgrade` 入口提供 NODE 服务，依赖 CONTRIB_MANAGER、TIMER 与 AUDIT，默认配置与 V4→V5 转换都启用它：
+  - `version()` 返回节点启动时记下的运行版本，装完未重启时仍是原版本；node-health 心跳中的版本同样取启动时的运行版本。
+    `available()` 返回每小时检查一次得到的最新可装版本。
+  - `info()` 返回运行版本与节点所在机器的信息：系统、系统名称与版本号、架构、节点进程的启动时间、CPU、内存与各磁盘，供 server-computer 的电脑页面使用；字段与磁盘的取法见 [server.md](server.md#机器信息)。
+  - `install(版本)` 预检后安装，版本缺省时取 `available()`；在节点自己的任务中执行，调用方断开时照样装完并发布审计事件。
+    Windows 上解释器所运行的启动器（`sys.orig_argv[1]`）就是 receipt 所列的工具入口（前台 `bcn.exe run`）时，
+    在预检前抛 UnsupportedUpgrade；`sys.argv[0]` 在这里不带 .exe，不能用来比较（contrib-system-service 诊断 run 41589428916）。
+  - 按消息 `1e36d3b0-d199-5d7e-b101-d1845566e3cd`、`c8ce6450-d1dd-50a7-8b02-feea93a05db7`、`1cca004d-6b4a-55a7-8e70-1cac0507dde1` 与 `897f1d71-9e4f-5394-97e5-659d9f2387d1`，重启不分平台都由 system-service 提供，NODE 去掉 `restart()`：
+    system-service 登记 remote `system-service` 的成员 `restart`，在节点自己的进程中发 SIGINT，节点像按下 Ctrl+C 一样正常退出，
+    由 system-service 的 supervisor 以新装的版本再拉起。按消息 `87081cbe-1f93-52bd-a5fe-6827a76cd72b`、`6b106d96-77e5-573e-afba-c28454386c8f` 与 `c2513e09-ab73-5f38-88bf-a5250f9312a2`，前台运行的节点
+    收到这个调用同样正常退出；节点没装 system-service 时，sidecar 报该成员未开放。
+  - 安装开始、完成与失败都发布审计事件 `node.upgrade`，带版本，失败时带 uv 的原始输出。
+  - 这些方法经 `bazaar_compute_node.remotes` 登记的 RemoteEntry 由 sidecar 开放。
+  - contrib-manager、timer 或 audit 入口停用时只有 node-upgrade 不可用，`bcn run` 不受影响。
+- agent 不 accept NODE，经 sidecar 调用它。按消息 `654e5a19-0174-54ff-a170-7dc2795deae9`，升级检测可以关闭：
+  停用 node-upgrade 入口后没有升级提示，`bcc node` 报 NODE 不可用，其余照常。按消息 `0566ef8a-a19e-5777-be66-c0c8bfacea77`
+  照 0.2：检查只由 NODE 的后台任务每小时做一次，全节点一份，结果在其内存中；回合开始与 steer 经 sidecar 读这份值，
+  不联网也不跑 uv，sidecar 或 NODE 不可用时视为没有新版本：
+  - 回合开始与回合中 steer 的 inbox 提示在 `available()` 有版本时附 0.2 的 Upgrade available 一行，每个会话同一版本只提示一次。
+  - bcc 增加 `node upgrade --message-id`（必填）与 `node version`。upgrade 依次调用 NODE 的 `install`，经 reminder 服务挂 60 秒后的
+    「Report the outcome of upgrading to <版本>」提醒并锚定该消息，再调用 system-service 的 `restart`；安装失败时报错，不挂提醒、不重启；
+    提醒挂不上时照常重启，输出说明没有提醒；调用 `restart` 失败时报 UPGRADE_RESTART_UNAVAILABLE，Next action 让 agent 转告用户新版本
+    已装好、请自己重启 bcn 或改用系统服务运行。NODE 抛 UnsupportedUpgrade 时报 UPGRADE_UNSUPPORTED，
+    Next action 让 agent 转告用户停机后执行 `uv tool install bazaar-compute-node==<版本>`，或改用系统服务运行。
+    version 照 0.2 只输出运行版本。
+  - 按消息 `e35821f1-0417-5a79-8675-412a1034ae33`，bcc 进程只在第一次调用时启动一次会话记录的客户端 hub，
+    同一命令里的多次 sidecar 调用复用同一个 client，不为每次调用重起 hub。
+
+验证：manager 的 installed_smoke 中，`bcn contrib upgrade example` 把 example 升到新发布的版本，而索引里同时有更新版本的
+bazaar-core 保持原版本；uv tool 部署在索引发布本体新版本后，最新可装版本为该版本；像系统服务那样把工具入口复制成
+bcn.running 再运行 `bcn run`，经 sidecar 调用 `install()` 后插件仍在环境中，以 SIGTERM 停下后正常退出（Windows 上结束进程），
+工具入口的 `bcn --version` 为新版本，再次启动后插件照常运行；Windows 上在此之前先直接以工具入口前台运行，
+`install()` 报 UnsupportedUpgrade；venv 部署的安装报不支持。
+node-management 的安装态用例经 sidecar 读取 `version()`、`available()` 与 `info()`，
+非 uv tool 部署的 `install()` 报不支持，三个平台都运行。agent 的 provider_smoke 在会话环境中执行 `bcc node version`
+并读到节点的本体版本。app 的 configuration_smoke 不改：去掉 manager、换成其他准备插件的配置照旧提交并 `bcn run`。
+manager、node-management、agent、config-versions 与 app 包 `scripts/ci.py check`、`test` 与 `package` 通过，
+仓库根目录 `uv run --quiet scripts/pyright_lsp_check.py .` 通过，PR 的三平台 CI 通过。
+
+## 删除无用与只供测试的代码（2026-11-03）
+
+按消息 `f80f5ca7-478c-59f0-a64a-2440b9769211`、`3bf18ed9-995f-54a2-8545-d2f11aa3b03c` 与 `1eb96d04-7f47-52f0-a9f1-75720cacae62`，
+0.3 的 workspace 成员（app、core、contrib/*）删去没有调用方的代码，以及只有测试调用的代码；生产代码不为测试预留接口，
+测试改为观察公开行为。判断调用方时一并核对各外部插件仓库。按消息 `62131714-ebf6-5e08-8980-daf389ba855b`，
+组合按安装时选择的 extra 区分（`bcn[agent]`、`bcn[server]`），各自以默认配置新建节点配置，不在运行时把组合并入已有配置；
+本节取代前文与 roadmap 中的组合导入，Task 16 对 `AGENTS.wait_applied` 的描述随之删去。Task 完成后停下等待 review。
+
+### Task 37：删除无用与只供测试的代码
+
+- 没有调用方：sidecar `wire.py` 的 `RESPONSE`，响应帧由 `streams.py` 自行解析；messages-node 与 reminder 命令分发器的 `accepting` 属性。
+- 只有测试调用：
+  - agent 的 `AgentInstances.wait_applied`，以及只供它使用的 `applied` 事件与 `error` 字段；CONTRIB_CHANGED 回调照旧应用实体组合，失败照旧抛出。
+  - schema 的 `Schema.modules`。
+  - config 的 `Configuration.import_defaults`，以及只供其测试使用的示例包 `defaults.toml` 与 `example-added` 入口。
+- 测试改为观察公开行为：
+  - agent 与 agent-command 的安装测试经 CONTRIB_CHANGED 与 hub 快照等待：节点启动后等具名 agent 及其下全部条目进入 Running；
+    provider_smoke 每次改配置后按这一步的变化，等新增条目进入 Running、被替换的条目换成新实例、被移除的条目消失；
+    等待期间出现失败的条目即报错。这一判断放在 agent 的测试工作台中共用。
+  - schema 用例改查 `contrib_schema_tables` 中各表的归属包。
+  - app 的 configuration_smoke 去掉组合导入及其并发冲突一段，直接提交含 status 的用户配置，后续步骤不变。
+- contrib-legacy-node-migrations 的迁移用例去掉对 `schema.modules` 的断言，同一用例对 `contrib_schema_tables` 归属的断言已覆盖模块登记；
+  该改动兼容已发布的 rc，先于含本 Task 的 rc 发布合入。
+
+验证：sidecar、messages-node、reminder、agent、agent-command、schema、config 与 app 包 `scripts/ci.py check`、`test` 与 `package`
+（wheel 与 sdist）通过，仓库根目录 `uv run --quiet scripts/pyright_lsp_check.py .` 通过，PR 的三平台 CI 通过；
+contrib-legacy-node-migrations 的 PR CI 通过。
+
+## 按 extra 选择初始依赖（2026-11-03）
+
+按消息 `d7e335aa-0bd2-51cd-9a48-7105a1743a31`、`ff4a878c-5d2c-5263-b2c0-5697dfcdbc66`、`f9e751b2-aa5f-5f3f-a978-b871e40d583f`、
+`2dab00c2-856f-50a9-ab94-93f827354e7f` 与 `8629e214-e3c7-5bf4-b5e0-9f417e62e082`，节点进程只有一个 hub，server 是普通插件；
+安装时选择的 extra 只决定装哪些带默认配置的包，即初始依赖，几个 extra 可以并存：[node] 对应 agent 与 node 两部分，[server] 随 server 交付，
+只安装 [server] 时环境中不含 node 的包。按消息 `099c1130-2a64-5cfc-a823-198fe11bafff`、`8e052273-dd89-5132-a754-2337b0a4372d` 与
+`b846a422-6206-5210-aeea-15e1df1b345b`，extra 只装带着默认配置的包本身，每个包带着自己的默认配置，配置中的其余包不作为依赖，
+照旧由 manager 按默认配置同步；按消息 `a8c4b4e7-7fa5-5a52-8b44-75cc52eed735`，默认配置中的包不增不减。按消息
+`5869bdb3-226d-553a-ad84-609443bc1724`，插件只有一种入口。按消息 `57eef769-6d01-539c-9a89-90104c759c94`，一个带默认配置的包都没装时默认为 node。
+按消息 `741e9603-e1ac-5ac8-8254-1c472af91556`、`96e09aeb-f8a3-58d9-82a2-9c61a184e0fb` 与 `f18d0e13-5771-5d56-a0f1-f57ac55aee4b`，
+本体发行名改为 bazaar-compute，旧名 bazaar-compute-node 作为 bazaar-compute[node] 的别名，命令行仍为 bcn；声明默认 extra 的 PEP 771
+仍是草案，uv 不支持。按消息 `d7e335aa-0bd2-51cd-9a48-7105a1743a31`，节点自行升级保留安装时的选择。本节在 0.3.0 正式版之前完成；
+按消息 `40ac9a5f-d37e-5319-ac7e-2b49f86b387c` 与 `b5daa819-b426-5602-9739-aa04be5cd9ae`，两个 Task 在同一分支一并完成，完成后停下等待 review。
+
+### Task 38：本体改名为 bazaar-compute，旧名作为 [node] 的别名
+
+- app 的发行名改为 bazaar-compute。Python 模块 `bazaar_compute_node`、入口组 `bazaar_compute_node.contribs`、`bazaar_compute_node.commands`、
+  `bazaar_compute_node.remotes` 与命令 `bcn` 不变，插件无需修改。宿主版本一律取 bazaar-compute 的已装版本，包括 `bcn --version`、
+  node-health 心跳、NODE 的运行版本与 agent 的升级提示。
+- bazaar-compute 增加 extra `node`，只含带着 node 默认配置的 bazaar-contrib-node-management；默认配置中的其余包照旧由 manager
+  按默认配置补装。
+- 新增 workspace 成员 bazaar-compute-node：依赖 `bazaar-compute[node]==<同一版本>`，并声明同一个 `bcn` 命令指向
+  `bazaar_compute_node.cli:main`。uv tool 只链接所点名包自己声明的命令，别名不声明时 uv 拒绝安装；两个包声明同名命令可以共存，
+  运行的是本体代码（uv 0.13 实测）。构建配置为 `module-name = []` 与 `module-root = ""`：wheel 只含元数据，workspace 的可编辑安装
+  写入 sys.path 的是成员目录本身，解释器启动时不再提示路径不存在。
+- 发版时 prepare 把别名的精确依赖改写为发版版本；发布顺序为各插件、bazaar-compute、bazaar-compute-node，旧名的新版本出现在 PyPI 时
+  其依赖均已可装，0.2 节点经自身的升级命令安装旧名即得到 bazaar-compute[node]。PyPI 为 bazaar-compute 配好 trusted publisher 后，
+  才发布首个含本 Task 的版本。
+- 节点自行升级按 uv receipt 中的原始要求重装：receipt 为 bazaar-compute-node 时安装 `bazaar-compute-node==<版本>`，为 bazaar-compute 时
+  连同其 extras 安装 `bazaar-compute[<extras>]==<版本>`；`--refresh-package` 同时刷新 bazaar-compute 与 bazaar-compute-node。
+  最新可装版本与预检以同一要求解析。manager 的启动准备、add、remove 与 sync 以 bazaar-compute 作为宿主包。
+- 宿主经直接引用安装时（CI 与发版验收用本地构建的 wheel），manager 按该引用声明宿主，不再按版本向索引查找；
+  PyPI 上还没有 bazaar-compute 时，自举与包检查同样可用。
+
+验证：manager 的 installed_smoke 分别以 bazaar-compute-node 与 bazaar-compute[node] 两种方式 uv tool 安装，两种安装都提供 bcn
+并装有 node-management，首次启动后默认配置的包由 manager 装齐；经 NODE 升级后 receipt 保持原来的要求与 extras。删除节点正在用的
+配置载体 config-filesystem 被拒绝。app 与 manager 包 `scripts/ci.py check`、`test`
+与 `package` 通过，新成员的 wheel 与 sdist 通过包检查，仓库根目录 `uv run --quiet scripts/pyright_lsp_check.py .` 通过，PR 的三平台 CI 通过。
+
+### Task 39：默认配置随包提供，`bcn run` 移入本体
+
+- 新增入口组 `bazaar_compute_node.defaults`：带默认配置的包登记一个返回默认配置文档的函数。本体的 `boot.defaults()` 按入口名顺序合并
+  已装包的默认配置：`contrib_indexes` 取并集，同一个包只保留一个声明，已经启用的入口不重复启用。新建配置与启动输入都用这份合并结果，
+  本仓库测试读取默认配置时同样经它。
+- defaults.toml 从本体移入 node-management，登记为 `node`；本体不再带任何默认配置。
+- 一个带默认配置的包都没装时，本体像自举缺失的 config-filesystem 那样，先经 manager 装上 node-management，再读它的默认配置；
+  两个包都缺时在同一次自举中安装。
+- `bcn run` 由本体提供：本体把 run 作为自己的命令条目交给 invoke 的 CommandCatalog，与已启用插件的命令一同列出，插件声明同名命令时
+  按重复声明报错；选中 run 时本体把登记 run 的条目加入组合并作为根。启动后激活整个配置组合，打印插件表与 `bcn ready`，一直运行到
+  Ctrl+C 取消它；Linux 与 macOS 上的 SIGTERM 同样结束它。按消息 `a0f9d0f6-74ac-5d0a-89bd-5bbdf8496dc6` 曾把停止事件 RUN 移入
+  bazaar-contrib-invoke；按消息 `1a9a3b44-ff29-50dc-acf4-154f886a3468`、`5fc7a4c3-cef8-5c37-90ac-02b1bf0e223d`、`b8ec28c3-6c69-57d1-915a-5b44d85ea180` 与 `c1ded550-5e5d-5e2e-a801-b963f32d71d0`，
+  本体只有 run，RUN 去掉，重启归 system-service（见 NODE 一节）。
+  插件表的行与 node-health 心跳共用 invoke 的 `contribs()`。
+  node-management 去掉 `node-management` 入口与 run 命令，保留 node-health 与 node-upgrade，不再用到的 click 与 bazaar-contrib-config
+  依赖一并去掉；默认配置与 V4→V5 转换不再启用 `node-management` 条目，默认配置中其余条目不变。
+- 外部仓库测试中读取本体 defaults.toml 的地方，在含本 Task 的 rc 发布后改为 `boot.defaults()`。
+
+验证：app 测试以测试夹具包登记第二份默认配置，新建的配置合并两份，共用的包只声明一次、共用的入口只启用一次；只装本体时首次运行装上
+node-management，新建的配置声明 node-management，测试中自举与同步向 PyPI 请求的包经 uv 的 `UV_OVERRIDE` 解析为本地构建。按消息
+`8fba6fbb-dacc-5918-a5b1-51caaf1783a7`，测试环境不混用 PyPI 上已发布的 node-management：manager 的 venv 与 tool 部署，以及拷入已有配置的
+新环境（tool 重装之后再装一次），先从测试索引装上 node-management，即 PyPI 已有这次发布时本体自举得到的环境；app 的包检查直接写入
+manager 的官方索引。`scripts/ci.py package` 把工作区中不在被检查包依赖闭包内的包经 `UV_OVERRIDE` 指向本次构建的 wheel，
+app 的包检查首次运行时自举的 node-management 因此是本次构建。node-management 的安装态用例
+经本体的 `bcn run` 照旧就绪、插件表列出 node-health、响应 SIGTERM 退出。node-management、config-versions、invoke、
+manager、agent、agent-command、collaboration、messages-node、reminder、schema 与 app 包 `scripts/ci.py check`、`test` 与 `package`
+通过，仓库根目录 pyright 通过，PR 的三平台 CI 通过。
+
+## 已装包按包名去重（2026-11-04）
+
+Fedora 系统自带的 Python 建出的环境，把同一个 site-packages 以 lib64 与 lib 两个路径各放进一次 sys.path，
+`importlib.metadata.distributions()` 因而把每个发行包返回两次（这台机器上正式节点的工具环境即是此布局）。manager 的已装包清单随之重复，
+`bcn contrib show` 等按名字选择已装包的命令报「select one installed package」。按消息 `e6a23249-9ee9-5e03-b89e-596e7df7580d`
+修这里的去重。
+
+### Task 40：manager 列已装包时按包名去重
+
+- manager 的 `environment.inspect()` 按规范化后的包名去重：同名发行包只保留 sys.path 中先出现的那份，与导入时实际生效的一致，
+  重复的那份不再读取入口。
+
+验证：manager 安装态用例的 venv 部署在 POSIX 上照 Fedora 的布局，把 lib64 下的 site-packages 再加入 sys.path 一次，原有流程中的
+`bcn contrib show`、移除与升级照常通过。manager 包 `scripts/ci.py check`、`test` 与 `package` 通过，仓库根目录 pyright 通过，
+PR 的三平台 CI 通过。
+
+## 删除 0.2 的节点代码并按 0.3 重写 README（2026-11-04）
+
+按消息 `67e1c292-3c8e-5654-827a-da49e4790754`、`c8961a83-daad-5e61-a824-97400c78f615` 与 `105d541e-08d5-5c9f-af29-45f4c2a7851a`，删除仓库中 0.2 的节点代码，server 部分保留到 server 开发完成后再删；README 按 0.3 重写，插件开发文档暂不写。
+
+### Task 41：删除 0.2 的节点代码
+
+- 删除 `src/bazaar_compute_node/`（222 个文件），以及根目录 tests 中只属于节点的部分：`tests/app`、`tests/core`、`tests/contrib`，`tests/e2e` 中除 `test_images.py` 以外的 8 个文件，`tests/package_smoke.py`、`tests/test_bcc.py`、`tests/test_bcc_help.py`、`tests/test_bcc_reminder.py`、`tests/test_cli.py`、`tests/test_i18n.py` 与 `tests/test_support.py`。`.gitattributes` 中指向 `src/bazaar_compute_node/resources` 的一行一并删除。
+- 保留 `src/bazaar_compute_server/`、`tests/server/`、`tests/e2e/test_images.py`、根目录 `tests/conftest.py` 与 `tests/support/`。server 源码不导入节点包；`tests/server` 中 11 个文件与 `tests/support` 的 `bcn_test_support` 导入节点包，删除后不再能运行，作为 server 移植的对照保留。`tests/support` 中的 `bcn_pytest` 插件把 BCN_HOME 指向临时目录，0.3 各包的测试依赖它，保持不变；`tests/run_installed.py` 属于 0.3，保持不变。
+- AGENTS.md 第 18 条中「原 src 中已发布迁移脚本保留为只读验收对照」改为指向 `src/bazaar_compute_server` 中的迁移脚本，节点的 0.2 迁移以 v0.2.3 标签为准。
+
+验证：0.3 的成员、脚本与 CI 配置不引用被删除的路径；全部成员 `scripts/ci.py check` 与 `test` 通过，其中 node-management 与 schema 的安装态用例照旧构建 `tests/support`；仓库根目录 `uv run --quiet scripts/pyright_lsp_check.py .` 通过，PR 的三平台 CI 通过。
+
+### Task 42：README 按 0.3 重写
+
+- 根目录 README 换成讨论中定稿的 0.3 内容。app 与别名包的 README 是指向它的软链接，PyPI 上的项目说明随下次发版更新。
+
+验证：README 中的安装与 contrib 命令在 0.3 中可用；app 与别名包 `scripts/ci.py package` 通过。

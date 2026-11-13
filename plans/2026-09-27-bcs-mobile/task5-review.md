@@ -1,6 +1,6 @@
 # Task 5 浏览器验收与截图
 
-2026-09-27，在专用临时目录运行真实 BCS 和 NodeApplication，使用 TestChannel/TestRuntime；浏览器为独立 Edge。真实外部渠道、模型及正式服务均未参与。
+2026-09-27，在专用临时目录运行真实 Bazaar Server 和 NodeApplication，使用 TestChannel/TestRuntime；浏览器为独立 Edge。真实外部渠道、模型及正式服务均未参与。
 
 ## 结果
 

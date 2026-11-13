@@ -1,0 +1,210 @@
+"""Route one agent's public Channel operations to its connected providers."""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import dataclass, field
+from uuid import NAMESPACE_URL, uuid5
+
+from bazaar_contrib_channel import (
+    CHANNEL_TURN,
+    Channel,
+    ChannelApprovalRequest,
+    ChannelIdentity,
+    ChannelSendPart,
+    ChannelSendRequest,
+    ChannelTarget,
+    ChannelTurn,
+    ChannelUnavailableError,
+    DmAddress,
+    DmRequest,
+    InboundMessage,
+)
+from bazaar_contrib_harness import ApprovalResult, HarnessOutput
+from bazaar_contrib_timer import Timer
+from bazaar_core import Context
+
+from . import states
+from .models import ProviderConfig
+
+
+@dataclass(eq=False, slots=True)
+class Connection:
+    name: str
+    kind: str
+    channel: Channel
+    provider: ProviderConfig
+    priority: int
+    context: Context
+    # the connection's key in its agent, `<kind>:<position among that kind>`
+    key: str
+    state: states.ConnectionState = states.ConnectionState.RUNNING
+    ready: asyncio.Event = field(default_factory=asyncio.Event)
+    received_at_ms: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Ingress:
+    connection: Connection
+    runtime: str | None
+    message: InboundMessage
+
+
+class Channels:
+    def __init__(self, agent_id: str, order: dict[str, int]):
+        self.agent_id = agent_id
+        self.order = order
+        self.connections: dict[str, Connection] = {}
+        self.turns: dict[
+            tuple[str, str], dict[str, tuple[Connection, ChannelTarget]]
+        ] = {}
+        self.inbound: asyncio.Queue[Ingress] = asyncio.Queue()
+        self.state = states.Lifecycle.RUNNING
+        self.pending = 0
+
+    def get_identity(self) -> ChannelIdentity:
+        return min(
+            (
+                connection
+                for connection in self.connections.values()
+                if connection.state is states.ConnectionState.RUNNING
+            ),
+            key=lambda connection: connection.priority,
+        ).channel.get_identity()
+
+    def local_id(self, kind: str, provider_local_id: str) -> str:
+        return str(
+            uuid5(NAMESPACE_URL, f"bcn:{self.agent_id}:{kind}:{provider_local_id}")
+        )
+
+    async def entries(self) -> AsyncIterator[Ingress]:
+        while True:
+            entry = await self.inbound.get()
+            try:
+                yield entry
+            finally:
+                self.pending -= 1
+                self.inbound.task_done()
+
+    async def receive(self) -> AsyncIterator[InboundMessage]:
+        async for entry in self.entries():
+            yield entry.message
+
+    def select(self, kind: str | None, identity: str | None) -> Connection:
+        matches = [
+            connection
+            for connection in self.connections.values()
+            if connection.state is not states.ConnectionState.STOPPED
+            and connection.kind == kind
+            and connection.channel.get_identity().id == identity
+        ]
+        if len(matches) != 1:
+            raise ValueError(f"Channel is unavailable or ambiguous: {kind}")
+        return matches[0]
+
+    def backfill_provider_thread_id(
+        self, provider_thread_id: str, *, channel: str, channel_identity: str
+    ) -> str:
+        return self.select(
+            channel, channel_identity
+        ).channel.backfill_provider_thread_id(
+            provider_thread_id, channel=channel, channel_identity=channel_identity
+        )
+
+    def dm_address(self, request: DmRequest) -> DmAddress | None:
+        for connection in (
+            [self.select(request.channel, request.channel_identity)]
+            if request.channel_identity is not None
+            else [
+                connection
+                for connection in self.connections.values()
+                if connection.state is states.ConnectionState.RUNNING
+            ]
+        ):
+            address = connection.channel.dm_address(request)
+            if address is None:
+                continue
+            address = address.model_copy(
+                update={
+                    "channel_session_id": self.local_id(
+                        "channel-session", address.channel_session_id
+                    ),
+                    "thread_id": self.local_id("bcn-session", address.thread_id),
+                    "channel_identity": connection.channel.get_identity().id,
+                }
+            )
+            return address
+        return None
+
+    async def prepare_send(
+        self, request: ChannelSendRequest
+    ) -> tuple[ChannelSendPart, ...]:
+        connection = next(
+            (
+                connection
+                for connection in self.connections.values()
+                if request.channel_identity is not None
+                and connection.state is not states.ConnectionState.STOPPED
+                and connection.kind == request.channel
+                and connection.channel.get_identity().id == request.channel_identity
+            ),
+            None,
+        )
+        if connection is None:
+            raise ChannelUnavailableError(
+                f"{request.channel} bot {request.channel_identity} is not up"
+                if request.channel_identity is not None
+                else f"conversation {request.actor_id} has no channel here",
+                phase="prepare",
+                delivery="not_sent",
+            )
+        if connection.state is states.ConnectionState.DRAINED:
+            raise ValueError("Channel is stopping and no longer accepts new sends")
+        return await connection.channel.prepare_send(request)
+
+    async def announce(self, event: HarnessOutput) -> None:
+        for connection, destination in self.turns[
+            event.session_id, event.turn_id
+        ].values():
+            if connection.state is not states.ConnectionState.STOPPED:
+                await connection.context.announce(
+                    CHANNEL_TURN, ChannelTurn(destination, event)
+                )
+
+    async def request_approval(
+        self,
+        request: ChannelApprovalRequest,
+        *,
+        timeout: float,  # noqa: ASYNC109
+    ) -> ApprovalResult:
+        for connection in self.connections.values():
+            if (
+                connection.state is states.ConnectionState.RUNNING
+                and connection.kind == request.channel
+                and connection.channel.get_identity().id == request.channel_identity
+            ):
+                return await connection.channel.request_approval(
+                    request, timeout=timeout
+                )
+        return ApprovalResult(
+            request_id=request.approval.request_id,
+            decision="rejected",
+            reason="channel_unavailable",
+        )
+
+    async def retire(
+        self, connection: Connection, timer: Timer, busy: Callable[[], Awaitable[bool]]
+    ) -> None:
+        if connection.state is not states.ConnectionState.DRAINED:
+            connection.state = states.ConnectionState.STOPPING
+        try:
+            while (
+                self.state is states.Lifecycle.RUNNING
+                and connection.state is not states.ConnectionState.DRAINED
+                and (self.pending or await busy())
+            ):
+                await timer.create(max(timer.tick_ms, 100)).wait()
+        finally:
+            connection.state = states.ConnectionState.STOPPED
+            self.connections.pop(connection.name, None)

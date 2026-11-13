@@ -1,0 +1,35 @@
+"""Render the default agent's instructions before a harness session starts."""
+
+from __future__ import annotations
+
+from functools import cache
+from typing import Annotated
+
+from bazaar_contrib_messages import Mode
+from pydantic import BaseModel, ConfigDict, Field
+lazy from jinja2 import Environment, PackageLoader, StrictUndefined, Template
+
+type Line = Annotated[str, Field(min_length=1, pattern=r"^[^\r\n]+$")]
+
+
+@cache
+def template(name: str = "developer_instructions.md") -> Template:
+    return Environment(
+        loader=PackageLoader("bazaar_contrib_agent", "resources"),
+        undefined=StrictUndefined,
+        autoescape=False,
+        keep_trailing_newline=True,
+        auto_reload=False,
+    ).get_template(name)
+
+
+class DeveloperInstructionContext(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    agent_name: Line
+    bot_names: tuple[Line, ...]
+    agent_id: Line
+    workspace: Line
+    mode: Mode = Mode.SESSION
+
+    def render(self) -> str:
+        return template().render(self.model_dump())

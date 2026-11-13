@@ -1,5 +1,0 @@
-{% import "components.html" as c with context %}
-{% for item in fleet.computers %}
-{% include "computer_row.html" %}
-{% endfor %}
-{% if fleet.edge %}{% set edge = ref(fleet.edge) %}{{ c.edge(edge, fleet.more, "/computers/list?after=" ~ edge ~ ("&selected=" ~ selected_key if selected_key else "")) }}{% endif %}

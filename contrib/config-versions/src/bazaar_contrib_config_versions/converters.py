@@ -1,0 +1,314 @@
+"""Version services and the V4-to-V5 field and package mapping."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Literal
+lazy import os
+lazy import sys
+lazy import tomllib
+lazy from collections.abc import Mapping
+lazy from copy import deepcopy
+lazy from hashlib import sha256
+lazy from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
+lazy from bazaar_contrib_config import (
+    ConfigCandidate,
+    ConfigConverter,
+    ConfigDocument,
+    ConfigFormatError,
+    ContribPackage,
+    EnabledContrib,
+    FieldChange,
+    PackageRequirement,
+)
+
+lazy from .legacy import (
+    _v1_to_v2_payload,
+    _v2_to_v3_payload,
+    _v3_to_v4_payload,
+)
+
+_VERSION = TypeAdapter(Literal["1", "2", "3", "4", "5"])
+
+
+class _Node(BaseModel):
+    # 0.2 read the keys it knew and passed over the rest.
+    model_config = ConfigDict(extra="ignore")
+    storage: str = "sqlite"
+    database_name: str = "bcn.sqlite3"
+    audit: Literal["logging", "server"] = "logging"
+    control: Literal["none", "server"] = "none"
+    server: dict[str, Any] = Field(default_factory=dict)
+    lang: str | None = Field(default=None, min_length=1)
+    endpoint: str | None = None
+    version_check: bool = True
+
+    @field_validator("database_name")
+    @classmethod
+    def database_file(cls, value: str) -> str:
+        if value in {".", ".."} or "/" in value or "\\" in value:
+            raise ValueError("node.database_name must be a single path component")
+        return value
+
+
+class _ProviderV4(BaseModel):
+    model_config = ConfigDict(extra="allow", frozen=True)
+    kind: str = Field(min_length=1)
+
+
+class _AgentV4(BaseModel):
+    """Agent settings in the V4 configuration format."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    mode: Literal["session", "dangerous_individual"] = "session"
+    idle_timeout: float = Field(default=0, ge=0, allow_inf_nan=False)
+    channel: tuple[_ProviderV4, ...] = ()
+    runtime: tuple[_ProviderV4, ...] = ()
+
+
+class _V4(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    version: Literal["4"]
+    node: _Node = Field(default_factory=_Node)
+    agent: tuple[_AgentV4, ...] = ()
+
+
+def migrate_v5(payload: Mapping[str, object]) -> ConfigCandidate:
+    old = _V4.model_validate(payload)
+    node = old.node
+    entries: dict[str, dict[str, EnabledContrib]] = {}
+    packages: dict[str, PackageRequirement] = {}
+    changes: list[FieldChange] = []
+
+    def add(name: str, package: str, config: dict[str, Any] | None = None) -> None:
+        package = "bazaar-contrib-" + package
+        requirement = PackageRequirement(package=package)
+        entries.setdefault(package, {})[name] = EnabledContrib(
+            entry=name, config=config or {}
+        )
+        packages[package] = requirement
+
+    add("status", "status")
+    add("storage", "storage")
+    add("sqlite", "sqlite", {"name": node.database_name})
+    add("database", "storage", {"backend": "sqlite"})
+    add("schema", "schema")
+    if old.agent:
+        add("channel-builders", "channel")
+        add("harness-builders", "harness")
+        add("legacy-node-migrations", "legacy-node-migrations")
+        add("messages-node", "messages")
+        add("collaboration", "collaboration")
+        add("reminder", "reminder")
+    add("timer-wheel", "timer")
+    add("contrib-manager", "manager")
+    add("contrib-indexes", "manager")
+    add("audit", "audit")
+    changes.extend(
+        [
+            FieldChange(
+                source="node.storage",
+                target="contribs[bazaar-contrib-storage].enabled[database].config.backend",
+            ),
+            FieldChange(
+                source="node.database_name",
+                target="contribs[bazaar-contrib-sqlite].enabled[sqlite].config.name",
+            ),
+        ]
+    )
+    # 0.2 wrote the audit to one sink; logging hears it beside starlink now.
+    # 0.2's logging sink took no settings from [node.logging].
+    add("logging", "logging")
+    if node.audit == "logging":
+        changes.append(
+            FieldChange(
+                source="node.audit",
+                target="contribs[bazaar-contrib-logging].enabled[logging]",
+            )
+        )
+    add("commands", "invoke")
+    endpoint = node.endpoint
+    if endpoint and sys.platform == "win32":
+        # V4 identified its native pipe by a configured filesystem path.
+        identity = str(Path(endpoint).expanduser().absolute()).casefold()
+        endpoint = rf"\\.\pipe\bcn-{sha256(identity.encode()).hexdigest()[:32]}"
+    endpoint = {"endpoint": endpoint} if endpoint else {}
+    add("sidecar", "sidecar")
+    transport = "sidecar-windows" if sys.platform == "win32" else "sidecar-unix"
+    add(transport, transport, endpoint)
+    add("node-health", "node-management")
+    add("node-upgrade", "node-management")
+    path = Path(os.environ.get("BCN_HOME") or Path.home()) / ".bcs" / "config.toml"
+    if path.is_file():
+        server = tomllib.loads(path.read_text(encoding="utf-8"))
+        storage = server.get("storage", "sqlite")
+        add(
+            "http", "http", {"listen": server["listen"]} if "listen" in server else None
+        )
+        # 0.2 read a storage's own settings from a table named after it
+        add(
+            "server-database",
+            "server-database",
+            {"storage": storage, "storage_options": server.get(storage, {})},
+        )
+        add("server-migrations", "server-migrations")
+        add("server", "server")
+        add("server-theme-night", "server")
+        add("server-theme-day", "server")
+        add("server-overview", "server-overview")
+        add(
+            "server-access",
+            "server-access",
+            {"session_minutes": server["session_minutes"]}
+            if "session_minutes" in server
+            else None,
+        )
+        add("server-relay-memory", "server-computer")
+        add("server-computer", "server-computer")
+        add("server-agent", "server-agent")
+        add(
+            "server-activity",
+            "server-activity",
+            {"retention_days": server["retention_days"]}
+            if "retention_days" in server
+            else None,
+        )
+        add("server-conversation", "server-conversation")
+        add("server-usage", "server-usage")
+    if node.server.get("url") and "server" in (node.audit, node.control):
+        # 0.2 reached its server with one address and token for the audit it
+        # reported and the requests it took; starlink does both
+        fields = {
+            key: name
+            for key, name in (("url", "server"), ("token_env", "token_env"))
+            if key in node.server
+        }
+        add(
+            "starlink",
+            "starlink",
+            {name: node.server[key] for key, name in fields.items()},
+        )
+        changes.extend(
+            FieldChange(
+                source=f"node.{key}",
+                target="contribs[bazaar-contrib-starlink].enabled[starlink]",
+            )
+            for key in ("audit", "control")
+            if getattr(node, key) == "server"
+        )
+        changes.extend(
+            FieldChange(
+                source=f"node.server.{key}",
+                target=f"contribs[bazaar-contrib-starlink].enabled[starlink].config.{name}",
+            )
+            for key, name in fields.items()
+        )
+    changes.extend(
+        [
+            FieldChange(
+                source="node.endpoint",
+                target=f"contribs[bazaar-contrib-{transport}].enabled[{transport}].config.endpoint",
+            ),
+        ]
+    )
+    agents = []
+    for index, agent in enumerate(old.agent):
+        for provider in agent.channel:
+            add(f"{provider.kind}-builder", provider.kind)
+        for provider in agent.runtime:
+            package = "claude-code" if provider.kind == "claudecode" else provider.kind
+            add(f"{provider.kind}-builder", package)
+        item = agent.model_dump(mode="json")
+        item["harness"] = item.pop("runtime")
+        if agent.mode == "session":
+            policy = (
+                item["harness"][0].get("sandbox_mode", "workspace-write")
+                if item["harness"]
+                else "workspace-write"
+            )
+            item["session"] = {"config": {"sandbox": {"policy": policy}}}
+        for harness in item["harness"]:
+            harness.pop("sandbox_mode", None)
+            harness.pop("network_access", None)
+            harness.pop("env", None)
+        agents.append(item)
+        changes.append(
+            FieldChange(
+                source=f"agent[{index}]",
+                target=f"contribs[bazaar-contrib-agent].enabled[agent].config.agents[{index}]",
+            )
+        )
+    if agents:
+        add("agent", "agent", {"agents": agents})
+        add("agent-execution", "agent")
+        add("agent-activity", "agent")
+        add("agent-command", "agent")
+    document = ConfigDocument(
+        contrib_indexes=(
+            "resource://bazaar_contrib_manager/catalog.json",
+            "resource://bazaar_contrib_manager/open_bazaar_index.json",
+            "https://raw.githubusercontent.com/open-bazaar/contrib-index/main/index.json",
+        ),
+        contribs=tuple(
+            ContribPackage(
+                package=package + packages[package].version,
+                enabled=tuple(values.values()),
+            )
+            for package, values in entries.items()
+        ),
+    )
+    return ConfigCandidate(
+        payload=document.model_dump(mode="json", exclude_none=True),
+        changes=tuple(changes),
+        required_packages=tuple(packages.values()),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class Converter:
+    version: str
+    previous: ConfigConverter | None = None
+
+    def convert(self, payload: Mapping[str, object]) -> ConfigCandidate:
+        input_version = _VERSION.validate_python(payload.get("version", "1"))
+        if input_version == self.version:
+            if self.version == "5":
+                ConfigDocument.model_validate(payload)
+            return ConfigCandidate(
+                payload=deepcopy(dict(payload)) | {"version": input_version}
+            )
+        if int(input_version) > int(self.version) or self.previous is None:
+            raise ConfigFormatError(
+                f"version {input_version} cannot be read by config-v{self.version}"
+            )
+        candidate = self.previous.convert(payload)
+        if self.version == "5":
+            result = migrate_v5(candidate.payload)
+        else:
+            apply = {
+                "2": _v1_to_v2_payload,
+                "3": _v2_to_v3_payload,
+                "4": _v3_to_v4_payload,
+            }[self.version]
+            result = ConfigCandidate(
+                payload=apply(candidate.payload),
+                changes=(
+                    FieldChange(
+                        source=f"version {int(self.version) - 1}",
+                        target=f"version {self.version}",
+                    ),
+                ),
+            )
+        return result.model_copy(
+            update={
+                "changes": (*candidate.changes, *result.changes),
+                "required_packages": (
+                    *candidate.required_packages,
+                    *result.required_packages,
+                ),
+            }
+        )
