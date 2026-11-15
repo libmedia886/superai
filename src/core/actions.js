@@ -160,6 +160,14 @@ export function validateAction(a) {
     if (a.duties == null && a.accepts == null) return 'roster.update 没有任何要改的字段';
     return null;
   }
+  if (type === 'continue') {
+    // 「这件事没完，请下一位接着说」。reason 必填——没理由的 continue
+    // 就是变相的无条件接龙，那正是我们要防的。
+    if (!a.reason || typeof a.reason !== 'string') return 'continue 需要 reason 说明为什么还没完';
+    if (a.reason.trim().length < 4) return 'continue 的 reason 太短，请说清楚还没完成什么';
+    return null;
+  }
+
   return `未知动作类型「${type}」`;
 }
 
@@ -248,6 +256,12 @@ export function authorize(action, { role, actorId, workerOf, task }) {
       return null;
     }
     return null; // 成员只能改自己的，由调用方把 target 固定为 actor
+  }
+
+  if (action.action === 'continue') {
+    // 谁都可以说"还没完"——这是表达需求，不是行使权限。
+    // 真正的护栏在 AutoAdvanceGuard 里（连续 3 次就停），不在这里拦。
+    return null;
   }
 
   return `无权执行「${action.action}」`;

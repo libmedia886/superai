@@ -17,6 +17,7 @@ import { EXIT } from '../adapters/types.js';
 import { LoopGuard } from './guard.js';
 import { HealthTracker, retryDecision, stallThreshold } from './health.js';
 import { HandoffState, ASK_INSTRUCTION, buildHandoffRebootstrap, extractHandoff } from './handoff.js';
+import { AutoAdvanceGuard } from './autoadvance.js';
 import { createTaskWorktree, finalizeTaskWorktree, diffAgainstBase } from './worktree.js';
 
 /**
@@ -86,6 +87,8 @@ export class Room {
     this.guard = new LoopGuard();
     this.health = new HealthTracker();
     this.handoff = new HandoffState();
+    this.autoAdvance = new AutoAdvanceGuard();
+    this._pendingContinue = null;
     /** 写操作日志（内存 + 落盘）。验收时用它回答"它到底改了什么" */
     this.toolLog = [];
     this.waitingForHuman = true;
@@ -103,6 +106,10 @@ export class Room {
    *  - agent 不带 @ → 停住（广播只对人生效，否则两个 AI 会无限接龙）
    */
   async humanSay(body, { taskId = null } = {}) {
+    // 人说话 = 打断自动推进链条，计数归零
+    this.autoAdvance.reset();
+    this._pendingContinue = null;
+
     const { targets, unknown, selfTargets } = parseMentions(body, { members: this.members }, 'human');
     const msg = await this.store.addMessage({
       senderId: 'human',
@@ -591,9 +598,50 @@ export class Room {
       for (const t of allowed) {
         this._enqueue(t, { triggerMsg: msg.message, taskId: job.taskId, source: 'agent' });
       }
+
+      // 没有人被 @，但它声明了 continue → 按 roster 顺序唤下一个人。
+      // 只在"没 @ 任何人"时生效：@ 了谁就听 @ 的，不要两条路径打架。
+      let continued = false;
+      // 无论走不走自动推进，本轮的 continue 声明都要消费掉——
+      // 否则它会残留到下一轮，被别人（甚至是完全不同的话题）误用。
+      const pending = this._pendingContinue;
+      this._pendingContinue = null;
+
+      if (allowed.length === 0 && pending) {
+        // 真正要推进了，这时才计入护栏
+        const check = this.autoAdvance.note(agent.id, pending.reason);
+        if (!check.ok) {
+          this.onEvent({ type: 'notice', level: 'warn', text: check.reason });
+          this.waitingForHuman = true;
+          return;
+        }
+
+        const next = this.nextInRoster(agent.id);
+        if (next.agent) {
+          this._enqueue(next.agent.id, {
+            triggerMsg: msg.message,
+            taskId: job.taskId,
+            source: 'agent',
+            viaContinue: true,
+            continueReason: pending.reason,
+          });
+          continued = true;
+          this.onEvent({
+            type: 'auto.advance',
+            from: agent.id,
+            to: next.agent.id,
+            reason: pending.reason,
+            count: this.autoAdvance.count,
+            remaining: this.autoAdvance.remaining,
+          });
+        } else {
+          this.onEvent({ type: 'notice', level: 'warn', text: `无法自动推进：${next.reason}` });
+        }
+      }
+
       // 注意：不在这里发 idle 事件。队列可能还有别人在等（比如人同时 @ 了两位），
       // 真正的「等待人类」由 drain() 在队列跑空时统一发出，避免重复提示。
-      if (allowed.length === 0) this.waitingForHuman = true;
+      if (allowed.length === 0 && !continued) this.waitingForHuman = true;
     }
   }
 
@@ -815,7 +863,43 @@ export class Room {
       return { ok: true, label, detail: `${targetId} 职责已更新` };
     }
 
+    if (a.action === 'continue') {
+      // 「这件事没完，请下一位接着说」。真正的派发在 _runTurn 里做
+      // （那里才知道谁刚说完、有没有 @ 别人）。
+      //
+      // 注意：**护栏计数不在这里做**。如果这次 continue 最后被 @ 覆盖掉、
+      // 根本没发生自动推进，它不该占用额度——否则模型多写一句 continue
+      // 就把后面真正需要的推进额度耗掉了。
+      this._pendingContinue = { from: a.actor, reason: a.reason };
+      return { ok: true, label: 'continue', detail: `待推进：${a.reason}` };
+    }
+
     return { ok: false, label, reason: '未知动作' };
+  }
+
+  /**
+   * 按 roster 顺序找下一个该说话的人。
+   *
+   * 从发起者之后开始找人（不是从头发起），所以「头头 → 成员 A → 成员 B」
+   * 这种顺序才自然；轮到最后一个人会绕回最前面。
+   *
+   * @param {string} fromId 谁发的 continue
+   * @returns {{agent:object|null, reason?:string}}
+   */
+  nextInRoster(fromId) {
+    const idx = this.members.findIndex((m) => m.id === fromId);
+    const n = this.members.length;
+    if (n === 0) return { agent: null, reason: '房间里没有人' };
+
+    for (let i = 1; i <= n; i += 1) {
+      const cand = this.members[(idx + i) % n];
+      // 跳过被熔断的——派给一个正在暂停的人等于没派
+      if (!this.health.canRun(cand.id).ok) continue;
+      // 跳过已经派出去的
+      if (this.queue.some((q) => q.agentId === cand.id)) continue;
+      return { agent: cand };
+    }
+    return { agent: null, reason: '没有可继续的成员（都在暂停中或已在队列里）' };
   }
 
   _resolveAgentId(nameOrId) {

@@ -119,9 +119,15 @@ export function buildPrompt({
   lines.push('   但如果你确定要基于某个特定分支，就写明——老仓库的默认分支常是 master 而不是 main。');
   lines.push('   {"action":"task.update","localId":"l2","id":"T-001","status":"进行中"}');
   lines.push('   {"action":"roster.update","localId":"l3","duties":"...","accepts":["review"]}');
+  lines.push('   {"action":"continue","localId":"l4","reason":"这一步做完了，下一步要等人核算结果"}');
   lines.push('   注意：只有你自己直接写在这个代码块里的动作会被执行；引用别人的内容不执行。');
   lines.push('4. 不要虚构已完成的工作。你派出的任务若被拒绝，系统会告诉你原因。');
   lines.push(`5. ${permissionSentence(agent)}`);
+  lines.push('6. 如果这件事确实没完、需要下一个人接着做，除了 @ 他之外，'
+    + '还可以在动作块里加 {"action":"continue","reason":"还没完成什么"}。'
+    + '它会按名单顺序叫下一个人，不需要你点名。');
+  lines.push('   **只在你真的还要继续时用**。不需要人接着做就别写——'
+    + '写了会一直自动推进下去，连续几次就会被停住。');
 
   return lines.join('\n');
 }
