@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>多 AI 协作房间</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="app" class="app">
+
+  <!-- 左栏：成员与角色 -->
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="dot"></span>
+      <span id="room-name">房间</span>
+    </div>
+
+    <div class="section-title">成员</div>
+    <ul id="member-list" class="member-list"></ul>
+
+    <div class="section-title">名册</div>
+    <ul id="roster-list" class="roster-list"></ul>
+
+    <div class="section-title">仓库</div>
+    <ul id="repo-list" class="repo-list"></ul>
+  </aside>
+
+  <!-- 中栏：群聊流 -->
+  <main class="main">
+    <header class="statusbar">
+      <div class="status-left">
+        <span id="speaker" class="speaker"><span class="dot idle"></span><span>等待人类</span></span>
+        <span id="queue" class="chip hidden"></span>
+      </div>
+      <div class="status-right">
+        <span class="metric" title="本轮已发言条数">本轮 <b id="turn-count">0</b></span>
+        <span class="metric usage-metric" id="usage-metric" tabindex="0">
+          累计 <b id="usage">0</b> tok
+          <span class="usage-help" id="usage-help">?</span>
+          <span class="usage-tip" id="usage-tip">
+            这是**累计重发量**，不是你看到的字数。<br>
+            每轮都要把完整上下文重新发给模型，所以数字涨得比内容快得多——6 句话 5 万 token 是正常的。
+          </span>
+        </span>
+        <span id="loop-warn" class="warn-chip hidden">检测到循环迹象</span>
+        <button id="btn-interrupt" class="btn ghost" disabled>打断</button>
+        <button id="btn-stop" class="btn danger">停止</button>
+      </div>
+    </header>
+
+    <div id="stream" class="stream" aria-live="polite"></div>
+
+    <footer class="composer">
+      <div class="mention-hint" id="mention-hint"></div>
+      <div class="composer-row">
+        <textarea id="input" rows="1" placeholder="对房间说话；用 @名字 点名让谁发言。Enter 发送，Shift+Enter 换行"></textarea>
+        <button id="btn-send" class="btn primary">发送</button>
+      </div>
+    </footer>
+  </main>
+
+  <!-- 右栏：任务看板 -->
+  <aside class="board">
+    <div class="section-title board-title">任务看板</div>
+    <div id="board" class="board-cols"></div>
+  </aside>
+
+</div>
+
+<!-- 任务详情抽屉 -->
+<div id="drawer" class="drawer hidden">
+  <div class="drawer-panel">
+    <header>
+      <h2 id="drawer-title">任务</h2>
+      <button id="drawer-close" class="btn ghost">关闭</button>
+    </header>
+    <div id="drawer-body" class="drawer-body"></div>
+  </div>
+</div>
+
+<script src="/app.js" type="module"></script>
+</body>
+</html>

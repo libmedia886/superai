@@ -1,0 +1,25 @@
+node_modules/
+npm-debug.log*
+
+# 运行时数据（含对话记录、会话 id、worktree）
+data/
+*.jsonl
+worktrees/
+agents/
+
+# 本地配置里可能有仓库绝对路径
+room.json
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# 测试/演示产物
+*.tmp
+coverage/
+
+# 临时产物与日志（防止误 git add -f 带进别人的临时路径）
+/tmp/
+*.log
