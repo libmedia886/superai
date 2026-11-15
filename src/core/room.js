@@ -483,7 +483,23 @@ export class Room {
     for (const s of skipped) results.push({ ok: true, label: s.action, detail: '该动作此前已执行，跳过' });
     for (const e of errors) results.push({ ok: false, label: '未识别动作', reason: e.reason });
     this._lastActionResults = results;
-    if (results.length) this.onEvent({ type: 'action.results', agentId: agent.id, results });
+    if (results.length) {
+      // 动作结果也要落盘：出事之后能不能查，全看这一条。
+      // 内存里的事件流重启就没了，而"它到底派没派成这个活"必须能追溯。
+      for (const r of results) {
+        this.store.append({
+          kind: 'action',
+          agentId: agent.id,
+          taskId: job.taskId ?? null,
+          label: r.label ?? '',
+          ok: Boolean(r.ok),
+          reason: r.reason ?? null,
+          detail: r.detail ?? null,
+          at: Date.now(),
+        }).catch(() => {});
+      }
+      this.onEvent({ type: 'action.results', agentId: agent.id, results });
+    }
 
     // 3) 失败不回滚但要让界面看见，并记账到熔断器
     if (aborted) {

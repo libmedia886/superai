@@ -22,6 +22,7 @@ export class Store {
     this.sessions = new Map();  // agentId -> {sessionId, cwd, backend}
     this.summaries = new Map(); // agentId -> 最新摘要（轮换后仍可读）
     this.toolLog = [];          // 写操作日志（只追加）
+    this.actionLog = [];        // 动作执行结果（只追加）
     this._seq = 0;
     this._writeChain = Promise.resolve();
   }
@@ -75,6 +76,13 @@ export class Store {
         this.toolLog.push({
           agentId: ev.agentId, taskId: ev.taskId, tool: ev.tool, action: ev.action,
           path: ev.path, command: ev.command, detail: ev.detail, at: ev.at,
+        });
+        break;
+      case 'action':
+        // 动作执行结果：成功失败都记，失败要带原因
+        this.actionLog.push({
+          agentId: ev.agentId, taskId: ev.taskId, label: ev.label,
+          ok: ev.ok, reason: ev.reason, detail: ev.detail, at: ev.at,
         });
         break;
       case 'compact':

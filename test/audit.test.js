@@ -106,3 +106,48 @@ test('并发追加不会互相踩（写入串行化）', async () => {
   const lines = parseLines(await readFile(path, 'utf8'));
   assert.equal(lines.length, 20, '20 条并发写入应完整落盘，不能有覆盖丢失');
 });
+
+/* ---------- 动作结果也要落盘 ---------- */
+
+test('★ 动作执行结果持久化（出事之后能查"它到底派没派成"）', async () => {
+  const { mkdtemp } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { Room } = await import('../src/core/room.js');
+
+  const dir = await mkdtemp(join(tmpdir(), 'act-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+
+  const room = new Room({
+    id: 'r', name: 'r', goal: 't',
+    members: [{ id: 'lead', name: 'lead', role: 'leader', backend: 'claude', tier: 'readonly', cwd: '/tmp' }],
+    store,
+    // 一个成功、一个失败（引用非法状态）
+    resolveAdapter: () => ({
+      run: async () => ({
+        text: '我建任务。\n```action\n{"action":"task.create","localId":"l1","title":"做A"}\n'
+          + '{"action":"task.update","id":"T-999","status":"完成"}\n```',
+        reason: 'completed',
+      }),
+    }),
+    onEvent: () => {},
+  });
+  room.turnTimeoutMs = 5_000;
+  room.maxRetries = 0;
+
+  await room.humanSay('@lead 干活');
+  await room.drain();
+  await new Promise((r) => setTimeout(r, 150));
+
+  const replay = new Store(join(dir, 'room.jsonl'));
+  await replay.load();
+
+  assert.ok(replay.actionLog.length >= 2, '成功和失败都要记');
+  const okEntry = replay.actionLog.find((e) => e.ok);
+  const failEntry = replay.actionLog.find((e) => !e.ok);
+  assert.ok(okEntry, '成功动作要记');
+  assert.ok(failEntry, '失败动作也要记');
+  assert.ok(failEntry.reason, '失败必须带原因');
+  assert.equal(failEntry.agentId, 'lead');
+});
