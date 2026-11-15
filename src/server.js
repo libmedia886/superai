@@ -187,7 +187,17 @@ export async function startServer({ port = 4321, host = '127.0.0.1', dataDir = D
           return json(res, 400, { error: '这个名字已存在' });
         }
 
-        const tier = availableTiers(backend).includes(body.tier) ? body.tier : TIER.READONLY;
+        // 档位必须该后端真支持，**不能静默降级**。
+        // 用户给 codex 选了 write、实际存成 readonly，他会以为 agent 能改文件，
+        // 结果跑了半天什么都没改——这种"看起来配了、实际没生效"是最难查的。
+        const tiers = availableTiers(backend);
+        const tier = body.tier ?? TIER.READONLY;
+        if (!tiers.includes(tier)) {
+          return json(res, 400, {
+            error: `${backend} 不支持档位「${tier}」，可选：${tiers.join(' / ')}`,
+            availableTiers: tiers,
+          });
+        }
         const member = {
           id: `m${Date.now().toString(36)}`,
           name,

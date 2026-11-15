@@ -35,3 +35,21 @@ test('Codex 合法档位可构造', () => {
   assert.doesNotThrow(() => new CodexAdapter({ backend: 'codex', tier: 'readonly' }));
   assert.doesNotThrow(() => new CodexAdapter({ backend: 'codex', tier: 'write-exec' }));
 });
+
+test('★ 不支持的后端档位必须明确拒绝，不能静默降级', async () => {
+  // 起因：给 codex 选 write，接口返回 200 但静默存成 readonly，
+  // 用户以为设成可写了，实际跑了半天什么都没改。
+  const { availableTiers, TIER } = await import('../src/core/probe.js');
+
+  for (const backend of ['claude', 'codex', 'opencode']) {
+    const tiers = availableTiers(backend);
+    assert.ok(tiers.includes(TIER.READONLY), `${backend} 必须支持只读`);
+  }
+  // codex 没有中间档，这条语义要一直成立
+  assert.ok(!availableTiers('codex').includes(TIER.WRITE));
+  // 只有 claude 能表达"每次询问"
+  assert.deepEqual(
+    [availableTiers('claude').includes(TIER.WRITE_ASK), availableTiers('codex').includes(TIER.WRITE_ASK)],
+    [true, false],
+  );
+});
