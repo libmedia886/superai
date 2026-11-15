@@ -18,6 +18,7 @@ import { LoopGuard } from './guard.js';
 import { HealthTracker, retryDecision, stallThreshold } from './health.js';
 import { HandoffState, ASK_INSTRUCTION, buildHandoffRebootstrap, extractHandoff } from './handoff.js';
 import { AutoAdvanceGuard } from './autoadvance.js';
+import { UsageWatcher } from './usage.js';
 import { createTaskWorktree, finalizeTaskWorktree, diffAgainstBase } from './worktree.js';
 
 /**
@@ -88,6 +89,8 @@ export class Room {
     this.health = new HealthTracker();
     this.handoff = new HandoffState();
     this.autoAdvance = new AutoAdvanceGuard();
+    /** 用量异常观察器（只提示，不拦截） */
+    this.usage = new UsageWatcher();
     this._pendingContinue = null;
     /** 写操作日志（内存 + 落盘）。验收时用它回答"它到底改了什么" */
     this.toolLog = [];
@@ -562,6 +565,19 @@ export class Room {
       const window = adapterResult.usage.contextWindow ?? null;
       const ratio = usageRatio({ usedTokens: used, window, backend: agent.backend });
       this.onEvent({ type: 'context.usage', agentId: agent.id, usedTokens: used, ratio });
+
+      // 用量异常提示：**只提示，不拦截**。老板说过不用考虑消耗，
+      // 这里只是让他知道钱花在哪，不替他做决定。
+      const usageWarn = this.usage.record({ agentId: agent.id, tokens: usageTokens });
+      if (usageWarn) {
+        this.onEvent({
+          type: 'usage.warning',
+          kind: usageWarn.kind,
+          agentId: agent.id,
+          text: usageWarn.text,
+          ratio: usageWarn.ratio,
+        });
+      }
       if (shouldCompact({ usedTokens: used, window, backend: agent.backend, threshold: this.compactThreshold })) {
         agent.pendingCompact = true;
         this.onEvent({ type: 'context.nearLimit', agentId: agent.id, ratio });

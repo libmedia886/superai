@@ -397,6 +397,15 @@ function renderHistoricalTools(log) {
   $('stream').appendChild(details);
 }
 
+/** 用量提示：比普通提示更醒目一点，但不用警告色（这不是错误） */
+function appendUsageNote(text) {
+  const el = document.createElement('div');
+  el.className = 'usage-note';
+  el.innerHTML = `<span class="usage-note-icon">◔</span><span>${escapeHtml(text)}</span>`;
+  $('stream').appendChild(el);
+  scrollToBottom();
+}
+
 function appendSystemNote(text, level = 'info') {
   const el = document.createElement('div');
   el.className = `sys-note ${level === 'warn' ? 'warn' : ''}`;
@@ -600,6 +609,11 @@ function handle(ev) {
     case 'guard.reset':
       $('loop-warn').classList.add('hidden');
       $('btn-stop').classList.remove('urgent');
+      break;
+
+    case 'usage.warning':
+      // 只提示不拦截：老板说过不用考虑消耗，这里只让他知道钱花在哪
+      appendUsageNote(ev.text);
       break;
 
     case 'notice':
