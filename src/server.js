@@ -17,6 +17,7 @@ import { randomUUID } from 'node:crypto';
 
 import { loadConfig, saveConfig, buildRoom, DEFAULT_DATA_DIR } from './core/config.js';
 import { availableTiers, TIER } from './core/probe.js';
+import { exportMarkdown } from './core/export.js';
 import {
   diffAgainstBase, commitWorktree, mergeTaskBranch, finalizeTaskWorktree,
 } from './core/worktree.js';
@@ -313,6 +314,27 @@ export async function startServer({ port = 4321, host = '127.0.0.1', dataDir = D
           roster: store.roster.get(body.agentId) ?? null,
         });
         return json(res, 200, { ok: true });
+      }
+
+      /** 导出 Markdown：干完活要能交出去 */
+      if (url.pathname === '/api/export') {
+        const md = exportMarkdown({
+          room: { name: cfg.name, goal: room.goal },
+          messages: store.messages,
+          tasks: [...store.tasks.values()],
+          roster: store.roster,
+          toolLog: store.toolLog,
+          actionLog: store.actionLog,
+          members: room.members,
+          nameOf,
+        });
+        const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+        res.writeHead(200, {
+          'Content-Type': 'text/markdown; charset=utf-8',
+          'Content-Disposition': `attachment; filename="room-${stamp}.md"`,
+        });
+        res.end(md);
+        return;
       }
 
       if (url.pathname === '/api/health') {

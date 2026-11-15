@@ -109,6 +109,27 @@ async function main() {
   console.log(`${C.bold}${cfg.name}${C.reset}  ${C.grey}${members.map((m) => `${m.name}(${m.backend}/${m.tier})`).join('  ')}${C.reset}`);
   console.log(`${C.grey}输入 /help 看命令。用 @名字 点名让谁发言。${C.reset}\n`);
 
+  // 导出：不需要进交互模式
+  if (args.includes('--export')) {
+    const { writeFile } = await import('node:fs/promises');
+    const { exportMarkdown } = await import('../src/core/export.js');
+    const md = exportMarkdown({
+      room: { name: cfg.name, goal: room.goal },
+      messages: store.messages,
+      tasks: [...store.tasks.values()],
+      roster: store.roster,
+      toolLog: store.toolLog,
+      actionLog: store.actionLog,
+      members,
+      nameOf,
+    });
+    const outIdx = args.indexOf('--out');
+    const outPath = outIdx >= 0 ? args[outIdx + 1] : join(DATA_DIR, `room-${Date.now()}.md`);
+    await writeFile(outPath, md, 'utf8');
+    console.log(`已导出：${outPath}（${md.length} 字符）`);
+    return;
+  }
+
   if (demo) {
     console.log(`${C.grey}== 演示：让头头拆一个任务并派给成员 ==${C.reset}`);
     await room.humanSay('@lead 把「用一句话描述海洋」拆成一个子任务，派给 bob 完成。');

@@ -561,3 +561,6 @@ html, body {
   font-weight: 600;
   letter-spacing: .3px;
 }
+
+/* 导出链接长得像按钮 */
+a.btn { text-decoration: none; display: flex; align-items: center; }
