@@ -16,6 +16,7 @@ const state = {
   currentSpeakerLast: null,
   leaderId: null,
   toolLog: [],
+  overridden: false,
 };
 
 const COLORS = ['#5b9dff', '#b76cf0', '#3fb950', '#d29922', '#f85149', '#39c5cf', '#e06c9f'];
@@ -131,17 +132,64 @@ function approvalNote(tier) {
 function renderRoster() {
   const ul = $('roster-list');
   ul.innerHTML = '';
-  if (!state.roster.size) {
-    ul.innerHTML = '<li class="empty-hint">尚无职责自述</li>';
-    return;
-  }
-  for (const [agentId, r] of state.roster) {
+  // 每个成员都列出来（不只是有自述的），否则没自述的人根本没法编辑
+  for (const m of state.members) {
+    const r = state.roster.get(m.id) ?? {};
+    const duty = r.humanDuties ?? r.selfDuties ?? '（未填写）';
+    const edited = r.humanDuties != null;
+
     const li = document.createElement('li');
     li.className = 'roster-item';
-    const duty = r.humanDuties ?? r.selfDuties ?? '（未填写）';
-    li.innerHTML = `<b>${escapeHtml(nameOf(agentId))}</b>：${escapeHtml(duty)}`;
+    li.innerHTML = `
+      <div class="roster-line">
+        <b>${escapeHtml(m.name)}</b>：<span class="roster-duty">${escapeHtml(duty)}</span>
+        <button class="mini-btn edit-roster" title="编辑职责">✎</button>
+      </div>
+      ${edited ? '<div class="roster-flag">人已编辑</div>' : ''}`;
+
+    li.querySelector('.edit-roster').onclick = (e) => {
+      e.stopPropagation();
+      startRosterEdit(li, m, duty === '（未填写）' ? '' : duty);
+    };
     ul.appendChild(li);
   }
+}
+
+function startRosterEdit(li, member, current) {
+  li.innerHTML = `
+    <div class="roster-edit">
+      <input class="roster-input" value="${escapeHtml(current)}" placeholder="这个成员负责什么、能接什么任务">
+      <div class="roster-edit-actions">
+        <button class="btn primary tiny save">保存</button>
+        <button class="btn ghost tiny cancel">取消</button>
+      </div>
+    </div>`;
+  const input = li.querySelector('.roster-input');
+  input.focus();
+  input.select();
+
+  const save = async () => {
+    const duties = input.value.trim();
+    const res = await fetch('/api/roster', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentId: member.id, duties }),
+    });
+    if (!res.ok) {
+      appendSystemNote('保存职责失败', 'warn');
+      renderRoster();
+      return;
+    }
+    appendSystemNote(`已更新 ${member.name} 的职责（之后它发言时会看到新版本）`);
+    renderRoster();
+  };
+
+  li.querySelector('.save').onclick = save;
+  li.querySelector('.cancel').onclick = () => renderRoster();
+  input.onkeydown = (e) => {
+    if (e.key === 'Enter') save();
+    if (e.key === 'Escape') renderRoster();
+  };
 }
 
 function renderRepos() {
@@ -288,11 +336,28 @@ function appendHistoryAgentMessage(m) {
     <div class="msg-head">
       <span class="msg-who" style="color:${colorFor(nameOf(m.senderId))}">${escapeHtml(nameOf(m.senderId))}</span>
       <span class="msg-role">${memberById(m.senderId)?.role === 'leader' ? '头头' : '成员'}</span>
+      ${m.isSummary ? '<span class="summary-tag">总结</span>' : ''}
       <span class="msg-time">${fmtTime(m.at)}${m.durationMs ? ` · ${(m.durationMs / 1000).toFixed(1)}s` : ''}</span>
     </div>
     <div class="msg-body">${renderBody(m.body)}</div>`;
+  if (m.isSummary) wrap.classList.add('summary');
   wrap.append(av, content);
   $('stream').appendChild(wrap);
+}
+
+/** 把刚说完的那条标记成总结：事后翻记录要能一眼分清结论和过程 */
+function markAsSummary() {
+  const msgs = $('stream').querySelectorAll('.msg.agent');
+  const last = msgs[msgs.length - 1];
+  if (!last) return;
+  last.classList.add('summary');
+  const head = last.querySelector('.msg-head');
+  if (head && !head.querySelector('.summary-tag')) {
+    const tag = document.createElement('span');
+    tag.className = 'summary-tag';
+    tag.textContent = '总结';
+    head.appendChild(tag);
+  }
 }
 
 /** 写操作小行：挂在当前发言下面，让人能实时看到"它动了什么" */
@@ -371,6 +436,7 @@ function handle(ev) {
       state.leaderId = ev.room.leaderId;
       state.registry = ev.registry ?? [];
       state.toolLog = ev.toolLog ?? [];
+      setOverridden(Boolean(ev.overridden));
       $('room-name').textContent = ev.room.name;
       for (const t of ev.tasks) state.tasks.set(t.id, t);
       for (const [k, v] of ev.roster) state.roster.set(k, v);
@@ -446,9 +512,10 @@ function handle(ev) {
       if (m.senderId === 'human') break;
       if (state.current?.agentId === m.senderId) {
         state.current.text = m.body;
-        state.current.textEl.innerHTML = renderBody(m.body);
+        state.current.textEl.innerHTML = renderBody(m.body, { live: true });
       }
       finishTurn(m.durationMs);
+      if (m.isSummary) markAsSummary();
       state.currentSpeakerLast = m.senderId;
       // 队列里还有人就不能显示"等待人类"
       state.pending = ev.pending ?? 0;
@@ -490,6 +557,35 @@ function handle(ev) {
 
     case 'broadcast':
       appendSystemNote(`广播：${ev.recipients.length} 人将依次回应（${ev.recipients.map((r) => '@' + nameOf(r)).join(' → ')}）`);
+      break;
+
+    case 'registry.updated':
+      state.registry = ev.registry ?? [];
+      renderRepos();
+      break;
+
+    case 'takeover':
+      setOverridden(true);
+      appendSystemNote(ev.dropped ? `已接管，丢弃了 ${ev.dropped} 条过期的排队发言` : '已接管：头头暂停自动发言', 'warn');
+      break;
+
+    case 'handback':
+      setOverridden(false);
+      appendSystemNote('已交还控制权');
+      break;
+
+    case 'summary.requested':
+      appendSystemNote(`${nameOf(ev.agentId)} 正在总结（说完房间会停住）`);
+      break;
+
+    case 'summary.done':
+      appendSystemNote('总结完成，房间已停住等你决定');
+      break;
+
+    case 'task.accepted':
+      appendSystemNote(ev.action === 'merge'
+        ? `任务 ${ev.id} 已合并进主分支（commit ${ev.commit ?? '?'}）`
+        : `任务 ${ev.id} 的改动已丢弃`);
       break;
 
     case 'loop.warning': {
@@ -652,22 +748,170 @@ async function openTask(id) {
   body.innerHTML = html;
 
   // 尝试拉 diff（只有建过 worktree 的任务才有）
+  const diffRes = await fetch(`/api/diff?task=${encodeURIComponent(id)}`).catch(() => null);
+  if (!diffRes?.ok) {
+    // 没有 worktree：纯讨论任务，没什么可验收的
+    return;
+  }
+
+  const d = await diffRes.json();
+  if (!d.files?.length) {
+    body.insertAdjacentHTML('beforeend',
+      '<h3>改动</h3><div class="link-note">这个任务还没有任何改动</div>');
+    return;
+  }
+
+  const esc = escapeHtml(d.patch ?? '');
+  const colored = esc.split('\n').map((line) => {
+    if (line.startsWith('+')) return `<span class="diff-add">${line}</span>`;
+    if (line.startsWith('-')) return `<span class="diff-del">${line}</span>`;
+    return line;
+  }).join('\n');
+
+  body.insertAdjacentHTML('beforeend', `
+    <h3>改动（${d.files.length} 个文件）</h3>
+    <pre>${colored}</pre>
+    <div class="accept-bar">
+      <div class="accept-note">合并会把改动写进主仓库；丢弃会删掉这个任务的副本。</div>
+      <button id="btn-merge" class="btn primary">合并进主分支</button>
+      <button id="btn-discard" class="btn danger">丢弃改动</button>
+    </div>`);
+
+  $('btn-merge').onclick = () => acceptTask(t, 'merge');
+  $('btn-discard').onclick = () => acceptTask(t, 'discard', () => {
+    // 丢弃是不可逆的，问一次
+    const hasChanges = d.files.length;
+    return window.confirm(`确定丢弃 ${t.id} 的改动？\n会删除 ${t.worktree}\n（${hasChanges} 个文件的改动将丢失）`);
+  });
+}
+
+/** 验收：合并或丢弃。两者都需要人明确点击。 */
+async function acceptTask(task, action, confirmFn) {
+  if (confirmFn && !confirmFn()) return;
+
+  const btn = action === 'merge' ? $('btn-merge') : $('btn-discard');
+  const other = action === 'merge' ? $('btn-discard') : $('btn-merge');
+  const original = btn.textContent;
+  btn.disabled = true;
+  other.disabled = true;
+  btn.textContent = action === 'merge' ? '合并中…' : '清理中…';
+
   try {
-    const res = await fetch(`/api/diff?task=${encodeURIComponent(id)}`);
-    if (res.ok) {
-      const d = await res.json();
-      const esc = escapeHtml(d.patch ?? '');
-      const colored = esc.split('\n').map((line) => {
-        if (line.startsWith('+')) return `<span class="diff-add">${line}</span>`;
-        if (line.startsWith('-')) return `<span class="diff-del">${line}</span>`;
-        return line;
-      }).join('\n');
-      body.insertAdjacentHTML('beforeend', `<h3>改动（${d.files.length} 个文件）</h3><pre>${colored}</pre>`);
+    const res = await fetch('/api/accept', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: task.id, action }),
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      // 冲突等失败情形：说清原因，不要把按钮留在假死状态
+      showDrawerResult(`失败：${data.error ?? res.status}`, 'fail');
+      btn.disabled = false;
+      other.disabled = false;
+      btn.textContent = original;
+      return;
     }
-  } catch { /* 没有 worktree，正常 */ }
+
+    showDrawerResult(
+      action === 'merge'
+        ? `已合并进主分支（commit ${data.commit ?? '?'}）。任务副本保留，可事后追问。`
+        : '已丢弃。主仓库未受影响，任务副本已清理。',
+      'ok',
+    );
+  } catch (err) {
+    showDrawerResult(`失败：${err.message}`, 'fail');
+    btn.disabled = false;
+    other.disabled = false;
+    btn.textContent = original;
+  }
+}
+
+function showDrawerResult(text, kind) {
+  const bar = document.querySelector('.accept-bar');
+  if (!bar) return;
+  bar.innerHTML = `<div class="accept-result ${kind}">${escapeHtml(text)}</div>`;
 }
 
 /* ---------------- 启动 ---------------- */
+
+/* ---------------- 侧栏操作 ---------------- */
+
+function setOverridden(on) {
+  state.overridden = on;
+  $('takeover-badge').classList.toggle('hidden', !on);
+  $('btn-takeover').classList.toggle('hidden', on);
+  $('btn-handback').classList.toggle('hidden', !on);
+}
+
+$('btn-takeover').onclick = async () => {
+  if (!window.confirm('接管后头头会暂停自动发言，你直接 @ 任何成员。继续？')) return;
+  const res = await fetch('/api/takeover', { method: 'POST' });
+  if (res.ok) {
+    setOverridden(true);
+    appendSystemNote('已接管：头头暂停，你可以直接 @ 任何成员', 'warn');
+  }
+};
+
+$('btn-handback').onclick = async () => {
+  if (!window.confirm('交还后头头会恢复自动发言（接管期间的排队发言不会补发）。继续？')) return;
+  const res = await fetch('/api/handback', { method: 'POST' });
+  if (res.ok) {
+    setOverridden(false);
+    appendSystemNote('已交还控制权：头头恢复自动发言');
+  }
+};
+
+$('btn-summarize').onclick = () => {
+  if (!state.members.length) return;
+  const names = state.members.map((m, i) => `${i + 1}. ${m.name}`).join('\n');
+  const pick = window.prompt(`让谁做总结？输入编号：\n${names}`);
+  if (!pick) return;
+  const m = state.members[Number(pick) - 1];
+  if (!m) return appendSystemNote('编号无效', 'warn');
+  fetch('/api/summarize', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ agentId: m.id }),
+  }).then((r) => {
+    if (r.ok) appendSystemNote(`${m.name} 开始总结（说完房间会停住）`);
+    else appendSystemNote('发起总结失败', 'warn');
+  });
+};
+
+$('btn-add-repo').onclick = async () => {
+  const path = window.prompt('登记一个可用仓库（绝对路径）：\n头头只能在登记的仓库里选。');
+  if (!path) return;
+  const res = await fetch('/api/registry', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: path.trim() }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return appendSystemNote(`登记失败：${data.error ?? res.status}`, 'warn');
+  state.registry = data.registry ?? [];
+  renderRepos();
+  appendSystemNote(`已登记仓库：${path.trim()}`);
+};
+
+$('btn-add-member').onclick = async () => {
+  const name = window.prompt('新成员的名字（在群里用 @名字 叫它）：');
+  if (!name) return;
+  const backend = (window.prompt('用哪个后端？claude / codex / opencode', 'claude') ?? '').trim();
+  if (!backend) return;
+  const tiers = { claude: 'readonly / write-ask / write / write-exec', codex: 'readonly / write-exec', opencode: 'readonly / write / write-exec' }[backend] ?? '';
+  const tier = (window.prompt(`权限档位？（${tiers}）`, 'readonly') ?? 'readonly').trim();
+  const role = (window.prompt('角色？输入 leader（头头）或 member（成员）', 'member') ?? 'member').trim();
+
+  const res = await fetch('/api/member', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: name.trim(), backend, tier, role }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return appendSystemNote(`添加失败：${data.error ?? res.status}`, 'warn');
+  appendSystemNote(`已添加成员 @${name.trim()}（${backend} / ${tier}）`);
+};
 
 $('btn-send').onclick = send;
 $('btn-stop').onclick = async () => { await fetch('/api/stop', { method: 'POST' }); };

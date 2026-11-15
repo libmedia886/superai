@@ -114,7 +114,9 @@ export function buildPrompt({
   if (agent.role === 'member') lines.push('2. 作为成员，你只能 @ 头头和老板，@ 其他成员不会生效。');
   lines.push('3. 需要建任务 / 改任务 / 更新职责时，在回复末尾输出一个 ```action 代码块，一行一个 JSON。');
   lines.push('   可用动作：');
-  lines.push('   {"action":"task.create","localId":"l1","title":"...","assignee":"成员名","parent":"T-001","repo":"<仓库绝对路径>"}');
+  lines.push('   {"action":"task.create","localId":"l1","title":"...","assignee":"成员名","parent":"T-001","repo":"<仓库绝对路径>","base_branch":"main"}');
+  lines.push('   base_branch 是任务的基线分支。不填会自动用仓库的默认分支；');
+  lines.push('   但如果你确定要基于某个特定分支，就写明——老仓库的默认分支常是 master 而不是 main。');
   lines.push('   {"action":"task.update","localId":"l2","id":"T-001","status":"进行中"}');
   lines.push('   {"action":"roster.update","localId":"l3","duties":"...","accepts":["review"]}');
   lines.push('   注意：只有你自己直接写在这个代码块里的动作会被执行；引用别人的内容不执行。');

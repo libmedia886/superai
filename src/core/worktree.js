@@ -46,15 +46,39 @@ export function isRepoAllowed(declaredPath, registry) {
   });
 }
 
+/** 探测仓库的默认分支（没指定基线时用这个，而不是硬编码 main） */
+export async function detectDefaultBranch(repoPath) {
+  // 优先问远端 HEAD（新克隆的仓库通常有）
+  const remote = await git(repoPath, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']);
+  if (remote.ok && remote.stdout) return remote.stdout.replace(/^origin\//, '');
+
+  // 退而求其次：看本地 HEAD 指向哪
+  const head = await git(repoPath, ['symbolic-ref', '--short', 'HEAD']);
+  if (head.ok && head.stdout) return head.stdout;
+
+  // 再退：main / master 哪个存在用哪个
+  for (const name of ['main', 'master']) {
+    const exists = await git(repoPath, ['rev-parse', '--verify', `refs/heads/${name}`]);
+    if (exists.ok) return name;
+  }
+  return null;
+}
+
 /**
  * 创建任务 worktree 的三步校验 + 创建。
  * 任何一步失败都返回原因（调用方负责回注给 agent，不得静默）。
+ *
+ * @param {object} o
+ * @param {string} [o.baseBranch] 不传则自动探测仓库默认分支
  */
-export async function createTaskWorktree({ repoPath, baseBranch, taskId, worktreesRoot, registry }) {
+export async function createTaskWorktree({
+  repoPath, baseBranch = null, taskId, worktreesRoot, registry,
+}) {
   // ① 在不在登记列表
   if (!isRepoAllowed(repoPath, registry)) {
     return {
       ok: false,
+      step: '仓库登记',
       reason: `仓库 ${repoPath} 不在登记列表内。可选：${registry.map((r) => r.path).join('、') || '（空，请先由人添加）'}`,
     };
   }
@@ -62,30 +86,75 @@ export async function createTaskWorktree({ repoPath, baseBranch, taskId, worktre
   // ② 是不是 git 仓库
   const isRepo = await git(repoPath, ['rev-parse', '--is-inside-work-tree']);
   if (!isRepo.ok || isRepo.stdout !== 'true') {
-    return { ok: false, reason: `${repoPath} 不是 git 仓库，需先 git init 并做一次初始提交（此步须由人确认）` };
+    return { ok: false, step: 'git 仓库检查', reason: `${repoPath} 不是 git 仓库，需先 git init 并做一次初始提交（此步须由人确认）` };
   }
 
-  // ③ 基线分支是否存在
-  const baseCheck = await git(repoPath, ['rev-parse', '--verify', `refs/heads/${baseBranch}`]);
+  // ③ 基线分支：没指定就自动探测（老仓库默认是 master，硬编码 main 会全线失败）
+  let branch = baseBranch;
+  if (!branch) {
+    branch = await detectDefaultBranch(repoPath);
+    if (!branch) {
+      const all = await git(repoPath, ['branch', '--format=%(refname:short)']);
+      return {
+        ok: false,
+        step: '基线分支',
+        reason: `这个仓库没有任何分支（现有：${all.stdout || '无'}），先做一次提交再来`,
+      };
+    }
+  }
+
+  const baseCheck = await git(repoPath, ['rev-parse', '--verify', `refs/heads/${branch}`]);
   if (!baseCheck.ok) {
-    const branches = await git(repoPath, ['branch', '--format=%(refname:short)']);
+    // 空仓库（git init 之后没提交过）：HEAD 指向 main 但那个 ref 还不存在。
+    // 这种要单独说，否则用户会以为自己分支名写错了。
+    const hasCommit = await git(repoPath, ['rev-parse', '--verify', 'HEAD']);
+    if (!hasCommit.ok) {
+      return {
+        ok: false,
+        step: '基线分支',
+        reason: `${repoPath} 还是一个空仓库（没有任何提交）。请先做一次初始提交，再开任务。`,
+      };
+    }
+
+    const all = await git(repoPath, ['branch', '--format=%(refname:short)']);
+    const detected = await detectDefaultBranch(repoPath);
+    const list = (all.stdout || '').split('\n').filter(Boolean).join('、') || '无';
     return {
       ok: false,
-      reason: `基线分支 ${baseBranch} 不存在。现有分支：${branches.stdout || '（无）'}`,
+      step: '基线分支',
+      reason: `基线分支 ${branch} 不存在。这个仓库的默认分支看起来是「${detected ?? '未知'}」，`
+        + `现有分支：${list}。请在任务的 base_branch 里写对分支名。`,
     };
   }
+  baseBranch = branch;
 
   // 路径只用任务 id
   await mkdir(worktreesRoot, { recursive: true });
   const wtPath = join(worktreesRoot, taskId);
-  const branch = `task/${taskId}`;
+  const taskBranch = `task/${taskId}`;
 
-  const add = await git(repoPath, ['worktree', 'add', wtPath, '-b', branch, baseBranch]);
-  if (!add.ok) {
-    return { ok: false, reason: `git worktree add 失败：${add.stderr || add.stdout}` };
+  let add = await git(repoPath, ['worktree', 'add', wtPath, '-b', taskBranch, baseBranch]);
+
+  // 分支已存在：多半是上次跑完没清理，或应用数据被重置但仓库分支还在。
+  // 自动换个名字继续，而不是让用户去手动删分支——任务 id 是 app 生成的，
+  // 用户没有理由知道仓库里躺着一条同名分支。
+  let finalBranch = taskBranch;
+  if (!add.ok && /already exists/i.test(`${add.stderr}${add.stdout}`)) {
+    finalBranch = `${taskBranch}-${Date.now().toString(36).slice(-4)}`;
+    add = await git(repoPath, ['worktree', 'add', wtPath, '-b', finalBranch, baseBranch]);
+    if (add.ok) {
+      return {
+        ok: true, worktree: wtPath, branch: finalBranch, baseBranch, repo: repoPath,
+        note: `分支 ${taskBranch} 已存在，改用 ${finalBranch}`,
+      };
+    }
   }
 
-  return { ok: true, worktree: wtPath, branch, baseBranch, repo: repoPath };
+  if (!add.ok) {
+    return { ok: false, step: '创建 worktree', reason: `git worktree add 失败：${add.stderr || add.stdout}` };
+  }
+
+  return { ok: true, worktree: wtPath, branch: taskBranch, baseBranch, repo: repoPath };
 }
 
 /**

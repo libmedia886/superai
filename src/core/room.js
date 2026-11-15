@@ -182,6 +182,28 @@ export class Room {
     return true;
   }
 
+  /**
+   * 指定某人做总结。
+   *
+   * 和普通发言的区别：**总结说完房间就停住，不进入互 @ 接力**。
+   * 否则总结者 @ 了谁，讨论又开始了——老板要的是"收敛出结论"，不是继续聊。
+   */
+  async requestSummary(agentId) {
+    const agent = this.members.find((m) => m.id === agentId);
+    if (!agent) return { ok: false, error: `找不到成员 ${agentId}` };
+
+    this.summarizing = agentId;
+    this.waitingForHuman = false;
+    this._enqueue(agentId, {
+      triggerMsg: { senderId: 'human', body: '请总结本次讨论，给出结论。' },
+      taskId: null,
+      source: 'human',
+      isSummary: true,
+    });
+    this.onEvent({ type: 'summary.requested', agentId });
+    return { ok: true };
+  }
+
   /** 一键停止整个房间（唯一的硬闸） */
   stop() {
     this.stopped = true;
@@ -195,10 +217,37 @@ export class Room {
     this.onEvent({ type: 'resumed' });
   }
 
-  /** 头头接管（P0 #20）：暂停头头，不再自动入队 */
+  /**
+   * 头头接管（P0 #20）：暂停头头，不再自动入队。
+   *
+   * 接管期间**丢弃队列里排着的头头发言**——那些是它接管前的意图，已经过期了。
+   * 等交还后一口气补发，就像把几天前的邮件一股脑发出去一样，会让人莫名其妙。
+   */
   takeOver() {
     this.overridden = true;
-    this.onEvent({ type: 'takeover' });
+    const dropped = this.queue.filter((q) => {
+      const m = this.members.find((x) => x.id === q.agentId);
+      return m?.role === 'leader';
+    });
+    this.queue = this.queue.filter((q) => !dropped.includes(q));
+
+    this.onEvent({
+      type: 'takeover',
+      at: new Date().toISOString(),
+      dropped: dropped.length,
+      text: dropped.length ? `已接管，丢弃 ${dropped.length} 条过期排队的头头发言` : '已接管',
+    });
+  }
+
+  /**
+   * 交还控制权。
+   *
+   * **不重置熔断计数**——熔断看的是它自己失败了几次，接管是人的决定，
+   * 两者不能互相掩盖。交还只是把头头的自动发言权还回去。
+   */
+  handBack() {
+    this.overridden = false;
+    this.onEvent({ type: 'handback', at: new Date().toISOString() });
   }
 
   // ---------- 单轮 ----------
@@ -246,6 +295,19 @@ export class Room {
       trigger: job.triggerMsg, mode: delivery,
       taskId: job.taskId, actionResults,
     });
+
+    // 总结模式：明确告诉它这是收尾，不是继续讨论
+    if (job.isSummary) {
+      prompt += [
+        '',
+        '--- 老板请你总结 ---',
+        '本次讨论该收尾了。请给出：',
+        '1. 已达成的结论（只写结论，不写过程）',
+        '2. 还没解决的问题',
+        '3. 建议的下一步',
+        '不要 @ 任何人——说完房间就停住，等老板决定。',
+      ].join('\n');
+    }
 
     // 还在等交接：把 ASK 段附在正常 prompt 末尾（不影响它正常干活）
     if (!rebootstrap && this.handoff.needsAsk(agent.id) && !this.handoff.canFire(agent.id)) {
@@ -393,6 +455,8 @@ export class Room {
       sessionId: agent.sessionId ?? null,
       durationMs,
       usageTokens,
+      // 总结要显式标记：否则事后翻记录分不清哪条是结论、哪条是过程
+      isSummary: Boolean(job.isSummary),
     });
     // 带上队列剩余数：界面据此区分"还要继续说"和"真的在等人"。
     // 不带的话，一轮说完就显示"等待人类"，而队列里可能还排着两三个人。
@@ -500,6 +564,14 @@ export class Room {
           ].filter(Boolean).join('；'),
         });
       }
+      // 总结不进入接力：它 @ 了谁也不继续，说完就停。
+      if (job.isSummary) {
+        this.summarizing = null;
+        this.waitingForHuman = true;
+        this.onEvent({ type: 'summary.done', agentId: agent.id });
+        return;
+      }
+
       for (const t of allowed) {
         this._enqueue(t, { triggerMsg: msg.message, taskId: job.taskId, source: 'agent' });
       }
@@ -677,7 +749,9 @@ export class Room {
         createdBy: agent.id,
         note: '',
         repo: a.repo ?? null,
-        baseBranch: a.base_branch ?? 'main',
+        // 不传就由 createTaskWorktree 自动探测默认分支（老仓库是 master，硬编码 main 会全线失败）
+        // 兼容模型直觉写法：base_branch / baseBranch / branch 都认
+        baseBranch: a.base_branch ?? a.baseBranch ?? a.branch ?? null,
         worktree: null,
       };
 
@@ -686,9 +760,11 @@ export class Room {
       if (task.repo) {
         const wt = await this.openWorktree(task);
         if (!wt.ok) {
-          return { ok: false, label, reason: wt.reason };
+          // 带上步骤名：不然模型会把"分支不存在"当成"仓库没登记"来回折腾
+          return { ok: false, label, reason: wt.step ? `开 worktree 失败（${wt.step}）：${wt.reason}` : wt.reason };
         }
         task.worktree = wt.worktree;
+        task.baseBranch = wt.baseBranch;
       }
 
       await this.store.createTask(task);

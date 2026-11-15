@@ -16,14 +16,26 @@
       <span id="room-name">房间</span>
     </div>
 
-    <div class="section-title">成员</div>
+    <div class="section-title">
+      成员
+      <button class="mini-btn" id="btn-add-member" title="添加成员">+</button>
+    </div>
     <ul id="member-list" class="member-list"></ul>
 
     <div class="section-title">名册</div>
     <ul id="roster-list" class="roster-list"></ul>
 
-    <div class="section-title">仓库</div>
+    <div class="section-title">
+      仓库
+      <button class="mini-btn" id="btn-add-repo" title="登记仓库">+</button>
+    </div>
     <ul id="repo-list" class="repo-list"></ul>
+
+    <div class="sidebar-actions">
+      <button class="btn ghost wide" id="btn-takeover" title="暂停头头，由你直接指挥">接管房间</button>
+      <button class="btn ghost wide hidden" id="btn-handback" title="把自动发言权还给头头">交还控制权</button>
+      <button class="btn ghost wide" id="btn-summarize">让某人总结</button>
+    </div>
   </aside>
 
   <!-- 中栏：群聊流 -->
@@ -31,6 +43,7 @@
     <header class="statusbar">
       <div class="status-left">
         <span id="speaker" class="speaker"><span class="dot idle"></span><span>等待人类</span></span>
+        <span id="takeover-badge" class="takeover-badge hidden">已被人工接管</span>
         <span id="queue" class="chip hidden"></span>
       </div>
       <div class="status-right">

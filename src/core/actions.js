@@ -138,6 +138,11 @@ export function validateAction(a) {
     if (!a.title || typeof a.title !== 'string') return 'task.create 缺少 title';
     if (a.assignee != null && typeof a.assignee !== 'string') return 'assignee 必须是成员标识';
     if (a.parent != null && typeof a.parent !== 'string') return 'parent 必须是任务 id';
+    if (a.repo != null && typeof a.repo !== 'string') return 'repo 必须是仓库路径';
+    // base_branch / baseBranch / branch 三种写法都认——模型直觉会写 branch
+    for (const key of ['base_branch', 'baseBranch', 'branch']) {
+      if (a[key] != null && typeof a[key] !== 'string') return `${key} 必须是分支名`;
+    }
     return null;
   }
   if (type === 'task.update') {

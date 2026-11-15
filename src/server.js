@@ -10,14 +10,16 @@
  */
 
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdir } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 
 import { loadConfig, saveConfig, buildRoom, DEFAULT_DATA_DIR } from './core/config.js';
 import { availableTiers, TIER } from './core/probe.js';
-import { diffAgainstBase } from './core/worktree.js';
+import {
+  diffAgainstBase, commitWorktree, mergeTaskBranch, finalizeTaskWorktree,
+} from './core/worktree.js';
 
 const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url));
 const MIME = {
@@ -67,6 +69,8 @@ export async function startServer({ port = 4321, host = '127.0.0.1', dataDir = D
     roster: [...store.roster.entries()],
     registry: cfg.registry ?? [],
     toolLog: store.toolLog.slice(-200),
+    // 接管状态必须带上：否则刷新后 badge 消失，用户会忘了自己接管过
+    overridden: Boolean(room.overridden),
   });
 
   const server = createServer(async (req, res) => {
@@ -133,6 +137,91 @@ export async function startServer({ port = 4321, host = '127.0.0.1', dataDir = D
         return json(res, 200, { ok: true });
       }
 
+      /** 一键接管：暂停头头，人直接指挥 */
+      if (url.pathname === '/api/takeover' && req.method === 'POST') {
+        room.takeOver();
+        return json(res, 200, { ok: true, overridden: true });
+      }
+
+      /** 交还控制权：把自动发言权还给头头（不重置熔断） */
+      if (url.pathname === '/api/handback' && req.method === 'POST') {
+        room.handBack();
+        return json(res, 200, { ok: true, overridden: false });
+      }
+
+      /** 指定某人做总结（不进入接力，说完房间停住） */
+      if (url.pathname === '/api/summarize' && req.method === 'POST') {
+        const body = await readJson(req);
+        const agentId = body.agentId;
+        if (!agentId) return json(res, 400, { error: '缺少 agentId' });
+        const r = await room.requestSummary(agentId);
+        if (!r.ok) return json(res, 400, r);
+        room.drain().catch(() => {});
+        return json(res, 200, { ok: true });
+      }
+
+      /** 登记可用仓库（只有人能加，头头加不了） */
+      if (url.pathname === '/api/registry' && req.method === 'POST') {
+        const body = await readJson(req);
+        const path = String(body.path ?? '').trim();
+        if (!path || !path.startsWith('/')) return json(res, 400, { error: '请填写绝对路径' });
+        cfg.registry = cfg.registry ?? [];
+        if (cfg.registry.some((r) => r.path === path)) {
+          return json(res, 400, { error: '这个仓库已经登记过了' });
+        }
+        cfg.registry.push({ path });
+        room.registry = cfg.registry;
+        await saveConfig(cfg, dataDir);
+        broadcast({ type: 'registry.updated', registry: cfg.registry });
+        return json(res, 200, { ok: true, registry: cfg.registry });
+      }
+
+      /** 建房/加成员（改配置并落盘，重启后仍在） */
+      if (url.pathname === '/api/member' && req.method === 'POST') {
+        const body = await readJson(req);
+        const name = String(body.name ?? '').trim();
+        const backend = String(body.backend ?? '').trim();
+        if (!name || !backend) return json(res, 400, { error: '需要名字和后端' });
+        if (!availableTiers(backend).length) return json(res, 400, { error: `不支持的 backend：${backend}` });
+        if (room.members.some((m) => m.name.toLowerCase() === name.toLowerCase())) {
+          return json(res, 400, { error: '这个名字已存在' });
+        }
+
+        const tier = availableTiers(backend).includes(body.tier) ? body.tier : TIER.READONLY;
+        const member = {
+          id: `m${Date.now().toString(36)}`,
+          name,
+          backend,
+          tier,
+          role: body.role === 'leader' ? 'leader' : 'member',
+          persona: body.persona ?? '',
+        };
+        cfg.members.push(member);
+        await saveConfig(cfg, dataDir);
+
+        // 热添加：不用重启
+        const cwd = join(dataDir, 'agents', member.id);
+        await mkdir(cwd, { recursive: true });
+        room.members.push({ ...member, cwd, aliases: [name.toLowerCase()] });
+        if (member.role === 'leader') room.leaderIds.push(member.id);
+
+        broadcast({
+          type: 'room.init',
+          room: { name: cfg.name, leaderId: room.leaderId },
+          members: room.members.map((m) => ({
+            id: m.id, name: m.name, role: m.role, backend: m.backend,
+            tier: m.tier, persona: m.persona,
+            tiers: availableTiers(m.backend),
+          })),
+          history: store.messages.slice(-200),
+          tasks: [...store.tasks.values()],
+          roster: [...store.roster.entries()],
+          registry: cfg.registry ?? [],
+          toolLog: store.toolLog.slice(-200),
+        });
+        return json(res, 200, { ok: true, member });
+      }
+
       if (url.pathname === '/api/interrupt' && req.method === 'POST') {
         return json(res, 200, { ok: room.interrupt() });
       }
@@ -151,6 +240,56 @@ export async function startServer({ port = 4321, host = '127.0.0.1', dataDir = D
         if (!t?.worktree || !t?.repo) return json(res, 404, { error: '该任务还没有 worktree' });
         const d = await diffAgainstBase(t.worktree, t.baseBranch ?? 'main');
         return json(res, 200, d);
+      }
+
+      /**
+       * 验收：把 worktree 里的改动提交到任务分支，然后合并或丢弃。
+       * **只有人能触发**，agent 没有这个接口的访问权。
+       */
+      if (url.pathname === '/api/accept' && req.method === 'POST') {
+        const body = await readJson(req);
+        const taskId = body.id;
+        const t = taskId ? store.tasks.get(taskId) : null;
+        if (!t) return json(res, 404, { error: '任务不存在' });
+        if (!t.worktree || !t.repo) return json(res, 400, { error: '该任务没有 worktree，无需验收' });
+
+        if (body.action === 'merge') {
+          const c = await commitWorktree({
+            worktree: t.worktree,
+            message: `${t.id}: ${t.title}`,
+            taskId: t.id,
+          });
+          if (!c.ok) return json(res, 500, { error: c.reason });
+          if (!c.committed) return json(res, 400, { error: '没有可合并的改动' });
+
+          const m = await mergeTaskBranch({
+            repoPath: t.repo, branch: `task/${t.id}`, baseBranch: t.baseBranch ?? 'main',
+          });
+          if (!m.ok) return json(res, 409, { error: m.reason, commit: c.commit });
+
+          // 合并成功：worktree 转 detached 再删分支，保留目录供事后追问
+          const f = await finalizeTaskWorktree({
+            repoPath: t.repo, worktree: t.worktree, branch: `task/${t.id}`, keepWorktree: true,
+          });
+
+          await store.updateTask(t.id, { status: '完成', acceptedAt: new Date().toISOString() });
+          broadcast({
+            type: 'task.accepted', id: t.id, action: 'merge',
+            commit: m.commit, worktreeKept: !f.worktreeRemoved,
+          });
+          return json(res, 200, { ok: true, commit: m.commit });
+        }
+
+        if (body.action === 'discard') {
+          const f = await finalizeTaskWorktree({
+            repoPath: t.repo, worktree: t.worktree, branch: `task/${t.id}`, keepWorktree: false,
+          });
+          await store.updateTask(t.id, { status: '阻塞', discardedAt: new Date().toISOString() });
+          broadcast({ type: 'task.accepted', id: t.id, action: 'discard', ok: f.ok });
+          return json(res, 200, { ok: f.ok, reason: f.reason ?? null });
+        }
+
+        return json(res, 400, { error: 'action 必须是 merge 或 discard' });
       }
 
       if (url.pathname === '/api/roster' && req.method === 'POST') {
