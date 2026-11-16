@@ -628,3 +628,37 @@ a.btn { text-decoration: none; display: flex; align-items: center; }
   color: var(--text-faint);
   font-family: var(--mono);
 }
+
+/* 权限天花板：安全相关的设置，要显眼但不刺眼 */
+.cabtier-box {
+  margin-top: 16px;
+  padding: 10px 11px;
+  border-radius: 9px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+}
+.cabtier-box label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+.cabtier-select {
+  width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.cabtier-select:focus { outline: none; border-color: var(--accent); }
+.cabtier-hint {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  line-height: 1.5;
+  margin-top: 6px;
+}

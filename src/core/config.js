@@ -91,6 +91,20 @@ export async function buildRoom({ cfg, dataDir = DEFAULT_DATA_DIR, onEvent }) {
     store,
     registry: cfg.registry ?? [],
     worktreesRoot: join(dataDir, 'worktrees'),
+    /** 房间级权限天花板：AI 能创建的成员最高档位（人设定，默认只读） */
+    aiCabTier: cfg.aiCabTier ?? TIER.READONLY,
+    // agent 造人时的落地钩子：建目录 + 写配置，返回带 cwd 的成员
+    onMemberCreate: async (member) => {
+      const cwd = join(dataDir, 'agents', member.id);
+      await mkdir(cwd, { recursive: true });
+      cfg.members = cfg.members ?? [];
+      cfg.members.push({
+        id: member.id, name: member.name, backend: member.backend,
+        tier: member.tier, role: member.role, persona: member.persona,
+      });
+      await saveConfig(cfg, dataDir);
+      return { ...member, cwd, aliases: [member.name.toLowerCase()] };
+    },
     resolveAdapter: (agent) => {
       if (!adapters.has(agent.id)) {
         adapters.set(agent.id, createAdapter({

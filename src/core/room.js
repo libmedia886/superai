@@ -19,6 +19,8 @@ import { HealthTracker, retryDecision, stallThreshold } from './health.js';
 import { HandoffState, ASK_INSTRUCTION, buildHandoffRebootstrap, extractHandoff } from './handoff.js';
 import { AutoAdvanceGuard } from './autoadvance.js';
 import { UsageWatcher } from './usage.js';
+import { planMemberCreation, DEFAULT_AI_CAB_TIER } from './members.js';
+import { availableTiers } from './probe.js';
 import { createTaskWorktree, finalizeTaskWorktree, diffAgainstBase } from './worktree.js';
 
 /**
@@ -55,8 +57,13 @@ export class Room {
    */
   constructor({
     id, name, goal = '', members, store, resolveAdapter, onEvent,
-    registry = [], worktreesRoot = null,
+    registry = [], worktreesRoot = null, onMemberCreate = null,
+    aiCabTier = DEFAULT_AI_CAB_TIER,
   }) {
+    /** 造人落地钩子（由 config 注入，负责建目录 + 写配置） */
+    this.onMemberCreate = onMemberCreate;
+    /** AI 能创建的成员的最高档位（人设定，默认只读） */
+    this.aiCabTier = aiCabTier;
     this.id = id;
     this.name = name;
     this.goal = goal;
@@ -661,6 +668,34 @@ export class Room {
     }
   }
 
+  /**
+   * 把新成员加进房间（内存 + 持久化）。
+   * server 的手动加成员和 agent 造人走同一条路，避免两处逻辑不一致。
+   */
+  async addMember(member, { createdBy = 'human', reason = '' } = {}) {
+    if (!this.onMemberCreate) {
+      return { ok: false, reason: '当前运行方式不支持动态加成员' };
+    }
+    try {
+      const added = await this.onMemberCreate(member);
+      this.members.push(added);
+      if (added.role === 'leader') this.leaderIds.push(added.id);
+      this.onEvent({
+        type: 'member.created',
+        member: {
+          id: added.id, name: added.name, role: added.role,
+          backend: added.backend, tier: added.tier,
+          tiers: availableTiers(added.backend),
+        },
+        createdBy,
+        reason,
+      });
+      return { ok: true, member: added };
+    } catch (err) {
+      return { ok: false, reason: String(err?.message ?? err) };
+    }
+  }
+
   /** 头头默认收摘要投递（prompt.js 会调） */
   summaryFor(agentId) {
     return this.summaries.get(agentId) ?? null;
@@ -877,6 +912,29 @@ export class Room {
       });
       this.onEvent({ type: 'roster.updated', agentId: targetId });
       return { ok: true, label, detail: `${targetId} 职责已更新` };
+    }
+
+    if (a.action === 'member.create') {
+      const plan = planMemberCreation({
+        action: a, members: this.members, ceiling: this.aiCabTier,
+      });
+      if (!plan.ok) {
+        // 超天花板这种情况尤其要说清——否则它会反复重试同一个请求
+        this.onEvent({
+          type: 'notice', level: 'warn', agentId: agent.id,
+          text: `不能加成员：${plan.reason}`,
+        });
+        return { ok: false, label: 'member.create', reason: plan.reason };
+      }
+
+      const created = await this.addMember(plan.member, { createdBy: agent.id, reason: a.reason });
+      if (!created.ok) return { ok: false, label: 'member.create', reason: created.reason };
+
+      return {
+        ok: true,
+        label: 'member.create',
+        detail: `已加入 @${plan.member.name}（${plan.member.backend}，${plan.member.tier}）`,
+      };
     }
 
     if (a.action === 'continue') {

@@ -31,6 +31,16 @@
     </div>
     <ul id="repo-list" class="repo-list"></ul>
 
+    <div class="cabtier-box">
+      <label for="cabtier">AI 创建成员的最高权限</label>
+      <select id="cabtier" class="cabtier-select">
+        <option value="readonly">只读（默认）</option>
+        <option value="write">可写</option>
+        <option value="write-exec">可写+执行</option>
+      </select>
+      <div class="cabtier-hint">头头自己加人时，新成员的权限不会超过这一档。<br>只有你能改这个设置。</div>
+    </div>
+
     <div class="sidebar-actions">
       <button class="btn ghost wide" id="btn-takeover" title="暂停头头，由你直接指挥">接管房间</button>
       <button class="btn ghost wide hidden" id="btn-handback" title="把自动发言权还给头头">交还控制权</button>

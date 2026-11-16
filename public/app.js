@@ -111,6 +111,10 @@ function renderMemberList() {
   }
 }
 
+function cabTierLabel(tier) {
+  return { readonly: '只读', write: '可写', 'write-exec': '可写+执行' }[tier] ?? tier;
+}
+
 function tierLabel(tier) {
   if (tier === 'readonly') return '只读';
   if (tier === 'write-ask') return '可写·询问';
@@ -445,6 +449,8 @@ function handle(ev) {
       state.leaderId = ev.room.leaderId;
       state.registry = ev.registry ?? [];
       state.toolLog = ev.toolLog ?? [];
+      state.aiCabTier = ev.aiCabTier ?? 'readonly';
+      $('cabtier').value = state.aiCabTier;
       setOverridden(Boolean(ev.overridden));
       $('room-name').textContent = ev.room.name;
       for (const t of ev.tasks) state.tasks.set(t.id, t);
@@ -568,6 +574,25 @@ function handle(ev) {
       appendSystemNote(`广播：${ev.recipients.length} 人将依次回应（${ev.recipients.map((r) => '@' + nameOf(r)).join(' → ')}）`);
       break;
 
+    case 'cabtier.updated':
+      state.aiCabTier = ev.tier;
+      $('cabtier').value = ev.tier;
+      appendSystemNote(`AI 创建成员的最高权限已改为「${cabTierLabel(ev.tier)}」`);
+      break;
+
+    case 'member.created':
+      // 头头自己加的人：立即出现在成员列表里
+      if (!state.members.some((m) => m.id === ev.member.id)) {
+        state.members.push(ev.member);
+        renderMemberList();
+        renderRoster();
+      }
+      appendSystemNote(
+        `@${ev.member.name} 已加入（${ev.member.backend} · ${tierLabel(ev.member.tier)}）`
+        + (ev.reason ? `—— 理由：${ev.reason}` : ''),
+      );
+      break;
+
     case 'registry.updated':
       state.registry = ev.registry ?? [];
       renderRepos();
@@ -611,7 +636,7 @@ function handle(ev) {
       $('btn-stop').classList.remove('urgent');
       break;
 
-    case 'usage.warning':
+    case 'usage.warning':   // 用量提示：只提示不拦截
       // 只提示不拦截：老板说过不用考虑消耗，这里只让他知道钱花在哪
       appendUsageNote(ev.text);
       break;
@@ -954,6 +979,29 @@ function setOverridden(on) {
   $('btn-takeover').classList.toggle('hidden', on);
   $('btn-handback').classList.toggle('hidden', !on);
 }
+
+$('cabtier').onchange = async (e) => {
+  const tier = e.target.value;
+  const label = cabTierLabel(tier);
+  if (tier !== 'readonly' && !window.confirm(
+    `把 AI 创建成员的最高权限改成「${label}」？\n\n`
+    + '这意味着头头自己加的人可以直接改文件'
+    + (tier === 'write-exec' ? '并执行命令' : '')
+    + '。只有你信任房间里的 AI 时才这么做。',
+  )) {
+    e.target.value = state.aiCabTier;   // 取消就还原
+    return;
+  }
+  const res = await fetch('/api/cabtier', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tier }),
+  });
+  if (!res.ok) {
+    e.target.value = state.aiCabTier;
+    appendSystemNote('设置失败', 'warn');
+  }
+};
 
 $('btn-takeover').onclick = async () => {
   if (!window.confirm('接管后头头会暂停自动发言，你直接 @ 任何成员。继续？')) return;

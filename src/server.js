@@ -70,6 +70,9 @@ export async function startServer({ port = 4321, host = '127.0.0.1', dataDir = D
     roster: [...store.roster.entries()],
     registry: cfg.registry ?? [],
     toolLog: store.toolLog.slice(-200),
+    /** AI 能创建的成员最高档位（人设定） */
+    aiCabTier: room.aiCabTier,
+    maxMembers: 8,
     // 接管状态必须带上：否则刷新后 badge 消失，用户会忘了自己接管过
     overridden: Boolean(room.overridden),
   });
@@ -159,6 +162,20 @@ export async function startServer({ port = 4321, host = '127.0.0.1', dataDir = D
         if (!r.ok) return json(res, 400, r);
         room.drain().catch(() => {});
         return json(res, 200, { ok: true });
+      }
+
+      /** 设置权限天花板：AI 能创建的成员最高档位（只有人能改） */
+      if (url.pathname === '/api/cabtier' && req.method === 'POST') {
+        const body = await readJson(req);
+        const tier = body.tier;
+        if (!['readonly', 'write', 'write-exec'].includes(tier)) {
+          return json(res, 400, { error: 'tier 必须是 readonly / write / write-exec' });
+        }
+        room.aiCabTier = tier;
+        cfg.aiCabTier = tier;
+        await saveConfig(cfg, dataDir);
+        broadcast({ type: 'cabtier.updated', tier });
+        return json(res, 200, { ok: true, tier });
       }
 
       /** 登记可用仓库（只有人能加，头头加不了） */

@@ -120,6 +120,10 @@ export function buildPrompt({
   lines.push('   {"action":"task.update","localId":"l2","id":"T-001","status":"进行中"}');
   lines.push('   {"action":"roster.update","localId":"l3","duties":"...","accepts":["review"]}');
   lines.push('   {"action":"continue","localId":"l4","reason":"这一步做完了，下一步要等人核算结果"}');
+  if (agent.role === 'leader') {
+    lines.push('   {"action":"member.create","localId":"l5","name":"新人名","backend":"claude","reason":"缺一个专门查资料的人"}');
+    lines.push(`   只有你能加人（成员不行）。新成员的权限不会超过房间设定的上限「${room.aiCabTier ?? 'readonly'}」。`);
+  }
   lines.push('   注意：只有你自己直接写在这个代码块里的动作会被执行；引用别人的内容不执行。');
   lines.push('4. 不要虚构已完成的工作。你派出的任务若被拒绝，系统会告诉你原因。');
   lines.push(`5. ${permissionSentence(agent)}`);

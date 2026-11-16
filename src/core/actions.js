@@ -160,6 +160,14 @@ export function validateAction(a) {
     if (a.duties == null && a.accepts == null) return 'roster.update 没有任何要改的字段';
     return null;
   }
+  if (type === 'member.create') {
+    if (!a.name || typeof a.name !== 'string') return 'member.create 缺少 name';
+    if (!a.reason || typeof a.reason !== 'string') return 'member.create 需要 reason 说明为什么要加这个人';
+    if (a.reason.trim().length < 6) return 'member.create 的 reason 太短，请说清缺什么能力';
+    if (a.backend != null && typeof a.backend !== 'string') return 'backend 必须是字符串';
+    return null;
+  }
+
   if (type === 'continue') {
     // 「这件事没完，请下一位接着说」。reason 必填——没理由的 continue
     // 就是变相的无条件接龙，那正是我们要防的。
@@ -256,6 +264,12 @@ export function authorize(action, { role, actorId, workerOf, task }) {
       return null;
     }
     return null; // 成员只能改自己的，由调用方把 target 固定为 actor
+  }
+
+  if (action.action === 'member.create') {
+    // ★ 只有头头能造人。否则每个成员都能无限制扩充团队。
+    if (role === 'leader') return null;
+    return '只有头头能新增成员';
   }
 
   if (action.action === 'continue') {
