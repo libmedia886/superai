@@ -187,6 +187,21 @@ test('★ -o 指向不存在的子目录 → 自动建（模型按提示词会�
   assert.ok(await exists(join(dir, 'work', 'page.html')), '子目录应被创建、文件应落盘');
 });
 
+test('★ 直接写到工作目录本身（-o page.html）必须成功（回归：曾一度全被拒）', async () => {
+  /**
+   * 自动建父目录那次改动把边界检查写成了 `"$real_cwd"/*`，
+   * 于是父目录**等于** cwd 时不匹配 —— `-o page.html` / `-o ./page.html`
+   * 这种最常见的写法全部 exit 3，且错误信息还说"不在工作目录内"（自相矛盾）。
+   * 当时 540 个测试全绿，因为没有一条用例把文件直接写在工作目录根上。
+   */
+  for (const out of ['page.html', './page2.html']) {
+    const dir = await mkdtemp(join(tmpdir(), 'ng-root-'));
+    const r = await run(dir, ['-o', out, 'https://example.com']);
+    assert.equal(r.code, 0, `${out} 应成功（实际 ${r.code}：${r.stderr.slice(0, 120)}）`);
+    assert.ok(await exists(join(dir, out.replace('./', ''))), `${out} 应落盘`);
+  }
+});
+
 test('★ 建目录也不能越界（-o /tmp/x/y.html、../x/y.html 都要拒）', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'ng-mk2-'));
   for (const out of [`/tmp/netget-mk-${Date.now()}/x.html`, '../netget-mk/x.html']) {

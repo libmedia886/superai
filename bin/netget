@@ -118,8 +118,11 @@ if [ -n "$out" ]; then
   # 而 `work/` 不存在 → curl 报 "(23) client returned ERROR on write"，整轮白烧一次。
   # 那不是模型的错，是我们给了它一个跑不通的示例。
   parent=$(/usr/bin/dirname -- "$real_out")
+  # ★ 必须单独允许 `parent == cwd` 这一种：`-o page.html` 是最常见的写法，
+  #   此时父目录就是工作目录本身，不匹配 `"$real_cwd"/*`（那要求后面还有内容）。
+  #   漏掉这一支的后果不是"多拒一条边角"，而是**往工作目录里直接下载一律失败**。
   case "$parent" in
-    "$real_cwd"/*) ;;
+    "$real_cwd"|"$real_cwd"/*) ;;
     *) echo "netget: 拒绝创建目录「$parent」（不在工作目录内）" >&2; exit 3 ;;
   esac
   /usr/bin/mkdir -p -- "$parent" 2>/dev/null || true
