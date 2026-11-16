@@ -15,6 +15,17 @@ export const THRESHOLDS = {
   chainDepth: 8,      // 从人类最后一条消息起，agent 之间接力的层数
   totalTurns: 20,     // 自人类最后一条消息起累计发言数
   minGapMs: 30_000,   // 两次发言间隔小于这个值，视为"过于密集"（辅助信号）
+  /**
+   * 连续多少轮"什么都没推进"才算空转。
+   *
+   * ★ 这是比"发言人轮换/间隔过密"更可信的信号（管理方 20:41 提出）：
+   * 真实协作里 8 个人高强度往返完全正常，但**如果连续几轮下来
+   * 没有新任务、没有任务状态变化、没有工具调用、没有新结论**，
+   * 那才是真的在原地打转。
+   * 光看轮次和间隔会把"认真干活"误判成"转圈"——
+   * 误报的代价是以后没人信这个警告。
+   */
+  noProgressTurns: 3,
 };
 
 export class LoopGuard {
@@ -31,6 +42,38 @@ export class LoopGuard {
     this.totalTurns = 0;
     this.lastAt = 0;
     this._reported = new Set();  // 同一原因只提示一次，避免刷屏
+    /** 连续"没有任何推进"的轮数（见 noteProgress） */
+    this.noProgressStreak = 0;
+  }
+
+  /**
+   * 记录一轮**推进了多少**。
+   *
+   * 与 `record()` 分开，因为它们是两件事：record 记"谁说了话"，
+   * 这个记"说的话有没有产生效果"。空转判据只看后者。
+   *
+   * @param {object} o
+   * @param {number} [o.actions]     本轮成功执行的动作数（建任务/改状态/改职责…）
+   * @param {number} [o.toolCalls]   本轮工具调用数
+   * @param {boolean} [o.newConclusion] 本轮是否产出新结论（非重复正文）
+   * @returns {{reason:object|null, streak:number}}
+   */
+  noteProgress({ actions = 0, toolCalls = 0, newConclusion = false } = {}) {
+    const progressed = actions > 0 || toolCalls > 0 || newConclusion;
+    this.noProgressStreak = progressed ? 0 : this.noProgressStreak + 1;
+
+    if (this.noProgressStreak >= this.t.noProgressTurns && !this._reported.has('no-progress')) {
+      this._reported.add('no-progress');
+      return {
+        streak: this.noProgressStreak,
+        reason: {
+          kind: 'no-progress',
+          text: `已连续 ${this.noProgressStreak} 轮没有任何推进`
+            + '（没有新任务、没有状态变化、没有工具调用）——这比"轮数多"更能说明在原地打转',
+        },
+      };
+    }
+    return { streak: this.noProgressStreak, reason: null };
   }
 
   /**
@@ -74,7 +117,13 @@ export class LoopGuard {
       });
     }
 
-    // 辅助信号：极密集的往复（不单独触发，配合前三个一起看更可信）
+    /**
+     * 辅助信号：极密集的往复。
+     *
+     * ★ 管理方实测过它的误报：真实房间里 8 次 agent 发言、间隔 10.4 秒、
+     * 链深 8 —— 那是正常的高强度协作，不是转圈。所以它**不单独成立**，
+     * 只在"同时没有任何推进"时才算（见 noteProgress 的 no-progress）。
+     */
     if (gap < this.t.minGapMs && this.consecutive >= 3) {
       reasons.push({
         kind: 'rapid',

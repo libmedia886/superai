@@ -4,7 +4,13 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { LoopGuard, THRESHOLDS } from '../src/core/guard.js';
+import { Store } from '../src/core/store.js';
+import { Room } from '../src/core/room.js';
 
 test('维度 1：同一 agent 自说自话 → 连续次数触发', () => {
   const g = new LoopGuard();
@@ -151,4 +157,92 @@ test('★ 循环警告必须写进事件流，不能只发界面', async () => {
   await replay.load();
   assert.ok(replay.loopWarnings.length > 0, '重放后仍能查到警告——这才是"事后能复盘"');
   assert.ok(replay.loopWarnings[0].reasons.length > 0, '要记下具体原因');
+});
+
+/* ---------- 空转判据：连续几轮"没有任何推进"（INBOX §2 第 3 条） ---------- */
+
+test('★ 连续 3 轮没有任何推进 → 报"原地打转"，并说明比轮数更可信', async () => {
+  const { LoopGuard } = await import('../src/core/guard.js');
+  const g = new LoopGuard();
+
+  assert.equal(g.noteProgress({ actions: 0, toolCalls: 0, newConclusion: false }).reason, null);
+  assert.equal(g.noteProgress({ actions: 0, toolCalls: 0, newConclusion: false }).reason, null);
+  const third = g.noteProgress({ actions: 0, toolCalls: 0, newConclusion: false });
+
+  assert.ok(third.reason, '第 3 轮应当报');
+  assert.equal(third.reason.kind, 'no-progress');
+  assert.match(third.reason.text, /没有任何推进/);
+  assert.equal(third.streak, 3);
+});
+
+test('★ 有推进就清零（建了任务 / 跑了工具 / 写了新结论都算）', async () => {
+  const { LoopGuard } = await import('../src/core/guard.js');
+  for (const progressed of [
+    { actions: 1, toolCalls: 0, newConclusion: false },
+    { actions: 0, toolCalls: 2, newConclusion: false },
+    { actions: 0, toolCalls: 0, newConclusion: true },
+  ]) {
+    const g = new LoopGuard();
+    g.noteProgress({ actions: 0, toolCalls: 0, newConclusion: false });
+    g.noteProgress({ actions: 0, toolCalls: 0, newConclusion: false });
+    assert.equal(g.noteProgress(progressed).streak, 0,
+      `${JSON.stringify(progressed)} 应当算推进并清零`);
+  }
+});
+
+test('★ 只报一次（同一原因不刷屏）', async () => {
+  const { LoopGuard } = await import('../src/core/guard.js');
+  const g = new LoopGuard();
+  const hits = [];
+  for (let i = 0; i < 8; i += 1) {
+    const r = g.noteProgress({ actions: 0, toolCalls: 0, newConclusion: false });
+    if (r.reason) hits.push(i + 1);
+  }
+  assert.deepEqual(hits, [3], '只在第 3 轮报一次');
+});
+
+test('★ 重新开局（人说话）会清掉空转计数', async () => {
+  const { LoopGuard } = await import('../src/core/guard.js');
+  const g = new LoopGuard();
+  g.noteProgress({ actions: 0, toolCalls: 0, newConclusion: false });
+  g.noteProgress({ actions: 0, toolCalls: 0, newConclusion: false });
+  g.reset();
+  assert.equal(g.noProgressStreak, 0);
+});
+
+test('★ 真实高强度协作（8 次往返、间隔 10 秒）不该只因为"轮数多"报警', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'busy-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+  const events = [];
+
+  const room = new Room({
+    id: 'r', name: 't',
+    members: [
+      { id: 'lead', name: 'lead', role: 'leader', backend: 'claude', tier: 'readonly', cwd: dir, aliases: ['lead'] },
+      { id: 'b', name: 'b', role: 'member', backend: 'claude', tier: 'readonly', cwd: dir, aliases: ['b'] },
+    ],
+    store,
+    resolveAdapter: (agent) => ({
+      async run({ onEvent }) {
+        onEvent?.({ type: 'meta', sessionId: 's' });
+        // 每一轮都在干活：有工具调用 + 有实质产出
+        onEvent?.({ type: 'tool', tool: 'Bash', command: 'grep …' });
+        const t = `${agent.id} 查到了三条新证据，分别来自 A/B/C，已记进表格。`;
+        onEvent?.({ type: 'text', text: t, done: false });
+        return { text: t, sessionId: 's', reason: 'completed', usage: null };
+      },
+    }),
+    onEvent: (e) => events.push(e),
+  });
+
+  // 造 8 次 agent 往返（模拟管理方看到的真实高强度协作）
+  for (let i = 0; i < 4; i += 1) {
+    room._enqueue(i % 2 ? 'b' : 'lead', { triggerMsg: { id: `m${i}`, senderId: 'lead', body: '继续' }, taskId: null, source: 'agent' });
+  }
+  await room.drain();
+
+  const noProgress = events.filter((e) => e.type === 'loop.warning'
+    && (e.reasons ?? []).some((r) => r.kind === 'no-progress'));
+  assert.equal(noProgress.length, 0, '一直在推进的协作不该报"原地打转"');
 });

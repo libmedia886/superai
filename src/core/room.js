@@ -1544,9 +1544,21 @@ export class Room {
 
     // 4) 循环护栏（CR-008，只提示不拦截）
     //    人类触发的轮次视为新任务起点，三个维度全部归零。
-    // 被动唤醒不计入护栏：一个话多的成员天天无 @ 发言，不能让头头那边
-    // 一直刷"检测到循环迹象"——警告一旦不稀缺就没人信了。
-    if (!job.passive) this._detectLoop(agent, body, { reset: job.source !== 'agent' });
+    /**
+     * 被动唤醒不计入护栏：一个话多的成员天天无 @ 发言，不能让头头那边
+     * 一直刷"检测到循环迹象"——警告一旦不稀缺就没人信了。
+     *
+     * 传入"这一轮推进了什么"：轮数多不一定是转圈，**连续几轮什么都没推进才是**。
+     */
+    if (!job.passive) {
+      const progressed = {
+        actions: results.filter((r) => r?.ok).length,
+        toolCalls: rowToolsInTurn,
+        // 产出过非空正文就算有新结论（正文是否重复由 similarity 单独判）
+        newConclusion: String(body ?? '').trim().length > 40,
+      };
+      this._detectLoop(agent, body, { reset: job.source !== 'agent', progressed });
+    }
 
     // 4.5) 上下文水位：达阈值就标记，下一轮开头压缩 + 轮换 session
     if (adapterResult?.usage) {
@@ -2221,7 +2233,7 @@ export class Room {
    *  3. totalTurns  总发言数 —— 防广播时人数多导致的长链
    *  4. similarity  内容重复 —— 追加信号，AI 互相客套时最明显
    */
-  _detectLoop(agent, body, { reset = false } = {}) {
+  _detectLoop(agent, body, { reset = false, progressed = null } = {}) {
     if (reset) {
       this.guard.reset();
       this.onEvent({ type: 'guard.reset' });
@@ -2229,6 +2241,16 @@ export class Room {
     }
 
     const reasons = this.guard.record({ agentId: agent.id });
+
+    /**
+     * 空转判据：连续几轮"没有任何推进"。
+     * 这比轮数/间隔更可信——真实协作里高强度往返是正常的（管理方实测：
+     * 8 次发言、间隔 10.4 秒、链深 8，那是正常干活）。
+     */
+    if (progressed) {
+      const p = this.guard.noteProgress(progressed);
+      if (p.reason) reasons.push(p.reason);
+    }
 
     const prev = this.store.messages.filter((m) => m.senderId === agent.id).at(-2);
     if (prev && similarity(prev.body, body) >= 0.85 && !this.guard._reported.has('similar')) {
