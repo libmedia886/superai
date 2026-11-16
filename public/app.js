@@ -893,6 +893,13 @@ function handle(ev) {
 
     case 'room.paused':
       state.paused = { reason: ev.reason, detail: ev.detail ?? '', at: new Date().toISOString() };
+      /**
+       * 实时事件也要同步 resumeTarget。
+       *
+       * 之前只从 room.init 读它，于是**只有刷新后按钮才变「接着做完」**。
+       * "刷新才正确"就是错的：用户不会为了看对按钮去刷新。
+       */
+      state.resumeTarget = ev.resumeTarget ?? null;
       state.busy = false;
       state.pending = 0;
       // 只在真有内容时提示一次；"头头汇报完停住"不该刷成警告色

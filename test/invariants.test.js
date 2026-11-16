@@ -284,3 +284,16 @@ test('清单：提示里提到的按钮必须真实存在（不变量，不只�
   const ui = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(ui, /state\.resumeTarget \? '▶ 接着做完'/, '按钮必须按"是否真的有可续轮次"决定文案');
 });
+
+test('清单：第五类不变量——界面上那句话必须做得到', async () => {
+  await mustMention('core/room.js', 'willRetry', '会不会自动重试必须是"要不要暂停"的依据');
+  await mustMention('core/room.js', 'canResume', '文案与按钮共用同一个布尔值');
+
+  const ui = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const pausedCase = ui.slice(ui.indexOf("case 'room.paused'"), ui.indexOf("case 'room.resumed'"));
+  assert.match(pausedCase, /state\.resumeTarget = ev\.resumeTarget/,
+    '实时事件也要同步 resumeTarget，否则只有刷新后按钮才对');
+
+  const server = await read('server.js');
+  assert.match(server, /resumeTarget: room\.resumeTarget/, 'resumeTarget 也要进 room.init（刷新后仍在）');
+});

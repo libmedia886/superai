@@ -182,6 +182,15 @@ function isStall(result, durationMs) {
 export function timeoutPauseText({
   name, stalledOut, durationMs, timeoutMs, toolCalls, textChars,
   capContinues = 0, maxCapContinues = MAX_CAP_CONTINUES, stallMs = STALL_MS,
+  /**
+   * 是否有可续的轮次（= 调用方是否设了 resumeTarget）。
+   *
+   * ★ 这个入参存在的唯一目的：让**文案**和**按钮**用同一份事实。
+   * 之前两次翻车都是两边各算各的——一次是文案说有按钮但没设 resumeTarget
+   * （用户点了发现行为不对），一次是设了 resumeTarget 但文案不提
+   * （按钮存在却不告诉用户）。共用一个布尔值，两边就不可能分叉。
+   */
+  canResume = false,
 }) {
   const secs = Math.max(1, Math.round(durationMs / 1000));
   const capSecs = Math.round(timeoutMs / 1000);
@@ -191,21 +200,25 @@ export function timeoutPauseText({
   const didSomething = toolCalls > 0 || hadText;
   const textPart = hadText ? `，已输出 ${textChars} 字` : '';
 
+  const resumeHint = canResume ? '点「接着做完」可以接着做，不会重做已完成的部分。' : '';
+
   if (stalledOut) {
     return `${name} 静默 ${stallSecs} 秒，被看门狗判定卡死（耗时 ${secs} 秒，${toolPart}${textPart}）。`
       + (toolCalls > 0
-        ? '它跑过工具，结果都还在会话里——点「接着做完」可以继续。'
+        ? '它跑过工具，结果都还在会话里。' + resumeHint
         : hadText
-          ? '它已经写了一部分，会话仍在——点「接着做完」接着写，不会重来。'
+          ? '它已经写了一部分，会话仍在。' + (resumeHint || '点「接着做完」接着写，不会重来。')
           : '本轮没有任何工具调用、也没有输出，多半是空转了。');
   }
   if (capContinues >= maxCapContinues) {
     return `${name} 跑满上限 ${capSecs} 秒被中止（耗时 ${secs} 秒，${toolPart}${textPart}）。`
-      + `已自动续做 ${maxCapContinues} 次仍未收尾，不再自动续——请确认它是不是在原地打转。`;
+      + `已自动续做 ${maxCapContinues} 次仍未收尾，不再自动续——请确认它是不是在原地打转。`
+      + resumeHint;
   }
   if (didSomething) {
     return `${name} 跑满上限 ${capSecs} 秒被中止（耗时 ${secs} 秒，${toolPart}${textPart}）。`
-      + '它确实在干活，但这一轮没能在上限内收尾。';
+      + '它确实在干活，但这一轮没能在上限内收尾。'
+      + resumeHint;
   }
   return `${name} 跑满上限 ${capSecs} 秒被中止（耗时 ${secs} 秒，${toolPart}）。`
     + '没有任何工具调用、也没有输出，多半是空转。';
@@ -1252,6 +1265,8 @@ export class Room {
       this.onEvent({ type: 'action.results', agentId: agent.id, results });
     }
 
+    /** timeout 分支已经算过的重试决定；下面复用，避免两次判定分叉 */
+    let retryDecided = null;
     const timedOut = adapterResult?.reason === EXIT.TIMEOUT && !aborted;
     if (timedOut) {
       this.store.append({
@@ -1325,7 +1340,39 @@ export class Room {
          * 所以有产出（跑过工具或写过正文）就设 resumeTarget；
          * 纯空转（0 工具 0 输出）没有可续的东西，按钮不出现、文案也不提。
          */
-        if (didSomething) {
+        /**
+         * ★ 先算"会不会自动重试"，再决定要不要暂停。
+         *
+         * 管理方 19:17 的 SSE 时序实测：`room.paused{timeout}` → 同一毫秒 `retry`
+         * → `room.resumed` → `turn.start`。于是聊天流里永久留着
+         * 「点『接着做完』接着写」，而按钮已经被 turn.start 重置隐藏——
+         * **用户被要求点一个 0 秒后就不存在的东西**。
+         *
+         * 房间根本没停下等人，就不该发暂停原因、也不该设 resumeTarget。
+         */
+        const timeoutDecision = capAutoContinued
+          ? { retry: false, reason: '已安排自动续做' }
+          : retryDecision({
+            tier: agent.tier,
+            reason: EXIT.TIMEOUT,
+            attempt: job.attempt ?? 0,
+            maxAttempts: this.maxRetries,
+            stalled: stalledOut || isStall(adapterResult, durationMs),
+            toolCalls: rowToolsInTurn,
+          });
+        retryDecided = timeoutDecision;
+        const willRetry = timeoutDecision.retry;
+
+        if (willRetry) {
+          // 系统马上自己接着跑：只说一句，不设暂停原因、不设 resumeTarget
+          this.onEvent({
+            type: 'notice',
+            level: 'info',
+            agentId: agent.id,
+            text: `${agent.name} 这一轮被中止（耗时 ${Math.round(durationMs / 1000)} 秒），`
+              + '系统已自动重试，不需要你操作。',
+          });
+        } else if (didSomething) {
           this.resumeTarget = {
             agentId: agent.id,
             taskId: job.taskId ?? null,
@@ -1334,8 +1381,10 @@ export class Room {
             reason: 'timeout',
           };
         }
+        // 文案与按钮共用同一个布尔值，两边不可能再分叉
+        const canResume = Boolean(this.resumeTarget) && !willRetry;
 
-        this._pause('timeout', timeoutPauseText({
+        if (!willRetry) this._pause('timeout', timeoutPauseText({
           name: agent.name,
           stalledOut,
           durationMs,          // 实际耗时，不是配置上限
@@ -1345,6 +1394,7 @@ export class Room {
           capContinues,
           maxCapContinues: MAX_CAP_CONTINUES,
           stallMs: stallThreshold(timeoutMs),
+          canResume,
         }));
       }
     }
@@ -1418,7 +1468,7 @@ export class Room {
        * （撞上限续做 vs 失败重试），同一轮超时会同时满足，
        * 结果这个成员被入队两次、白跑一轮。测试抓到的就是这个。
        */
-      const decision = capAutoContinued
+      const decision = retryDecided ?? (capAutoContinued
         ? { retry: false, reason: '已安排自动续做' }
         : retryDecision({
           tier: agent.tier,
@@ -1427,7 +1477,7 @@ export class Room {
           maxAttempts: this.maxRetries,
           stalled: stalledOut || isStall(adapterResult, durationMs),
           toolCalls: rowToolsInTurn,
-        });
+        }));
       if (decision.retry) {
         this.onEvent({ type: 'retry', agentId: agent.id, reason: decision.reason });
         this.queue.unshift({ ...job, attempt: (job.attempt ?? 0) + 1 });
