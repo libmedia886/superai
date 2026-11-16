@@ -195,3 +195,36 @@ test('清单有条数上限（不能让 prompt 无限膨胀）', async () => {
   }
   assert.ok(room.unresolvedActions({ limit: 20 }).length <= 20);
 });
+
+test('★ 意图句不能被当成"谎称已完成"（误报会让警告失去信任）', async () => {
+  const { room, store, events } = await makeRoom();
+  await store.append({
+    kind: 'action', agentId: 'lead', taskId: null,
+    label: 'task.update T-008', ok: false, reason: '非法状态', at: Date.now(),
+  });
+
+  const intent = [
+    '我打算把 T-008 改成阻塞，等渠道确认。',
+    '建议 T-008 改为阻塞。',
+    'T-008 还需要等待外部渠道。',
+    '计划将 T-008 设为阻塞。',
+  ];
+  for (const t of intent) {
+    events.length = 0;
+    room._detectFalseClaims(t, 'lead');
+    assert.ok(!events.some((e) => /没有成功/.test(e.text ?? '')),
+      `这是提议不是声称，不该报：${t}`);
+  }
+
+  const claims = [
+    'T-008 已改为阻塞。',
+    '已把 T-008 改成阻塞，报告见附件。',
+    'T-008 设置为阻塞。',
+  ];
+  for (const t of claims) {
+    events.length = 0;
+    room._detectFalseClaims(t, 'lead');
+    assert.ok(events.some((e) => /没有成功/.test(e.text ?? '')),
+      `这是声称已处理，必须报：${t}`);
+  }
+});

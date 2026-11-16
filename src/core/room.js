@@ -700,9 +700,23 @@ export class Room {
       // label 形如 "task.update T-008"；取出目标 id
       const id = p.label.split(/\s+/).slice(1).join(' ').trim();
       if (!id || !text.includes(id)) continue;
-      // 只有紧跟在 id 附近说"已…"才算声称完成，避免误伤"T-008 还需要…"
-      const near = text.split(id).slice(1).join(id).slice(0, 40);
-      if (/(已改|已完成|已更新|已设为|已调整|已处理|已完成修改|改成)/.test(near)) {
+
+      /**
+       * 只在 id **附近**找"已完成"的说法，且必须排除意图句。
+       *
+       * 误报的代价很高：老板看到「系统说它在撒谎」，而它其实只是写了
+       * "我打算把 T-008 改成阻塞"——那他下次就不信这个警告了。
+       * 所以：
+       *   - 窗口：id 前后各 30 字
+       *   - 有意图词（打算/计划/将/需要/建议…）→ 是提议，不是声称
+       *   - 有完成态动词（已改/改为/改成…）→ 才算声称
+       */
+      const idx = text.indexOf(id);
+      const near = text.slice(Math.max(0, idx - 30), idx + id.length + 30);
+      const INTENT = /(打算|计划|准备|将要|将会|将|需要|还需|建议|拟|是否要|要不要|待)/;
+      const CLAIM = /(已改|已完成|已更新|已设为|已调整|已处理|改成|改为|设成|设置为)/;
+      if (INTENT.test(near)) continue;
+      if (CLAIM.test(near)) {
         claimed.push({ id, label: p.label, reason: p.reason });
       }
     }
