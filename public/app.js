@@ -583,6 +583,7 @@ const PAUSE_LABEL = {
   breaker: '连续失败，暂时停用',
   stopped: '你点了「停止」',
   summary: '总结完毕',
+  timeout: '超时被中止（不是说完）',
   interrupted: '被打断（这一轮没做完）',
   error: '出错停住',
   cleared: '已恢复',

@@ -162,3 +162,21 @@ test('清单：迁移后会话能接上', async () => {
   await mustMention('core/rooms.js', 'symlink', '根目录留 agents 兼容链接');
   await mustMention('core/config.js', 'sessionResetReason', '接不上时界面上要说出来');
 });
+
+test('清单：每个后端暂停原因都要有中文文案（否则状态栏显示原始 key）', async () => {
+  const { PAUSE_LABEL } = await import('../src/core/room.js');
+  const uiSrc = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const uiBlock = uiSrc.slice(uiSrc.indexOf('const PAUSE_LABEL = {'), uiSrc.indexOf('};', uiSrc.indexOf('const PAUSE_LABEL = {')));
+
+  for (const key of Object.keys(PAUSE_LABEL)) {
+    if (key === 'cleared') continue;   // 后端没有这个（它是 UI 专用）
+    // 前端 map 少一个 key，状态栏就会把 "timeout" 这样的原始英文直接显示给老板
+    assert.ok(new RegExp(`\\b${key}:`).test(uiBlock),
+      `前端 PAUSE_LABEL 缺少「${key}」—— 状态栏会显示原始 key 而不是人话`);
+  }
+});
+
+test('清单：撞上限自动续做与失败重试互斥（否则白跑一轮）', async () => {
+  await mustMention('core/room.js', 'capAutoContinued', '两条路径会同时满足同一个超时');
+  await mustMention('core/room.js', 'MAX_CAP_CONTINUES', '续做次数必须有上限');
+});
