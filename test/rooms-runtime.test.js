@@ -438,3 +438,36 @@ test('★ 清空「单轮上限」= 用房间默认，同时清掉手写的 time
   assert.equal(set.member.timeoutMinutes, 25);
   assert.equal(set.member.timeoutMs, null);
 });
+
+test('★ 房间启动时真的生成 netget，并挂到每个成员上', async () => {
+  const { readFile: rf, stat } = await import('node:fs/promises');
+  const dir = await makeMultiRoom();
+  const mgr = await new RoomManager({ dataDir: dir, onEvent: () => {} }).init();
+
+  const path = mgr.session.netgetPath;
+  assert.ok(path, 'session 要暴露 netgetPath');
+  assert.ok(path.endsWith(join('r-0', 'bin', 'netget')), `路径应在房间 bin/ 下：${path}`);
+
+  const st = await stat(path);
+  assert.ok(st.mode & 0o100, '生成的可执行位要在');
+
+  const body = await rf(path, 'utf8');
+  assert.match(body, /--proto '=http,https'/, '内容必须是真正的包装器，不是空文件');
+
+  // ★ 关键：必须在成员 cwd 之外
+  for (const m of mgr.session.members) {
+    assert.equal(m.netgetPath, path, '每个成员都要拿到同一个路径（适配器按 agent 构建）');
+    assert.ok(!m.cwd.startsWith(join(dir, 'rooms', 'r-0', 'bin')), '成员 cwd 不能落在 bin/ 里');
+    assert.ok(!path.startsWith(m.cwd), `包装器不能在成员自己的工作目录里（否则它能改写边界）：${m.cwd}`);
+  }
+});
+
+test('★ 换房间后 netget 路径跟着换', async () => {
+  const dir = await makeMultiRoom();
+  const mgr = await new RoomManager({ dataDir: dir, onEvent: () => {} }).init();
+  const a = mgr.session.netgetPath;
+  await mgr.switchTo('r-1');
+  const b = mgr.session.netgetPath;
+  assert.notEqual(a, b);
+  assert.ok(b.includes('r-1'));
+});
