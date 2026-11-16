@@ -148,6 +148,49 @@ export function planMemberUpdate({ member, patch = {}, members = [], confirmOver
     }
   }
 
+  /**
+   * ---- 允许的命令（只有人能设置）----
+   *
+   * 不是权限档位的一部分，而是档位之上的一层人工例外：
+   * `["curl","wget"]` → `--allowedTools "Bash(curl:*)" "Bash(wget:*)"`。
+   *
+   * ★ 只能人改。它**不在动作协议里**（agent 发 member.update 会被拒），
+   *   与"禁止成员自己提权"同源。
+   * ★ 默认空 = 维持现状：严格执行"不能跑命令"。
+   */
+  if (patch.allowedCommands !== undefined) {
+    const raw = Array.isArray(patch.allowedCommands)
+      ? patch.allowedCommands
+      : String(patch.allowedCommands ?? '').split(/[\s,，]+/);
+    const cmds = [...new Set(raw.map((c) => String(c ?? '').trim()).filter(Boolean))];
+
+    const bad = cmds.filter((c) => c !== '*' && !/^[A-Za-z0-9_.+-]{1,40}$/.test(c));
+    if (bad.length) {
+      return { ok: false, reason: `命令名不合法：${bad.join('、')}（只允许字母数字和 _ . + -）` };
+    }
+    if (cmds.length > 12) {
+      return { ok: false, reason: '最多 12 条命令。清单越长，越接近"整片放开"。' };
+    }
+    // 整片放开必须走"确认"，不能一不小心打一个 * 就绕过了围墙
+    if (cmds.some((c) => c === '*')) {
+      if (!confirmOverride) {
+        return {
+          ok: false,
+          code: 'NEEDS_CONFIRM',
+          reason: '命令清单里写了 * 等于放开全部命令（命令行没有目录墙）。确认请带 confirmOverride。',
+          needingConfirm: [{ arg: '*' }],
+        };
+      }
+    }
+
+    const asText = cmds.join(' ');
+    if (asText !== (member.allowedCommandsText ?? (member.allowedCommands ?? []).join(' '))) {
+      next.allowedCommands = cmds;
+      next.allowedCommandsText = asText;
+      changed.push('allowedCommands');
+    }
+  }
+
   // ---- 角色 / persona ----
   if (patch.role !== undefined) {
     const role = patch.role === 'leader' ? 'leader' : 'member';

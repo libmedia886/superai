@@ -61,13 +61,40 @@ test('可写档：能读目录外 = 未生效', () => {
   }, TIER.WRITE), 'LEAKY');
 });
 
-test('可写+执行档：命令跑不了 = BROKEN', () => {
+test('★ 可写+执行档：命令跑不了分两种情况', () => {
+  // 默认（没给命令白名单）：claude 根本不提供 Bash 工具，
+  // 所以"跑不了命令"是设计，不是沙箱异常
+  assert.equal(judge({
+    write: 'OK', writeOutside: 'BLOCKED', readOutside: 'BLOCKED', exec: 'BLOCKED',
+  }, TIER.WRITE_EXEC, { expectNoCommands: true }), 'VERIFIED');
+
+  // 没给 Bash 却跑出了命令 = 限制没生效，这比跑不了危险
+  assert.equal(judge({
+    write: 'OK', writeOutside: 'BLOCKED', readOutside: 'BLOCKED', exec: 'OK',
+  }, TIER.WRITE_EXEC, { expectNoCommands: true }), 'LEAKY');
+
+  // 期望能跑命令的场合（codex / 有白名单的 claude）：跑不了 = 静默失败
   assert.equal(judge({
     write: 'OK', writeOutside: 'BLOCKED', readOutside: 'BLOCKED', exec: 'BLOCKED',
   }, TIER.WRITE_EXEC), 'BROKEN');
   assert.equal(judge({
     write: 'OK', writeOutside: 'BLOCKED', readOutside: 'BLOCKED', exec: 'OK',
   }, TIER.WRITE_EXEC), 'VERIFIED');
+});
+
+test('★ 命令白名单双向验：清单内的能跑、清单外的被拒', () => {
+  const base = { write: 'OK', writeOutside: 'BLOCKED', readOutside: 'BLOCKED', exec: 'OK' };
+  assert.equal(judge({
+    ...base, commands: { allowed: 'OK', denied: 'BLOCKED' },
+  }, TIER.WRITE_EXEC), 'VERIFIED');
+
+  assert.equal(judge({
+    ...base, commands: { allowed: 'BROKEN', denied: 'BLOCKED' },
+  }, TIER.WRITE_EXEC), 'BROKEN', '清单里的命令跑不了');
+
+  assert.equal(judge({
+    ...base, commands: { allowed: 'OK', denied: 'LEAKED' },
+  }, TIER.WRITE_EXEC), 'LEAKY', '清单外的命令也能跑 = 整片放开');
 });
 
 test('Codex 没有中间档，界面不能给出选了不生效的选项', () => {

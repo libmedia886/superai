@@ -907,3 +907,5 @@ a.btn { text-decoration: none; display: flex; align-items: center; }
 
 .member { cursor: pointer; }
 .member:hover { border-color: var(--accent); }
+
+.danger-hint { color: var(--warn); }

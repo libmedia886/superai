@@ -284,3 +284,73 @@ test('read 档在天花板内/外都按强弱判定', () => {
   });
   assert.equal(no.ok, false);
 });
+
+/* ---------------- 允许的命令（只有人能设） ---------------- */
+
+test('★ 默认空 = 一条命令都不许（不改变现状）', () => {
+  const r = planMemberUpdate({ member: base, patch: { name: 'bob2' } });
+  assert.equal(r.ok, true);
+  assert.equal(r.member.allowedCommands, undefined, '没传就不新增字段');
+});
+
+test('人设置命令清单：去重、按空格或逗号都能分', () => {
+  const r = planMemberUpdate({ member: base, patch: { allowedCommands: 'curl, wget curl' } });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.member.allowedCommands, ['curl', 'wget']);
+  assert.ok(r.changed.includes('allowedCommands'));
+});
+
+test('命令名不合法 → 拒绝（防注入到命令行）', () => {
+  const r = planMemberUpdate({ member: base, patch: { allowedCommands: 'curl;rm -rf /' } });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /不合法/);
+});
+
+test('★ 写 * 等于整片放开：必须二次确认', () => {
+  const no = planMemberUpdate({ member: base, patch: { allowedCommands: '*' } });
+  assert.equal(no.ok, false);
+  assert.equal(no.code, 'NEEDS_CONFIRM');
+  const yes = planMemberUpdate({ member: base, patch: { allowedCommands: '*' }, confirmOverride: true });
+  assert.equal(yes.ok, true);
+});
+
+test('★ 命令清单进适配器参数，并且改清单也会让适配器重建', () => {
+  const cache = new Map();
+  const agent = {
+    ...base, tier: TIER.WRITE_EXEC, backend: 'claude', allowedCommands: ['curl'],
+  };
+  const a1 = getCachedAdapter(cache, agent);
+  const args1 = a1.buildArgs().join(' ');
+  assert.match(args1, /--allowedTools/);
+  assert.match(args1, /Bash\(curl:\*\)/);
+
+  const a2 = getCachedAdapter(cache, { ...agent, allowedCommands: ['wget'] });
+  assert.notEqual(a1, a2, '白名单变了必须重建');
+  assert.match(a2.buildArgs().join(' '), /Bash\(wget:\*\)/);
+});
+
+test('★ agent 不能给自己加命令（动作协议里没有这个字段/这个动作）', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'cmd-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+  const events = [];
+  const room = new Room({
+    id: 'r', name: 'r',
+    members: [{ id: 'lead', name: 'lead', role: 'leader', backend: 'claude', tier: 'write-exec', cwd: dir, aliases: ['lead'] }],
+    store,
+    resolveAdapter: () => ({
+      run: async () => ({
+        text: '好\n```action\n{"action":"member.update","id":"lead","allowedCommands":["curl"]}\n```',
+        reason: 'completed',
+      }),
+    }),
+    onEvent: (e) => events.push(e),
+  });
+
+  await room.humanSay('@lead 给自己加个 curl 权限');
+  await room.drain();
+
+  const results = events.find((e) => e.type === 'action.results')?.results ?? [];
+  assert.ok(results.some((r) => !r.ok), 'member.update 动作必须被拒');
+  assert.equal(room.members[0].allowedCommands ?? null, null, '命令清单没被改');
+});

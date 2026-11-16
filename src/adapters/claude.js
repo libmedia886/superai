@@ -32,7 +32,22 @@ const BASE_ARGS = [
  * ⚠️ 静默自动批准 vs 每次询问的差别必须在界面上写清：
  *    默认档是"从来不问"，不是"每次都会问我"。
  */
-export function tierArgs(tier = 'readonly') {
+/**
+ * 命令白名单 → `--allowedTools "Bash(curl:*)" "Bash(wget:*)"`。
+ *
+ * ★ 为什么必须用白名单而不是整片放开 Bash：
+ *   实测 `--allowedTools "Bash"` 之后，agent 能 `echo LEAK > /tmp/outside`，
+ *   也就是**命令行走廊没有目录墙**（文件工具反而有）。所以"能跑命令"和
+ *   "只能在目录内动手"这两个承诺无法同时成立。
+ *   白名单让老板自己决定放开到什么程度，界面必须明说这层风险。
+ */
+export function allowedCommandArgs(cmds = []) {
+  const list = (cmds ?? []).map((c) => String(c ?? '').trim()).filter(Boolean);
+  if (!list.length) return [];
+  return ['--allowedTools', ...list.map((c) => `Bash(${c}:*)`)];
+}
+
+export function tierArgs(tier = 'readonly', { allowedCommands = [] } = {}) {
   if (tier === 'read') {
     // 可读档：实测 `--tools "Read,Grep,Glob" --permission-prompts none`
     // 能读 cwd 内文件，目录外被权限系统拦下。这是老板说的「可读」。
@@ -42,8 +57,21 @@ export function tierArgs(tier = 'readonly') {
     return ['--tools', 'Read,Write,Edit', '--permission-mode', 'default', '--permission-prompts', 'host'];
   }
   if (tier === 'write' || tier === 'writeExec' || tier === 'write-exec') {
-    const tools = tier === 'write' ? 'Read,Write,Edit' : 'Read,Write,Edit,Bash';
-    return ['--tools', tools, '--permission-mode', 'acceptEdits', '--permission-prompts', 'none'];
+    /**
+     * write-exec 的 Bash 只在有白名单时给出。
+     *
+     * 没有白名单时给了 Bash 也没用：`acceptEdits` 只自动批准文件编辑，
+     * Bash 每次仍要审批，而 `--permission-prompts none` 没有审批通道 →
+     * 一律自动拒绝。于是"可写+执行"名不副实，agent 会反复尝试、白烧 token。
+     * 干脆不给这个工具，并在 prompt 里说清楚。
+     */
+    const hasCommands = (allowedCommands ?? []).length > 0;
+    const tools = tier === 'write'
+      ? 'Read,Write,Edit'
+      : (hasCommands ? 'Read,Write,Edit,Bash' : 'Read,Write,Edit');
+    const args = ['--tools', tools, '--permission-mode', 'acceptEdits', '--permission-prompts', 'none'];
+    if (hasCommands) args.push(...allowedCommandArgs(allowedCommands));
+    return args;
   }
   return ['--tools', '', '--permission-prompts', 'none'];
 }
@@ -92,7 +120,7 @@ export class ClaudeAdapter extends AgentAdapter {
   buildArgs({ sessionId = null } = {}) {
     const args = [
       ...BASE_ARGS,
-      ...tierArgs(this.config.tier),
+      ...tierArgs(this.config.tier, { allowedCommands: this.config.allowedCommands }),
       ...modelArgs('claude', this.config.model),
       ...effortArgs('claude', this.config.effort),
     ];

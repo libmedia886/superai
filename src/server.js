@@ -101,6 +101,7 @@ export async function startServer({
     model: m.model ?? '',
     effort: m.effort ?? '',
     extraArgs: m.extraArgsText ?? '',
+    allowedCommands: (m.allowedCommands ?? []).join(' '),
     overridesTier: detectTierOverride(m.backend, m.extraArgs ?? []),
     colors: m.color ?? null,
     tiers: availableTiers(m.backend),
@@ -487,6 +488,7 @@ export async function startServer({
             effort: target.effort,
             extraArgs: target.extraArgs ?? [],
             extraArgsText: target.extraArgsText ?? '',
+            allowedCommands: target.allowedCommands ?? [],
           },
           patch: body.patch ?? body,
           members: room.members,
@@ -519,6 +521,8 @@ export async function startServer({
             effort: next.effort ?? null,
             extraArgs: next.extraArgs ?? [],
             extraArgsText: next.extraArgsText ?? '',
+            allowedCommands: next.allowedCommands ?? [],
+            allowedCommandsText: next.allowedCommandsText ?? '',
           });
         }
         Object.assign(target, {
@@ -531,6 +535,8 @@ export async function startServer({
           effort: next.effort ?? null,
           extraArgs: next.extraArgs ?? [],
           extraArgsText: next.extraArgsText ?? '',
+          allowedCommands: next.allowedCommands ?? [],
+          allowedCommandsText: next.allowedCommandsText ?? '',
           aliases: [next.name.toLowerCase()],
         });
 
@@ -771,6 +777,7 @@ function pickAudit(m) {
   return {
     name: m.name, backend: m.backend, tier: m.tier, model: m.model,
     effort: m.effort, extraArgs: m.extraArgs, role: m.role,
+    allowedCommands: m.allowedCommands ?? [],
   };
 }
 

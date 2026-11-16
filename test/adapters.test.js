@@ -19,12 +19,24 @@ test('Claude 可写档：必须有 acceptEdits，否则写会被自动拒（实�
   assert.ok(!a[a.indexOf('--tools') + 1].includes('Bash'));
 });
 
-test('Claude 可写+执行档：加 Bash', () => {
+test('★ Claude 可写+执行档：只有给了命令白名单才加 Bash', () => {
+  // 起因（实测）：acceptEdits 只自动批准文件编辑，Bash 每条仍要审批，
+  // 而 --permission-prompts none 没有审批通道 → 一律被自动拒绝。
+  // 所以"可写+执行"名不副实：给了 Bash 也用不上，只会让它反复重试。
   for (const tier of ['write-exec', 'writeExec']) {
-    const a = tierArgs(tier);
-    assert.ok(a[a.indexOf('--tools') + 1].includes('Bash'));
-    assert.equal(a[a.indexOf('--permission-mode') + 1], 'acceptEdits');
+    const without = tierArgs(tier);
+    assert.ok(!without[without.indexOf('--tools') + 1].includes('Bash'), '没白名单就不给 Bash');
+    assert.equal(without[without.indexOf('--permission-mode') + 1], 'acceptEdits');
+
+    const withCmds = tierArgs(tier, { allowedCommands: ['curl'] });
+    assert.ok(withCmds[withCmds.indexOf('--tools') + 1].includes('Bash'));
+    assert.ok(withCmds.includes('Bash(curl:*)'), '白名单要拼成 Bash(curl:*)');
   }
+});
+
+test('命令白名单默认空 → 命令行里没有任何 Bash 授权', () => {
+  const a = tierArgs('write-exec', { allowedCommands: [] });
+  assert.ok(!a.join(' ').includes('--allowedTools'));
 });
 
 test('Codex 中间档直接拒绝，不静默降级成 workspace-write', () => {

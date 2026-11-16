@@ -25,11 +25,20 @@ test('可写档：不能再自称只读，必须说「可以改文件、不能�
   assert.match(s, /不能执行命令/);
 });
 
-test('可写+执行档：允许命令，但说明仍限工作目录', () => {
+test('★ 可写+执行档（无命令白名单）：明确说"这个会话不能执行命令"', () => {
+  // 之前的文案写"可以执行命令，且限制在工作目录内"——两处都不对：
+  //  a) 没有白名单时 Bash 根本跑不起来（一律自动拒绝）
+  //  b) 有白名单时命令行**没有**目录墙（实测能写到 /tmp）
   const s = permissionSentence({ tier: 'write-exec', backend: 'claude' });
   assert.doesNotMatch(s, /只读/);
-  assert.match(s, /可以修改文件并执行命令/);
+  assert.match(s, /不能执行任何命令/);
   assert.match(s, /工作目录/);
+});
+
+test('可写+执行档（有命令白名单）：列出命令，并说明它们不受目录限制', () => {
+  const s = permissionSentence({ tier: 'write-exec', backend: 'claude', allowedCommands: ['curl', 'wget'] });
+  assert.match(s, /curl、wget/);
+  assert.match(s, /不受工作目录限制|外部网络/);
 });
 
 test('opencode 可写档：额外注入「用 write 工具不要用 shell」(双保险)', () => {

@@ -1528,7 +1528,7 @@ $('mm-backend').onchange = (e) => {
   updatePreview();
 };
 
-for (const id of ['mm-model', 'mm-effort', 'mm-extra']) {
+for (const id of ['mm-model', 'mm-effort', 'mm-extra', 'mm-commands']) {
   $(id).addEventListener('input', updatePreview);
 }
 
@@ -1579,6 +1579,7 @@ function openMemberSettings(id) {
   $('mm-model').value = m.model ?? '';
   $('mm-effort').value = m.effort ?? '';
   $('mm-extra').value = m.extraArgs ?? '';
+  $('mm-commands').value = m.allowedCommands ?? '';
   $('mm-role').value = m.role;
   $('mm-persona').value = m.persona ?? '';
   $('mm-remove').classList.remove('hidden');
@@ -1604,6 +1605,7 @@ function openNewMember() {
   $('mm-model').value = '';
   $('mm-effort').value = '';
   $('mm-extra').value = '';
+  $('mm-commands').value = '';
   $('mm-role').value = isFirst ? 'leader' : 'member';
   $('mm-role').disabled = isFirst;   // 第一个成员固定头头，不再多问一次
   $('mm-persona').value = '';
@@ -1693,6 +1695,12 @@ function updatePreview() {
     else if (backend === 'codex') parts.push(`-c model_reasoning_effort="${effort}"`);
     else parts.push('--variant', effort);
   }
+  const cmds = $('mm-commands').value.trim().split(/[\s,，]+/).filter(Boolean);
+  if (cmds.length && tier === 'write-exec') {
+    parts.push('--allowedTools', ...cmds.map((c) => `"Bash(${c}:*)"`));
+  } else if (cmds.length) {
+    parts.push('（命令只对「可写+执行」档生效）');
+  }
   if (extra) parts.push(extra);
 
   $('mm-preview').textContent = parts.join(' ');
@@ -1735,6 +1743,7 @@ async function saveMemberSettings() {
     model: $('mm-model').value.trim(),
     effort: $('mm-effort').value.trim(),
     extraArgs: extraText,
+    allowedCommands: $('mm-commands').value,
     role: $('mm-role').value,
     persona: $('mm-persona').value,
   };
@@ -1767,6 +1776,7 @@ async function saveMemberSettings() {
   if (data.changed?.includes('model')) bits.push('模型');
   if (data.changed?.includes('effort')) bits.push('思考等级');
   if (data.changed?.includes('extraArgs')) bits.push('启动参数');
+  if (data.changed?.includes('allowedCommands')) bits.push('允许的命令');
   if (data.changed?.includes('name')) bits.push('名字');
   if (data.sessionReset) bits.push('会话已重置');
   appendSystemNote(bits.length ? `已更新 ${name}：${bits.join('、')}（立即生效，不用重启）` : '没有改动');

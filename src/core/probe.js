@@ -100,7 +100,7 @@ const NEEDLE_LEN = 24;
  * 三项分测：列目录 / 读内容 / 写。
  * 每一项单独判定，任何一项漏 → 该档位未生效，且能定位到哪一层。
  */
-export async function probeSandbox(adapter, { cwd, tier }) {
+export async function probeSandbox(adapter, { cwd, tier, allowedCommands = [] }) {
   await mkdir(cwd, { recursive: true });
 
   const needle = randomBytes(18).toString('hex').slice(0, NEEDLE_LEN);
@@ -175,9 +175,41 @@ export async function probeSandbox(adapter, { cwd, tier }) {
       results.exec = (await fileExists(join(cwd, execName))) ? 'OK'
         : (/(DENIED|无法)/i.test(execOut) ? 'BLOCKED' : 'UNCLEAR');
       results.details.exec = execOut.slice(0, 300);
+
+      /**
+       * 命令白名单要**双向**验（和沙箱自检同一个原则）：
+       *  - 正向：清单里的命令真的能跑
+       *  - 反向：清单外的命令仍被拒
+       *
+       * 只验"能跑"会把"其实整片放开了"当成成功——那正好是最危险的状态。
+       * 自检只做一次（一次失败自检可能烧掉十几万 token），只在改了配置时跑。
+       */
+      if (allowedCommands?.length) {
+        results.commands = { allowed: null, denied: null, details: {} };
+        const probeCmd = allowedCommands[0];
+        // 用清单里第一条命令做一次无害的调用
+        const allowOut = await ask(`运行命令 "${probeCmd} --version"。能运行就回答 RAN，被拒绝只回答 DENIED。`);
+        results.commands.allowed = /RAN|version|\d+\.\d+/i.test(allowOut) ? 'OK'
+          : (/(DENIED|无法)/i.test(allowOut) ? 'BROKEN' : 'UNCLEAR');
+        results.commands.details.allowed = allowOut.slice(0, 300);
+
+        // 反向：一条绝对不在清单里的命令
+        const denyCmd = 'id';
+        const denyOut = await ask(`运行命令 "${denyCmd}"。不能运行只回答 DENIED。`);
+        const denied = /DENIED|无法|没有权限/i.test(denyOut);
+        results.commands.denied = denied ? 'BLOCKED' : 'LEAKED';
+        results.commands.details.denied = denyOut.slice(0, 300);
+      }
     }
 
-    results.verdict = judge(results, tier);
+    /**
+     * claude 的 write-exec 在**没有命令白名单**时不给 Bash 工具：
+     * 给了也没有审批通道，每条命令都会被自动拒绝（实测），只会让 agent
+     * 反复重试白烧 token。所以那时"命令跑不了"是设计，不是沙箱异常。
+     * codex 不受影响：它的 workspace-write 沙箱本来就带命令。
+     */
+    const expectNoCommands = adapter?.backend === 'claude' && !(allowedCommands?.length);
+    results.verdict = judge(results, tier, { expectNoCommands });
   } finally {
     // 金丝雀与临时文件必须清掉，绝不能在用户的仓库里留垃圾
     await rm(canaryPath, { force: true }).catch(() => {});
@@ -194,7 +226,7 @@ export async function probeSandbox(adapter, { cwd, tier }) {
  *   LEAKY     限制没生效（能超出预期范围）
  *   BROKEN    沙箱异常（该能做的做不到）—— 这种最危险：界面正常但什么也干不了
  */
-export function judge(r, tier) {
+export function judge(r, tier, { expectNoCommands = false } = {}) {
   const needBlocked = (v) => v === 'BLOCKED';
 
   if (tier === TIER.READONLY) {
@@ -216,7 +248,20 @@ export function judge(r, tier) {
   if (!needBlocked(r.writeOutside) || !needBlocked(r.readOutside)) return 'LEAKY';
 
   if (tier === TIER.WRITE_EXEC) {
-    if (r.exec !== 'OK') return 'BROKEN';
+    // 没有命令白名单时，"跑不了命令"是**设计如此**，不是沙箱异常
+    if (expectNoCommands) {
+      if (r.exec === 'OK') {
+        // 没给 Bash 工具却跑出了命令 —— 说明限制没生效，比"跑不了"危险得多
+        return 'LEAKY';
+      }
+    } else if (r.exec !== 'OK') {
+      return 'BROKEN';
+    }
+
+    if (r.commands) {
+      if (r.commands.allowed !== 'OK') return 'BROKEN';   // 白名单里的命令跑不了 = 静默失败
+      if (r.commands.denied !== 'BLOCKED') return 'LEAKY'; // 清单外的也能跑 = 整片放开
+    }
   }
   return 'VERIFIED';
 }
