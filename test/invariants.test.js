@@ -319,3 +319,14 @@ test('清单：测试不得往 cwd 写文件（交付物会带上它们）', asy
     assert.equal(bareWrite, null, `${f} 往 cwd 写文件：${bareWrite?.[0]}`);
   }
 });
+
+test('清单：超时路径的 fake adapter 契约（不能用"自己声明的 timeout"冒充中止）', async () => {
+  await mustMention('core/room.js', 'const timeoutMs', '硬上限由 runJsonCli 杀进程实现');
+  // 这条不变量在 test/adapter-contract.test.js 里实证过：
+  // 立即返回 reason:'timeout' 的 fake adapter，signal 从未 abort。
+  // 所以任何"验硬上限/中断"的测试必须让 adapter 自己遵守 timeoutMs + signal。
+  const { readdir } = await import('node:fs/promises');
+  const dir = new URL('../test/', import.meta.url);
+  const files = await readdir(dir);
+  assert.ok(files.includes('adapter-contract.test.js'), '必须有这条契约测试守着');
+});
