@@ -677,11 +677,11 @@ export class Room {
       return { ok: false, reason: '当前运行方式不支持动态加成员' };
     }
     try {
-      const added = await this.onMemberCreate(member);
+      const added = await this.onMemberCreate(member, { createdBy, reason });
       this.members.push(added);
       if (added.role === 'leader') this.leaderIds.push(added.id);
-      this.onEvent({
-        type: 'member.created',
+
+      const payload = {
         member: {
           id: added.id, name: added.name, role: added.role,
           backend: added.backend, tier: added.tier,
@@ -689,7 +689,12 @@ export class Room {
         },
         createdBy,
         reason,
-      });
+      };
+
+      // ★ 落盘：事件流里要留痕。光发事件不行——进程重启后事件流就没了，
+      // 而"这个人是谁加的、为什么加"是事后要能查的东西。
+      this.store.append({ kind: 'member.created', ...payload, at: Date.now() }).catch(() => {});
+      this.onEvent({ type: 'member.created', ...payload });
       return { ok: true, member: added };
     } catch (err) {
       return { ok: false, reason: String(err?.message ?? err) };

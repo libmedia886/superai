@@ -94,13 +94,18 @@ export async function buildRoom({ cfg, dataDir = DEFAULT_DATA_DIR, onEvent }) {
     /** 房间级权限天花板：AI 能创建的成员最高档位（人设定，默认只读） */
     aiCabTier: cfg.aiCabTier ?? TIER.READONLY,
     // agent 造人时的落地钩子：建目录 + 写配置，返回带 cwd 的成员
-    onMemberCreate: async (member) => {
+    onMemberCreate: async (member, { createdBy = null, reason = '' } = {}) => {
       const cwd = join(dataDir, 'agents', member.id);
       await mkdir(cwd, { recursive: true });
       cfg.members = cfg.members ?? [];
       cfg.members.push({
         id: member.id, name: member.name, backend: member.backend,
         tier: member.tier, role: member.role, persona: member.persona,
+        // ★ 审计：谁加的、为什么加。不记的话老板回头看名册里莫名多了个人，
+        // 只能查到"lead 加的"，查不到它当时说的理由——那 reason 强制填写就白填了。
+        createdBy,
+        createdReason: reason || null,
+        createdAt: new Date().toISOString(),
       });
       await saveConfig(cfg, dataDir);
       return { ...member, cwd, aliases: [member.name.toLowerCase()] };

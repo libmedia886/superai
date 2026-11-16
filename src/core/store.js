@@ -23,6 +23,7 @@ export class Store {
     this.summaries = new Map(); // agentId -> 最新摘要（轮换后仍可读）
     this.toolLog = [];          // 写操作日志（只追加）
     this.actionLog = [];        // 动作执行结果（只追加）
+    this.membersCreated = [];   // 成员创建记录（谁加的、为什么）
     this._seq = 0;
     this._writeChain = Promise.resolve();
   }
@@ -83,6 +84,12 @@ export class Store {
         this.actionLog.push({
           agentId: ev.agentId, taskId: ev.taskId, label: ev.label,
           ok: ev.ok, reason: ev.reason, detail: ev.detail, at: ev.at,
+        });
+        break;
+      case 'member.created':
+        // 谁加了谁、为什么加——老板回头看名册要知道这个
+        this.membersCreated.push({
+          member: ev.member, createdBy: ev.createdBy, reason: ev.reason, at: ev.at,
         });
         break;
       case 'compact':

@@ -14,9 +14,11 @@
  */
 
 import { startServer } from '../src/server.js';
+import { DEFAULT_DATA_DIR } from '../src/core/config.js';
 import { spawn } from 'node:child_process';
 import { networkInterfaces } from 'node:os';
 import { randomBytes } from 'node:crypto';
+import { join, dirname } from 'node:path';
 
 const args = process.argv.slice(2);
 const portArg = args.indexOf('--port');
@@ -27,12 +29,38 @@ const noOpen = args.includes('--no-open');
 const noToken = args.includes('--no-token');
 
 const exposed = host === '0.0.0.0' || host === '::';
+
 /**
  * 令牌按**绑定地址**决定，不按请求来源。
  * 绑 0.0.0.0 时连 127.0.0.1 也要令牌——否则认证就是漏的
  * （同一台机器上的任何进程都能绕过）。宁可多输一次，不留半吊子状态。
+ *
+ * ★ 令牌**持久化到数据目录**：每次重启换一个的话，发出去的链接就失效了，
+ * 用户每次都得重新要一次——这不是安全，是麻烦。写进文件后重启复用同一个。
  */
-const token = noToken ? null : (exposed ? randomBytes(16).toString('hex') : null);
+async function resolveToken() {
+  if (noToken || !exposed) return null;
+
+  const { mkdir, readFile, writeFile } = await import('node:fs/promises');
+  const tokenPath = join(process.env.MAROOM_DATA || DEFAULT_DATA_DIR, 'access-token');
+
+  try {
+    const saved = (await readFile(tokenPath, 'utf8')).trim();
+    // 只接受看起来正常的令牌，防止文件被写坏后静默用了一个空串
+    if (/^[a-f0-9]{32}$/.test(saved)) return saved;
+  } catch { /* 文件不存在，下面创建 */ }
+
+  const fresh = randomBytes(16).toString('hex');
+  try {
+    await mkdir(dirname(tokenPath), { recursive: true });
+    await writeFile(tokenPath, fresh, { mode: 0o600 });
+  } catch (err) {
+    console.warn(`⚠️  令牌无法保存到 ${tokenPath}（${err.message}），本次令牌重启后会变。`);
+  }
+  return fresh;
+}
+
+const token = await resolveToken();
 
 const { url, port: actualPort } = await startServer({ port, host, token });
 
@@ -66,7 +94,16 @@ if (exposed) {
 } else {
   console.log('如需从其他设备访问，加 --host 0.0.0.0（会自动生成访问令牌）');
 }
+console.log('');
 console.log('按 Ctrl+C 停止。数据保存在 ~/.multiagent-chat（可用 MAROOM_DATA 覆盖）');
+// 网页打不开时最可能的原因是"这个终端关了/进程没了"。
+// 用户看到的第一反应应该是"重跑这条命令"，而不是怀疑软件坏了。
+console.log('');
+console.log(`💡 如果网页打不开了，重新运行这条命令即可：`);
+console.log(`   node bin/serve.mjs${process.argv.slice(2).filter((a) => a !== '--no-open').join(' ').replace(/^/, ' ')}`);
+if (token) {
+  console.log('   访问令牌已保存，重启后链接不变。');
+}
 
 if (!noOpen) openBrowser(url);
 
