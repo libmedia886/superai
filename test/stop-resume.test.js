@@ -144,3 +144,52 @@ test('★ drain 重入：停止后人在 turn 收尾期间说话也不会丢消�
   assert.equal(room.queue.length, 0, '第二条消息不能被晾在队列里');
   assert.equal(calls, 2, '恢复后应该跑第二轮');
 });
+
+test('★ 停止与打断必须落盘（CR-036：事后要能查"谁停的、打断了谁"）', async () => {
+  const { room, store } = await makeRoom();
+
+  room.stop();
+  await store.flush();
+
+  const stopped = store.controlLog.find((c) => c.action === 'stop');
+  assert.ok(stopped, '停止要落一条 control 事件');
+  assert.equal(stopped.who, 'human');
+
+  // 打断一条正在跑的轮次
+  const dir = await mkdtemp(join(tmpdir(), 'ctl-'));
+  const s2 = new Store(join(dir, 'room.jsonl'));
+  await s2.load();
+  const { Room } = await import('../src/core/room.js');
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const r2 = new Room({
+    id: 'r', name: 't',
+    members: [{ id: 'a', name: 'a', role: 'leader', backend: 'claude', tier: 'readonly', cwd: dir, aliases: ['a'] }],
+    store: s2,
+    resolveAdapter: () => ({
+      async run({ signal }) {
+        await Promise.race([gate, new Promise((res) => signal?.addEventListener('abort', res, { once: true }))]);
+        return { text: '', reason: 'interrupted' };
+      },
+    }),
+    onEvent: () => {},
+  });
+  await r2.humanSay('@a 干活');
+  const draining = r2.drain();
+  await new Promise((res) => setTimeout(res, 30));
+  r2.interrupt();
+  release();
+  await draining;
+  await s2.flush();
+
+  const interrupted = s2.controlLog.find((c) => c.action === 'interrupt');
+  assert.ok(interrupted, '打断也要落盘，否则只能看到 status:"已中断"，查不到是谁');
+  assert.equal(interrupted.agentId, 'a');
+});
+
+test('打断时没有在跑的一轮 → 不落空事件（不制造噪音）', async () => {
+  const { room, store } = await makeRoom();
+  assert.equal(room.interrupt(), false);
+  await store.flush();
+  assert.equal(store.controlLog.filter((c) => c.action === 'interrupt').length, 0);
+});

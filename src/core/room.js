@@ -45,6 +45,22 @@ function classifyTool(name) {
  * 判据刻意收紧：只认空内容或明确的标记词。不能按"短"来判断——
  * 「好」「收到」是正常回复，把它们记成"未回应"会让老板以为它没理人。
  */
+/**
+ * 停顿原因的优先级：高的不能被低的覆盖。
+ * 真实故障（超时/出错/被刹住）永远压过"没点名下一位"这类常规收尾。
+ */
+export const PAUSE_PRIORITY = {
+  no_target: 1,
+  only_human: 1,
+  summary: 1,
+  overreach: 2,
+  continue_cap: 2,
+  error: 3,
+  timeout: 3,
+  breaker: 3,
+  stopped: 4,
+};
+
 /** 停顿原因 → 人话。状态栏直接显示这个，不要让人猜。 */
 /** 默认单轮硬上限：20 分钟。看门狗负责"死了"，这里只防"无限跑" */
 export const DEFAULT_TURN_TIMEOUT_MS = 20 * 60_000;
@@ -336,8 +352,23 @@ export class Room {
   /** 立即打断当前发言人：杀进程，保留已输出；队列继续（P0 #7） */
   interrupt() {
     if (!this.current) return false;
+    const agentId = this.current.agentId;
     this.current.abort?.();
-    this.onEvent({ type: 'interrupted', agentId: this.current.agentId });
+    /**
+     * 落盘（CR-036）。
+     *
+     * 原来只发 SSE：事后翻 room.jsonl 只能看到某轮 status:"已中断"，
+     * 查不到是谁、因为什么中止的——「系统做了事、事后查不到」。
+     * 人工干预必须是可追责的动作，所以记一条 control 事件。
+     */
+    this.store.append({
+      kind: 'control',
+      action: 'interrupt',
+      who: 'human',
+      agentId,
+      at: Date.now(),
+    }).catch(() => {});
+    this.onEvent({ type: 'interrupted', agentId });
     return true;
   }
 
@@ -381,6 +412,15 @@ export class Room {
     this._pendingContinue = null;
     if (this.current) this.current.abort?.();
     this._pause('stopped', '房间已停止');
+    // 落盘（CR-036）：事后要能回答"谁在什么时候停了房间、丢了几条"
+    this.store.append({
+      kind: 'control',
+      action: 'stop',
+      who: 'human',
+      dropped,
+      interrupted: wasRunning,
+      at: Date.now(),
+    }).catch(() => {});
     this.onEvent({
       type: 'stopped',
       dropped,
@@ -521,6 +561,27 @@ export class Room {
    * @param {'no_target'|'overreach'|'only_human'|'continue_cap'|'breaker'|'stopped'|'summary'|'error'} reason
    */
   _pause(reason, detail = '') {
+    /**
+     * 原因有优先级：低优先级不能覆盖高优先级的理由。
+     *
+     * 事故（CR-035，管理方在 13:47:45 那条记录上抓到的）：
+     * 同一秒既有 `failure reason:"failed"`（282 秒、16 次工具调用），
+     * 又有 `pausedReason{reason:"no_target", detail:"说完了，没有点名下一位"}`。
+     * 也就是说：它明明失败了，界面却告诉用户"它说完了"。
+     *
+     * 真实失败的原因必须压得住"没点名下一位"这种常规收尾理由。
+     * 反过来，同一轮里先 no_target 再 timeout（比如先停住又被判超时）要能覆盖。
+     */
+    const prev = this.pauseReason;
+    if (prev && (PAUSE_PRIORITY[prev.reason] ?? 0) > (PAUSE_PRIORITY[reason] ?? 0)) {
+      this.onEvent({
+        type: 'notice',
+        level: 'info',
+        text: `（不再显示"${PAUSE_LABEL[reason] ?? reason}"：本轮的真正原因是「${PAUSE_LABEL[prev.reason] ?? prev.reason}」）`,
+      });
+      this.waitingForHuman = true;
+      return prev;
+    }
     this.waitingForHuman = true;
     this.pauseReason = { reason, detail: String(detail ?? ''), at: new Date().toISOString() };
     this.onEvent({ type: 'room.paused', reason, detail: this.pauseReason.detail });
@@ -1046,8 +1107,28 @@ export class Room {
         + '。它可能正在干活——看门狗没有判它卡死，是硬上限到了。');
     }
 
+    /**
+     * 失败的一轮不进接力。
+     *
+     * CR-035：失败不是 aborted，所以原来照样走接力，然后被
+     * `_pause('no_target')` 覆盖成"说完了"。用户看到的是"它聊完了"，
+     * 实际是"它 282 秒、16 次工具调用之后失败了"。
+     *
+     * 失败时也不该把话往下传：它没产出可交接的内容。
+     */
+    const failedTurn = !aborted
+      && adapterResult?.reason !== EXIT.COMPLETED
+      && adapterResult?.reason !== 'interrupted';
+
+    if (failedTurn && !job.passive) {
+      // 失败也要有原因，且这个原因优先级高于任何"没点名下一位"
+      this._pause('error', `${agent.name} 本轮失败（${adapterResult?.reason ?? 'unknown'}）`
+        + `，耗时 ${Math.round(durationMs / 1000)} 秒、工具调用 ${rowToolsInTurn} 次。`
+        + '没有产出可交接的内容，所以没有把话往下传。');
+    }
+
     // 5) 接力：解析它 @ 了谁
-    if (!aborted) {
+    if (!aborted && !failedTurn) {
       const { targets, unknown } = parseMentions(displayBody, { members: this.members }, agent.id);
       const { allowed, overreach } = applyMentionPolicy({
         targets,

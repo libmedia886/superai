@@ -281,3 +281,86 @@ test('★ task.update 改派给别人 → 新人被叫起来；改成完成 → 
   assert.ok(!e2.some((e) => e.type === 'task.dispatched'), '完成的任务不该再叫人');
   assert.equal(s2.tasks.get('T-002').status, '完成', '同义词归一化后落库');
 });
+
+/* ---------------- CR-035：失败轮次不能被"说完了"覆盖 ---------------- */
+
+test('★ 失败的一轮不进接力，且原因压得住 no_target（CR-035 事故回归）', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'cr035-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+  const events = [];
+
+  const room = new Room({
+    id: 'r', name: '测试',
+    members: [
+      { id: 'lead', name: 'lead', role: 'leader', backend: 'claude', tier: 'readonly', cwd: dir, aliases: ['lead'] },
+      { id: 'm', name: 'm', role: 'member', backend: 'claude', tier: 'readonly', cwd: dir, aliases: ['m'] },
+    ],
+    store,
+    resolveAdapter: () => ({
+      async run({ onEvent }) {
+        onEvent?.({ type: 'meta', sessionId: 's' });
+        // 失败：没有产出、reason 是 failed（不是 timeout，也不是 aborted）
+        return { text: '', sessionId: 's', reason: 'failed', usage: null };
+      },
+    }),
+    onEvent: (e) => events.push(e),
+  });
+  room.maxRetries = 0;
+
+  await room.humanSay('@m 干活');
+  await room.drain();
+
+  assert.equal(room.pauseReason?.reason, 'error',
+    '失败必须显示成失败，不能被覆盖成"说完了，没点名下一位"');
+  assert.match(room.pauseReason.detail, /失败/);
+  assert.ok(!events.some((e) => e.type === 'room.paused' && e.reason === 'no_target'),
+    '不能再发出 no_target 的暂停事件');
+});
+
+test('★ 失败轮次不把话传给下一位（它没有可交接的产出）', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'cr035b-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+  const calls = [];
+  const room = new Room({
+    id: 'r', name: '测试',
+    members: [
+      { id: 'a', name: 'a', role: 'member', backend: 'claude', tier: 'readonly', cwd: dir, aliases: ['a'] },
+      { id: 'lead', name: 'lead', role: 'leader', backend: 'claude', tier: 'readonly', cwd: dir, aliases: ['lead'] },
+    ],
+    store,
+    resolveAdapter: (agent) => ({
+      async run({ onEvent }) {
+        calls.push(agent.id);
+        onEvent?.({ type: 'meta', sessionId: 's' });
+        return { text: '', sessionId: 's', reason: 'failed', usage: null };
+      },
+    }),
+    onEvent: () => {},
+  });
+  room.maxRetries = 0;
+
+  await room.humanSay('@a 干活');
+  await room.drain();
+  assert.deepEqual(calls, ['a'], '失败之后不该自动叫头头');
+  assert.equal(room.queue.length, 0);
+});
+
+test('优先级：timeout 压得住后到的 no_target，但 stopped 压得住 timeout', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'prio-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+  const room = new Room({ id: 'r', name: 't', members: [], store, resolveAdapter: () => ({}), onEvent: () => {} });
+
+  room._pause('timeout', '跑满 20 分钟');
+  room._pause('no_target', '说完了');
+  assert.equal(room.pauseReason.reason, 'timeout', '低优先级不能覆盖高优先级');
+
+  room._pause('stopped', '你点了停止');
+  assert.equal(room.pauseReason.reason, 'stopped', '停止是最高优先级');
+
+  room._clearPause();
+  room._pause('no_target', '说完了');
+  assert.equal(room.pauseReason.reason, 'no_target', '清空后低优先级仍可正常使用');
+});

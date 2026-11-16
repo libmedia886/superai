@@ -25,6 +25,7 @@ export class Store {
     this.actionLog = [];        // 动作执行结果（只追加）
     this.membersCreated = [];   // 成员创建记录（谁加的、为什么）
     this.memberAudit = [];      // 成员变更/删除（before → after），事后追责用
+    this.controlLog = [];       // 人的干预（停止/打断）：谁、何时、丢了几条
     this.loopWarnings = [];     // 循环护栏警告（事后复盘用）
     this._seq = 0;
     this._writeChain = Promise.resolve();
@@ -118,6 +119,13 @@ export class Store {
         // 谁加了谁、为什么加——老板回头看名册要知道这个
         this.membersCreated.push({
           member: ev.member, createdBy: ev.createdBy, reason: ev.reason, at: ev.at,
+        });
+        break;
+      case 'control':
+        // 人工干预必须可追责：事后翻 jsonl 要能回答"谁停的、打断了谁"
+        this.controlLog.push({
+          action: ev.action, who: ev.who ?? 'human', agentId: ev.agentId ?? null,
+          dropped: ev.dropped ?? 0, interrupted: Boolean(ev.interrupted), at: ev.at,
         });
         break;
       case 'member.updated':
