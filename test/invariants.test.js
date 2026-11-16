@@ -233,3 +233,10 @@ test('清单：seq 撞号要能被告知（历史不回写，但必须让人知�
   await mustMention('core/export.js', 'seqWarning', '导出件会被别人拿去对账');
   await mustMention('server.js', 'seqUnique === false', '启动时要在界面说一句');
 });
+
+test('清单：暂停原因跨轮作废 + 停因按看门狗/硬上限分流', async () => {
+  await mustMention('core/room.js', '看门狗判定卡死', 'stalled 的文案不能写"跑满 N 秒"');
+  await mustMention('core/room.js', '多半是空转', '0 次工具调用时不能说"可能正在干活"');
+  await mustMention('core/room.js', '新一轮开始 = 上一轮的理由作废', '优先级只该在同一轮内比较');
+  await mustMention('server.js', 'seqWarning', 'seq 警告必须进 room.init，不能只发一次性 notice');
+});

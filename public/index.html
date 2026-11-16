@@ -108,6 +108,13 @@
       </div>
     </header>
 
+    <!-- seq 撞号提示：常驻，刷新后按实际状态重现（不是一次性 notice） -->
+    <div id="seq-warn" class="seq-warn hidden">
+      <span class="seq-warn-icon">⚠️</span>
+      <span id="seq-warn-text"></span>
+      <button id="seq-warn-hide" class="seq-warn-hide" title="本次会话内隐藏">×</button>
+    </div>
+
     <div id="stream" class="stream" aria-live="polite"></div>
 
     <footer class="composer">

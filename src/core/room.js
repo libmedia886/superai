@@ -910,6 +910,17 @@ export class Room {
       prompt += lines.join('\n');
     }
 
+    /**
+     * ★ 新一轮开始 = 上一轮的理由作废。
+     *
+     * `PAUSE_PRIORITY` 的用途是"同一轮内部别被低优先级覆盖"，
+     * 但它原来跨轮也比较：一条 timeout 挂上去后，后面每轮正常收尾的
+     * `no_target` 都被静默拒收 → 界面永久挂着一条已被事实推翻的理由。
+     *
+     * 实测（管理方 10:17）：零产出重试成功、房间正常收尾，
+     * /api/health 仍显示那条假 timeout。所以这里必须清。
+     */
+    this._clearPause();
     this.onEvent({ type: 'turn.start', agentId: agent.id, pending: this.queue.length });
 
     let aborted = false;
@@ -1219,16 +1230,45 @@ export class Room {
           attempt: capContinues + 1,
           max: MAX_CAP_CONTINUES,
           toolCalls: rowToolsInTurn,
-          text: `${agent.name} 跑满 ${Math.round(timeoutMs / 1000)} 秒（本轮 ${rowToolsInTurn} 次工具调用），`
-            + `正在干活，自动接着做（第 ${capContinues + 1}/${MAX_CAP_CONTINUES} 次）`,
+          // 用 durationMs（实际跑了多久），不是 timeoutMs（配置的上限）
+          text: `${agent.name} 跑满上限（实际 ${Math.round(durationMs / 1000)} 秒，`
+            + `本轮 ${rowToolsInTurn} 次工具调用），正在干活，自动接着做`
+            + `（第 ${capContinues + 1}/${MAX_CAP_CONTINUES} 次）`,
         });
       } else {
-        this._pause('timeout',
-          `${agent.name} 跑满 ${Math.round(timeoutMs / 1000)} 秒被中止`
-          + `（本轮有 ${rowToolsInTurn} 次工具调用）`
-          + (rowToolsInTurn > 0 && capContinues >= MAX_CAP_CONTINUES
-            ? `。已自动续做 ${MAX_CAP_CONTINUES} 次仍未收尾，不再自动续——请确认它是不是在原地打转。`
-            : '。它可能正在干活——看门狗没有判它卡死，是硬上限到了。'));
+        /**
+         * ★ 停因必须说真话（管理方在 09:56:13 那条记录上抓到三句假话）。
+         *
+         * 真实事件：`stalled:true, durationMs:112584, toolCalls:0`，而文案写的是
+         * 「跑满 1800 秒…看门狗没有判它卡死…它可能正在干活」——三句全反：
+         *   - 1800 是**配置的上限**，实际跑了 112.6 秒；能说"跑了多久"的只有 durationMs
+         *   - `stalled:true` 恰恰就是看门狗判的（它把 reason 设成 TIMEOUT，于是走到这里）
+         *   - 本轮 0 次工具调用、零输出，最可能是空转，不该说"可能正在干活"
+         *
+         * 停因说错比不说明更糟：一整天在修"停下却不说明原因"，
+         * 结果说明本身是假的，用户会按错的方向去处理。
+         */
+        const secs = Math.max(1, Math.round(durationMs / 1000));
+        const toolPart = `本轮 ${rowToolsInTurn} 次工具调用`;
+        let detail;
+        if (stalledOut) {
+          detail = `${agent.name} 静默 ${Math.round(stallThreshold(timeoutMs) / 1000)} 秒，`
+            + `被看门狗判定卡死（耗时 ${secs} 秒，${toolPart}）。`
+            + (rowToolsInTurn > 0
+              ? '它跑过工具，结果都还在会话里——点「接着做完」可以继续。'
+              : '本轮没有任何工具调用、也没有输出，多半是空转了。');
+        } else if (capContinues >= MAX_CAP_CONTINUES) {
+          detail = `${agent.name} 跑满上限 ${Math.round(timeoutMs / 1000)} 秒被中止`
+            + `（耗时 ${secs} 秒，${toolPart}）。已自动续做 ${MAX_CAP_CONTINUES} 次仍未收尾，`
+            + '不再自动续——请确认它是不是在原地打转。';
+        } else if (rowToolsInTurn > 0) {
+          detail = `${agent.name} 跑满上限 ${Math.round(timeoutMs / 1000)} 秒被中止`
+            + `（耗时 ${secs} 秒，${toolPart}）。它确实在干活，但这一轮没能在上限内收尾。`;
+        } else {
+          detail = `${agent.name} 跑满上限 ${Math.round(timeoutMs / 1000)} 秒被中止`
+            + `（耗时 ${secs} 秒，${toolPart}）。没有任何工具调用、也没有输出，多半是空转。`;
+        }
+        this._pause('timeout', detail);
       }
     }
 

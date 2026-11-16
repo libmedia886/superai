@@ -496,3 +496,83 @@ test('★ 撞上限续做的那一轮，prompt 里要说明"这不是失败，�
   assert.match(prompts[1], /不是你的错|不是失败/, '要说清这不是失败');
   assert.match(prompts[1], /不要把?已完成|不要重写|从断掉的地方/, '要告诉它别重头再来');
 });
+
+/* ---------------- 管理方 18:12 要求的两条 ---------------- */
+
+test('★ 被看门狗判死时的文案不能写"跑满 N 秒"（三句假话的事故）', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'stalltext-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+  const events = [];
+
+  const room = new Room({
+    id: 'r', name: '测试',
+    members: [{ id: 'a', name: 'a', role: 'leader', backend: 'claude', tier: 'readonly', cwd: dir, aliases: ['a'] }],
+    store,
+    resolveAdapter: () => ({
+      async run({ onEvent, signal }) {
+        onEvent?.({ type: 'meta', sessionId: 's' });
+        // 零输出、零工具调用，等到被看门狗/中止
+        await new Promise((res) => signal?.addEventListener('abort', res, { once: true }));
+        return { text: '', sessionId: 's', reason: 'timeout' };
+      },
+    }),
+    onEvent: (e) => events.push(e),
+  });
+  room.maxRetries = 0;
+  room.turnTimeoutMs = 4_000;
+
+  await room.humanSay('@a 干个没输出的活');
+  const draining = room.drain();
+  await new Promise((r) => setTimeout(r, 120));
+  room.stop();       // 人为中止，走 aborted 分支
+  await draining;
+
+  const paused = events.find((e) => e.type === 'room.paused');
+  assert.ok(paused);
+  // 被打断（人为）时说"被中途打断"，不该说"跑满 N 秒"
+  assert.doesNotMatch(paused.detail ?? '', /跑满 \d+ 秒/, `不该声称跑满上限：${paused.detail}`);
+});
+
+test('★ 看门狗判死的分支：文案要说是"静默…判定卡死"，不是"跑满上限"', async () => {
+  const { Room } = await import('../src/core/room.js');
+  const src = Room.prototype._runTurn.toString();
+  // 实现层面的保证：stalledOut 与硬上限走不同文案
+  assert.match(src, /stalledOut/, '必须按 stalledOut 分流');
+  assert.match(src, /看门狗判定卡死/);
+  assert.match(src, /多半是空转|没有任何工具调用/, '0 次工具调用时不能说"它可能正在干活"');
+});
+
+test('★ 新一轮开始要清掉上一轮的暂停原因（跨轮不能比优先级）', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'clearpause-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+  let round = 0;
+
+  const room = new Room({
+    id: 'r', name: '测试',
+    members: [{ id: 'a', name: 'a', role: 'leader', backend: 'claude', tier: 'readonly', cwd: dir, aliases: ['a'] }],
+    store,
+    resolveAdapter: () => ({
+      async run({ onEvent }) {
+        round += 1;
+        onEvent?.({ type: 'meta', sessionId: 's' });
+        if (round === 1) return { text: '', sessionId: 's', reason: 'timeout', usage: null };
+        onEvent?.({ type: 'text', text: '好了', done: false });
+        return { text: '好了', sessionId: 's', reason: 'completed', usage: null };
+      },
+    }),
+    onEvent: () => {},
+  });
+  room.maxRetries = 0;
+
+  await room.humanSay('@a 第一轮');
+  await room.drain();
+  assert.equal(room.pauseReason?.reason, 'timeout', '第一轮留下 timeout');
+
+  await room.humanSay('@a 第二轮');
+  await room.drain();
+
+  assert.notEqual(room.pauseReason?.reason, 'timeout',
+    'timeout 已被事实推翻（第二轮成功了），不能因为优先级高就永久挂着');
+});

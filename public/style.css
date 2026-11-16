@@ -941,3 +941,16 @@ a.btn { text-decoration: none; display: flex; align-items: center; }
   font-size: 11px;
   white-space: nowrap;
 }
+
+/* seq 撞号提示：常驻在消息流上方，可收起。琥珀色——这是记录问题，不是故障。 */
+.seq-warn {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 24px; padding: 8px 12px;
+  border: 1px solid var(--warn); border-radius: 8px;
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--warn); font-size: 12px;
+}
+.seq-warn-hide {
+  margin-left: auto; background: none; border: none; cursor: pointer;
+  color: var(--warn); font-size: 15px; line-height: 1; padding: 0 4px;
+}

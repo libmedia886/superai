@@ -567,6 +567,9 @@ function resetRoomView() {
   // 否则新房间会顶着上一个房间的红色「已停止」——和"刷新后徽章撒谎"同一类 bug。
   state.stopped = false;
   state.paused = null;
+  // 换房间要重新判断：新房间可能没有这个问题（也可能是另一个）
+  seqWarningDismissed = false;
+  $('seq-warn')?.classList.add('hidden');
   $('stream').innerHTML = '';
   $('loop-warn').classList.add('hidden');
   $('btn-stop').classList.remove('urgent');
@@ -848,6 +851,7 @@ function handle(ev) {
       setOverridden(Boolean(ev.overridden));
       state.stopped = Boolean(ev.stopped);
       state.paused = ev.paused ?? null;
+      renderSeqWarning(ev.seqWarning ?? null);
       state.headPassiveWake = ev.headPassiveWake !== false;
       $('passive-wake').checked = state.headPassiveWake;
       if (ev.turnTimeoutMinutes != null) $('room-timeout').value = ev.turnTimeoutMinutes;
@@ -1388,6 +1392,29 @@ function autoGrow(el) {
   el.style.height = 'auto';
   el.style.height = Math.min(el.scrollHeight, 200) + 'px';
 }
+
+/**
+ * seq 撞号提示。
+ *
+ * 不能只在启动时弹一次 notice：启动时没人在线、或者用户刷新一次，提示就没了，
+ * 而导出件里却写着"别用 seq 对账"——两边对不上。所以它跟着 room.init 走，
+ * 常驻显示，可以手动收起（本次会话内）。
+ */
+let seqWarningDismissed = false;
+function renderSeqWarning(warning) {
+  const el = $('seq-warn');
+  if (!warning || seqWarningDismissed) {
+    el.classList.add('hidden');
+    return;
+  }
+  $('seq-warn-text').textContent = warning.text ?? '本房间历史事件的 seq 有重复，回溯请以行序与时间为准。';
+  el.classList.remove('hidden');
+}
+
+$('seq-warn-hide').onclick = () => {
+  seqWarningDismissed = true;
+  $('seq-warn').classList.add('hidden');
+};
 
 /**
  * 任务卡「账不平」标记：说明里写着阻塞、状态仍是「待办」。

@@ -149,7 +149,8 @@ export async function startServer({
         singleFallback: rooms.singleFallback,
         members: [], history: [], tasks: [], roster: [], registry: [], toolLog: [],
         aiCabTier: 'readonly', maxMembers: 8, overridden: false, stopped: false,
-        headPassiveWake: true, paused: null, turnTimeoutMinutes: 20, maxCapContinues: MAX_CAP_CONTINUES,
+        headPassiveWake: true, paused: null, turnTimeoutMinutes: 20,
+        maxCapContinues: MAX_CAP_CONTINUES, seqWarning: null,
       };
     }
     return {
@@ -174,6 +175,19 @@ export async function startServer({
       headPassiveWake: room.headPassiveWake !== false,
       turnTimeoutMinutes: Math.round((room.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS) / 60_000),
       maxCapContinues: MAX_CAP_CONTINUES,
+      /**
+       * seq 撞号状态必须进 room.init，不能只发一次 notice。
+       * 与「接管徽章刷新后消失」同一个毛病：一次性事件在没人连着的时候等于没发。
+       */
+      seqWarning: store?.seqUnique === false
+        ? {
+          duplicates: store.seqDuplicates,
+          since: '2026-11-16',
+          text: `本房间有 ${store.seqDuplicates} 条事件的 seq 与更早事件重复`
+            + '（2026-11-16 之前重启会重置计数）。新事件已保证唯一；'
+            + '回溯历史请以文件行序与 at 为准，不要用 seq 做 join。',
+        }
+        : null,
       // 有被中断的轮次时，界面要把「继续」显示成「接着做完」
       resumeTarget: room.resumeTarget ? { ...room.resumeTarget } : null,
       // 停顿原因必须随状态一起下发：刷新后"为什么停着"不能变成一个谜
