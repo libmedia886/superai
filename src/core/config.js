@@ -79,7 +79,20 @@ export async function buildRoom({ cfg, dataDir = DEFAULT_DATA_DIR, onEvent }) {
       tier = TIER.READONLY;
     }
 
-    members.push({ ...m, tier, cwd, aliases: [m.name.toLowerCase()] });
+    /**
+     * ★ 恢复上次的会话 id。
+     *
+     * `store.saveSession()` 一直在往 room.jsonl 写 `session` 事件，但以前从来没人读回来：
+     * 重启或切换房间后每个 agent 都拿不到 sessionId，于是**从头开始**——
+     * 界面上看不出任何异常，只是它忘了之前所有事。切房间会新建 Room，同样中招。
+     *
+     * cwd 必须一致。claude/codex 用错误的 cwd resume 会**挂住不报错**
+     * （实测 60 秒超时才被杀），所以宁可开新会话也不要冒险接。
+     */
+    const savedSession = store.sessions.get(m.id);
+    const sessionId = savedSession && savedSession.cwd === cwd ? savedSession.sessionId : null;
+
+    members.push({ ...m, tier, cwd, sessionId, aliases: [m.name.toLowerCase()] });
   }
 
   const adapters = new Map();
