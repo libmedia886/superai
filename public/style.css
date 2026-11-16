@@ -929,3 +929,15 @@ a.btn { text-decoration: none; display: flex; align-items: center; }
   border: 1px dashed var(--warn); border-radius: 999px;
   padding: 0 7px; margin-top: 4px; display: inline-block;
 }
+
+/* 任务卡「账不平」标记：说明里写着阻塞、状态仍是待办。
+   不做成红色错误，是因为它多数是记录不一致，不是系统故障。 */
+.task-warn {
+  margin-left: 6px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: #fff4e5;
+  color: #b26a00;
+  font-size: 11px;
+  white-space: nowrap;
+}

@@ -462,3 +462,37 @@ test('★ 被打断的轮次必须留下原因（不能显示成"等待人类"�
   assert.equal(room.pauseReason?.reason, 'interrupted',
     '打断后不能是 null/等待人类，否则用户不知道这轮被打断了');
 });
+
+test('★ 撞上限续做的那一轮，prompt 里要说明"这不是失败，接着做"', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'capcont3-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+  const prompts = [];
+  let round = 0;
+
+  const room = new Room({
+    id: 'r', name: '测试',
+    members: [{ id: 'a', name: 'a', role: 'leader', backend: 'claude', tier: 'readonly', cwd: dir, aliases: ['a'] }],
+    store,
+    resolveAdapter: () => ({
+      async run({ onEvent, prompt }) {
+        round += 1;
+        prompts.push(prompt);
+        onEvent?.({ type: 'meta', sessionId: 's' });
+        onEvent?.({ type: 'tool', tool: 'Bash', command: 'curl' });
+        if (round === 1) return { text: '', sessionId: 's', reason: 'timeout', usage: null };
+        onEvent?.({ type: 'text', text: '做完了', done: false });
+        return { text: '做完了', sessionId: 's', reason: 'completed', usage: null };
+      },
+    }),
+    onEvent: () => {},
+  });
+
+  await room.humanSay('@a 取证');
+  await room.drain();
+
+  assert.equal(round, 2);
+  assert.match(prompts[1], /被系统中止/);
+  assert.match(prompts[1], /不是你的错|不是失败/, '要说清这不是失败');
+  assert.match(prompts[1], /不要把?已完成|不要重写|从断掉的地方/, '要告诉它别重头再来');
+});

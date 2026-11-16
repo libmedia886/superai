@@ -187,3 +187,10 @@ test('清单：被拒的动作要跨轮重现，且不许写成已完成（16:27
   await mustMention('core/prompt.js', '未完成清单', '每轮 prompt 都要重现');
   await mustMention('core/actions.js', 'targetId', '校验失败也要带上"想改哪个对象"');
 });
+
+test('清单：任务卡「账不平」提示（记录不一致不能看起来一致）', async () => {
+  const ui = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.ok(ui.includes('taskLooksStuck'), 'frontend 要有"账不平"判据');
+  const css = await readFile(new URL('../public/style.css', import.meta.url), 'utf8');
+  assert.ok(css.includes('.task-warn'), '要有对应样式（不用红色：这是记录不一致，不是故障）');
+});

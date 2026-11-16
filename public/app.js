@@ -271,6 +271,7 @@ function renderBoard() {
         <div class="task-title">${escapeHtml(t.title)}</div>
         <div class="task-meta">
           <span>${t.assignee ? '@' + escapeHtml(nameOf(t.assignee)) : '未指派'}</span>
+          ${taskLooksStuck(t) ? '<span class="task-warn" title="说明里写着阻塞，但状态仍是待办——账不平，点开核对">⚠️ 账不平</span>' : ''}
         </div>`;
       card.onclick = () => openTask(t.id);
       col.appendChild(card);
@@ -1380,6 +1381,20 @@ async function send() {
 function autoGrow(el) {
   el.style.height = 'auto';
   el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+}
+
+/**
+ * 任务卡「账不平」标记：说明里写着阻塞、状态仍是「待办」。
+ *
+ * 这是给"报告说改了、板上没改"这类不一致做的**可见提示**。
+ * 根因修复在服务端（未成功动作必须跨轮重现），但界面也不能让这种账
+ * 平白无故地看起来一致 —— 那才是最容易被当成"系统说一切正常"的形态。
+ *
+ * 判据刻意保守：只认明确的阻塞词，避免把普通备注误标成异常。
+ */
+function taskLooksStuck(t) {
+  const note = String(t.note ?? '');
+  return t.status === '待办' && /阻塞|需外部渠道|等外部/.test(note);
 }
 
 /* ---------------- 任务抽屉 ---------------- */
