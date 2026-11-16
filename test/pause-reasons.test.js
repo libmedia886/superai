@@ -705,3 +705,123 @@ test('★ 纯空转（0 工具 0 输出）不设 resumeTarget —— 没有可�
   assert.doesNotMatch(room.pauseReason?.detail ?? '', /接着做完|接着写/,
     '没有可续的东西就不该让用户去点');
 });
+
+/* ---------------- 双入队守卫（INBOX 欠了 5 轮的行为测试） ---------------- */
+
+/**
+ * `capAutoContinued ? {retry:false} : retryDecision(...)` 是"同一轮被入队两次、
+ * 白跑一轮"的唯一防线。之前只有 `invariants.test.js` 的文本检查——
+ * 那只能证明"这行代码还在"，不能证明"它真的挡住了"。
+ *
+ * 这里构造两条路径**同时成立**的场景：
+ *   - 撞上限续做：非 stalled、有工具调用、未到 MAX_CAP_CONTINUES
+ *   - 失败重试：readonly 档 + timeout + 未到 maxAttempts
+ * 然后断言：队列只多 1 条、第二轮只跑 1 次。
+ */
+test('★ 双入队守卫：撞上限续做与失败重试同时成立时，只入队 1 次', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'double-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+  const runs = [];
+
+  const room = new Room({
+    id: 'r', name: '测试',
+    // readonly 档：retryDecision 本来会允许 timeout 重试
+    members: [{ id: 'a', name: 'a', role: 'leader', backend: 'claude', tier: 'readonly', cwd: dir, aliases: ['a'] }],
+    store,
+    resolveAdapter: () => ({
+      async run({ onEvent }) {
+        runs.push(1);
+        onEvent?.({ type: 'meta', sessionId: 's' });
+        // 有工具调用 → 满足"撞上限续做"；非 stalled → canContinue 成立
+        onEvent?.({ type: 'tool', tool: 'Bash', command: 'curl' });
+        if (runs.length === 1) return { text: '', sessionId: 's', reason: 'timeout', usage: null };
+        onEvent?.({ type: 'text', text: '做完了', done: false });
+        return { text: '做完了', sessionId: 's', reason: 'completed', usage: null };
+      },
+    }),
+    onEvent: () => {},
+  });
+  room.maxRetries = 2;   // 确保"失败重试"那条路也成立
+
+  await room.humanSay('@a 取证');
+  await room.drain();
+
+  assert.equal(runs.length, 2,
+    `第一轮超时后只应该续做一次、共 2 轮；实际跑了 ${runs.length} 轮（>2 说明被双入队）`);
+  // 队列在 drain 结束时应当空
+  assert.equal(room.queue.length, 0);
+});
+
+test('★ 双入队守卫：续做那一轮若又撞上限，仍只各入队 1 次', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'double2-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+  const runs = [];
+  const events = [];
+
+  const room = new Room({
+    id: 'r', name: '测试',
+    members: [{ id: 'a', name: 'a', role: 'leader', backend: 'claude', tier: 'readonly', cwd: dir, aliases: ['a'] }],
+    store,
+    resolveAdapter: () => ({
+      async run({ onEvent }) {
+        runs.push(1);
+        onEvent?.({ type: 'meta', sessionId: 's' });
+        onEvent?.({ type: 'tool', tool: 'Bash', command: 'curl' });
+        // 每一轮都超时，直到 MAX_CAP_CONTINUES 用完
+        return { text: '', sessionId: 's', reason: 'timeout', usage: null };
+      },
+    }),
+    onEvent: (e) => events.push(e),
+  });
+  room.maxRetries = 2;
+
+  await room.humanSay('@a 一直取证');
+  await room.drain();
+
+  // MAX_CAP_CONTINUES = 2 → 首轮 + 2 次续做 = 3 轮，之后停止
+  const { MAX_CAP_CONTINUES } = await import('../src/core/room.js');
+  assert.equal(runs.length, MAX_CAP_CONTINUES + 1,
+    `应该是首轮 + ${MAX_CAP_CONTINUES} 次续做；实际 ${runs.length} 轮`);
+  // 每一轮都只续做一次：cap.continue 事件条数 == 上限，不能多
+  const continues = events.filter((e) => e.type === 'cap.continue');
+  assert.equal(continues.length, MAX_CAP_CONTINUES,
+    `每次续做只该发一条 cap.continue；实际 ${continues.length} 条（>上限说明双入队）`);
+  assert.deepEqual(continues.map((e) => e.attempt), [1, 2], '续做次数要递增，不能重复');
+  assert.ok(room.pauseReason, '续做用完应当停下并说明原因');
+  // 停下的原因可能是 timeout 也可能是 breaker（连续失败同样成立）——
+  // 两者都是真话，重点是不能停在一个"没事发生"的原因上。
+  assert.ok(['timeout', 'breaker'].includes(room.pauseReason.reason),
+    `实际停因：${room.pauseReason.reason}`);
+});
+
+test('★ 双入队守卫：只有失败重试那一条成立时，正常走重试', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'single-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+  const runs = [];
+
+  const room = new Room({
+    id: 'r', name: '测试',
+    members: [{ id: 'a', name: 'a', role: 'leader', backend: 'claude', tier: 'readonly', cwd: dir, aliases: ['a'] }],
+    store,
+    resolveAdapter: () => ({
+      async run({ onEvent }) {
+        runs.push(1);
+        onEvent?.({ type: 'meta', sessionId: 's' });
+        // 零工具调用 → 不满足"撞上限续做"，只有失败重试成立
+        if (runs.length === 1) return { text: '', sessionId: 's', reason: 'timeout', usage: null };
+        onEvent?.({ type: 'text', text: '好了', done: false });
+        return { text: '好了', sessionId: 's', reason: 'completed', usage: null };
+      },
+    }),
+    onEvent: () => {},
+  });
+  room.maxRetries = 2;
+
+  await room.humanSay('@a 想事情');
+  await room.drain();
+
+  assert.equal(runs.length, 2, '失败重试仍然生效（不能因为加了守卫而把这条路也堵死）');
+});
