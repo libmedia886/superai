@@ -19,6 +19,7 @@ const state = {
   overridden: false,
   stopped: false,
   headPassiveWake: true,
+  resumeTarget: null,   // 有可续的轮次时，「继续」按钮变成「接着做完」
   paused: null,      // {reason, detail, at}
   continueToken: 0,  // "继续"按钮的用途：停止时=解除停止；停顿原因在时=接着往下走
   // ---- 多房间 ----
@@ -316,7 +317,7 @@ function renderStatus() {
   $('btn-resume').classList.toggle('hidden', !canContinue);
   $('btn-resume').textContent = state.stopped
     ? '▶ 继续'
-    : (state.paused?.reason === 'interrupted' ? '▶ 接着做完' : '▶ 接着推进');
+    : (state.resumeTarget ? '▶ 接着做完' : '▶ 接着推进');
   $('btn-stop').classList.toggle('hidden', state.stopped);
 }
 
@@ -567,6 +568,7 @@ function resetRoomView() {
   // 否则新房间会顶着上一个房间的红色「已停止」——和"刷新后徽章撒谎"同一类 bug。
   state.stopped = false;
   state.paused = null;
+  state.resumeTarget = null;
   // 换房间要重新判断：新房间可能没有这个问题（也可能是另一个）
   seqWarningDismissed = false;
   $('seq-warn')?.classList.add('hidden');
@@ -851,6 +853,7 @@ function handle(ev) {
       setOverridden(Boolean(ev.overridden));
       state.stopped = Boolean(ev.stopped);
       state.paused = ev.paused ?? null;
+      state.resumeTarget = ev.resumeTarget ?? null;
       renderSeqWarning(ev.seqWarning ?? null);
       state.headPassiveWake = ev.headPassiveWake !== false;
       $('passive-wake').checked = state.headPassiveWake;

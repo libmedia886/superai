@@ -632,3 +632,76 @@ test('续做次数到上限时的说法要把"已续做 N 次"说出来', async 
   assert.match(t, /已自动续做 2 次/);
   assert.match(t, /原地打转/);
 });
+
+/* ---------------- 「提示里的按钮必须真实存在」不变量 ---------------- */
+
+test('★ pause.detail 提到「接着做完」时，resumeTarget 必须存在', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'btnguard-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+  const events = [];
+
+  const room = new Room({
+    id: 'r', name: '测试',
+    members: [{ id: 'a', name: 'a', role: 'leader', backend: 'claude', tier: 'readonly', cwd: dir, aliases: ['a'] }],
+    store,
+    resolveAdapter: () => ({
+      async run({ onEvent, signal }) {
+        onEvent?.({ type: 'meta', sessionId: 's' });
+        onEvent?.({ type: 'text', text: '写了九个字啊', done: false });
+        await new Promise((res) => signal?.addEventListener('abort', res, { once: true }));
+        return { text: '写了九个字啊', sessionId: 's', reason: 'timeout' };
+      },
+    }),
+    onEvent: (e) => events.push(e),
+  });
+  room.maxRetries = 0;
+  room.turnTimeoutMs = 4_000;
+
+  await room.humanSay('@a 干活');
+  const draining = room.drain();
+  await new Promise((r) => setTimeout(r, 100));
+  room.stop();
+  await draining;
+
+  const paused = events.find((e) => e.type === 'room.paused' && /接着做完/.test(e.detail ?? ''));
+  if (paused) {
+    assert.ok(paused.resumeTarget, '文案让用户点「接着做完」，就必须真的有可续的轮次');
+  }
+});
+
+test('★ timeout 且有产出 → 设 resumeTarget（让按钮变成「接着做完」）', async () => {
+  const { Room } = await import('../src/core/room.js');
+  // 纯函数层面验不了 resumeTarget，这里用源码断言 + 行为测（上面那条）
+  const src = Room.prototype._runTurn.toString();
+  assert.match(src, /didSomething/, '要判断"有没有产出"');
+  assert.match(src, /this\.resumeTarget = \{/, 'timeout 分支也要设 resumeTarget');
+});
+
+test('★ 纯空转（0 工具 0 输出）不设 resumeTarget —— 没有可续的东西', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'btnguard2-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+
+  const room = new Room({
+    id: 'r', name: '测试',
+    members: [{ id: 'a', name: 'a', role: 'leader', backend: 'claude', tier: 'readonly', cwd: dir, aliases: ['a'] }],
+    store,
+    // 直接返回 timeout（模拟撞硬上限被中止），不经过 abort
+    resolveAdapter: () => ({
+      async run({ onEvent }) {
+        onEvent?.({ type: 'meta', sessionId: 's' });
+        return { text: '', sessionId: 's', reason: 'timeout' };
+      },
+    }),
+    onEvent: () => {},
+  });
+  room.maxRetries = 0;
+
+  await room.humanSay('@a 干个没输出的活');
+  await room.drain();
+
+  assert.equal(room.resumeTarget, null, '什么都没干过，没有可续的轮次');
+  assert.doesNotMatch(room.pauseReason?.detail ?? '', /接着做完|接着写/,
+    '没有可续的东西就不该让用户去点');
+});

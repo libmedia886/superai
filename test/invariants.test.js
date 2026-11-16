@@ -258,3 +258,29 @@ test('清单：暂停原因跨轮作废 + 停因文案是纯函数（每个数�
   });
   assert.doesNotMatch(withText, /也没有输出/, '输出了 9 个字就不能说没有输出');
 });
+
+test('清单：提示里提到的按钮必须真实存在（不变量，不只是这次修补）', async () => {
+  const { timeoutPauseText } = await import('../src/core/room.js');
+  const { Room } = await import('../src/core/room.js');
+
+  // 有产出 → 文案提「接着做完」→ 代码里必须真的设 resumeTarget
+  const withOutput = timeoutPauseText({
+    name: 'x', stalledOut: true, durationMs: 20_000, timeoutMs: 600_000,
+    toolCalls: 0, textChars: 9, stallMs: 90_000,
+  });
+  assert.match(withOutput, /接着做完/);
+  const src = Room.prototype._runTurn.toString();
+  assert.match(src, /didSomething/, 'timeout 分支要判断有没有产出');
+  assert.match(src, /this\.resumeTarget = \{/, 'timeout 分支也要设 resumeTarget');
+
+  // 零产出 → 不提按钮（没东西可续）
+  const nothing = timeoutPauseText({
+    name: 'x', stalledOut: true, durationMs: 20_000, timeoutMs: 600_000,
+    toolCalls: 0, textChars: 0, stallMs: 90_000,
+  });
+  assert.doesNotMatch(nothing, /接着做完|接着写/, '没有可续的东西就不该让用户去点');
+
+  // 前端按钮文案要跟着 resumeTarget 走，不是跟着 reason 猜测
+  const ui = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(ui, /state\.resumeTarget \? '▶ 接着做完'/, '按钮必须按"是否真的有可续轮次"决定文案');
+});

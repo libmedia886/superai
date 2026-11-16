@@ -672,7 +672,16 @@ export class Room {
     this.pauseReason = { reason, detail: String(detail ?? ''), at: new Date().toISOString() };
     // 落盘：内存字段活不过重启，重启后"为什么停着"不能变成谜
     this.store?.append?.({ kind: 'room.pause', reason, detail: this.pauseReason.detail }).catch?.(() => {});
-    this.onEvent({ type: 'room.paused', reason, detail: this.pauseReason.detail });
+    /**
+     * 带上 resumeTarget：界面靠它决定按钮显示「接着做完」还是「接着推进」。
+     * 不带就会出现"提示里让你点接着做完、按钮却写着接着推进"（管理方 18:42 抓到的那处）。
+     */
+    this.onEvent({
+      type: 'room.paused',
+      reason,
+      detail: this.pauseReason.detail,
+      resumeTarget: this.resumeTarget ? { ...this.resumeTarget } : null,
+    });
     return this.pauseReason;
   }
 
@@ -1302,13 +1311,37 @@ export class Room {
          * 停因说错比不说明更糟：一整天在修"停下却不说明原因"，
          * 结果说明本身是假的，用户会按错的方向去处理。
          */
+        const textChars = String(body ?? '').trim().length;
+        const didSomething = rowToolsInTurn > 0 || textChars > 0;
+
+        /**
+         * ★ 文案里说了「点接着做完」，就必须真的有那个按钮。
+         *
+         * 管理方 18:42 抓到：timeout/看门狗分支的文案写着"点「接着做完」"，
+         * 但只有 interrupted 分支设 `resumeTarget`，于是按钮实际显示「接着推进」，
+         * 点下去是叫头头开新轮——**提示里的按钮不存在，点击行为也不是那回事**。
+         *
+         * 语义上它们本就同类：工作做到一半、会话还在、应当接着那条做。
+         * 所以有产出（跑过工具或写过正文）就设 resumeTarget；
+         * 纯空转（0 工具 0 输出）没有可续的东西，按钮不出现、文案也不提。
+         */
+        if (didSomething) {
+          this.resumeTarget = {
+            agentId: agent.id,
+            taskId: job.taskId ?? null,
+            at: new Date().toISOString(),
+            partialChars: textChars,
+            reason: 'timeout',
+          };
+        }
+
         this._pause('timeout', timeoutPauseText({
           name: agent.name,
           stalledOut,
           durationMs,          // 实际耗时，不是配置上限
           timeoutMs,
           toolCalls: rowToolsInTurn,
-          textChars: String(body ?? '').trim().length,
+          textChars,
           capContinues,
           maxCapContinues: MAX_CAP_CONTINUES,
           stallMs: stallThreshold(timeoutMs),
