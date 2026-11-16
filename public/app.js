@@ -120,6 +120,7 @@ function renderMemberList() {
         ${m.overridesTier ? '<span class="member-flag" title="启动参数里有覆盖档位的项">档位被参数覆盖</span>' : ''}
       </div>
       ${m.sessionResetReason && m.role === 'leader' ? `<div class="session-reset" title="${escapeHtml(m.sessionResetReason)}">上下文已重置</div>` : ''}
+      ${m.timeoutSource === 'legacy' ? `<div class="timeout-legacy" title="room.json 里手写了 timeoutMs，界面上的单轮上限对它不生效">上限来自配置手写 · 实际 ${escapeHtml(String(m.effectiveTimeoutMinutes))} 分钟</div>` : ''}
       ${approvalNote(m)}`;
     li.querySelector('.member-top').prepend(avatarEl(m.name));
     li.onclick = () => openMemberSettings(m.id);
@@ -1655,6 +1656,10 @@ function openMemberSettings(id) {
   $('mm-extra').value = m.extraArgs ?? '';
   $('mm-commands').value = m.allowedCommands ?? '';
   $('mm-timeout').value = m.timeoutMinutes ?? '';
+  $('mm-timeout-hint').textContent = m.timeoutSource === 'legacy'
+    ? `⚠️ 当前实际生效的是 ${m.effectiveTimeoutMinutes} 分钟，来自 room.json 里手写的 timeoutMs；`
+      + '在这里填一个值会覆盖它，并让界面与实际情况重新一致。'
+    : `实际生效：${m.effectiveTimeoutMinutes} 分钟。`;
   $('mm-role').value = m.role;
   $('mm-persona').value = m.persona ?? '';
   $('mm-remove').classList.remove('hidden');
@@ -1682,6 +1687,7 @@ function openNewMember() {
   $('mm-extra').value = '';
   $('mm-commands').value = '';
   $('mm-timeout').value = '';
+  $('mm-timeout-hint').textContent = '这是「防无限跑」的上限，不是卡死判定——卡死由看门狗判（90 秒无输出）。';
   $('mm-role').value = isFirst ? 'leader' : 'member';
   $('mm-role').disabled = isFirst;   // 第一个成员固定头头，不再多问一次
   $('mm-persona').value = '';

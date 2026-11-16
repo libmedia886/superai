@@ -373,3 +373,43 @@ test('★ 成员级单轮上限优先于房间默认', async () => {
   await mgr.session.room.drain();
   assert.deepEqual(seen, [5 * 60_000]);
 });
+
+test('★ 手写 timeoutMs 会压过界面设置 → 必须显式暴露，不能静默', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'legacy-timeout-'));
+  await mkdir(join(dir, 'rooms', 'r-a', 'agents', 'a1'), { recursive: true });
+  await writeFile(join(dir, 'rooms', 'r-a', 'room.json'), JSON.stringify({
+    name: '手改上限',
+    members: [
+      // 这条是外部手改的：没有 timeoutMinutes，只有 timeoutMs
+      { id: 'a1', name: 'a1', role: 'leader', backend: 'claude', tier: 'readonly', timeoutMs: 30 * 60_000 },
+      { id: 'a2', name: 'a2', role: 'member', backend: 'claude', tier: 'readonly' },
+    ],
+  }));
+  await writeFile(join(dir, 'rooms.json'), JSON.stringify({
+    version: 1, activeRoomId: 'r-a',
+    rooms: [{ id: 'r-a', name: '手改上限', createdAt: new Date().toISOString() }],
+  }));
+
+  const notices = [];
+  const mgr = new RoomManager({ dataDir: dir, onEvent: (e) => notices.push(e) });
+  await mgr.init();
+
+  // 1. 启动时必须告诉用户"这个值不是界面写的"
+  assert.ok(mgr.notices.some((n) => /手写的 timeoutMs/.test(n)),
+    '要有明确警告，否则界面显示 20 分钟、实际 30 分钟');
+
+  // 2. 实际生效值确实是 30 分钟（行为不变，不静默改数据）
+  const { resolveMemberTimeoutMs, timeoutSource } = await import('../src/core/room.js');
+  const a1 = mgr.session.room.members.find((m) => m.id === 'a1');
+  assert.equal(timeoutSource(a1), 'legacy');
+  assert.equal(resolveMemberTimeoutMs(a1, 20 * 60_000), 30 * 60_000);
+  assert.equal(timeoutSource(mgr.session.room.members.find((m) => m.id === 'a2')), 'room');
+
+  // 3. 用界面字段覆盖后就回到正常（来源变 member，警告来源消失）
+  const { planMemberUpdate } = await import('../src/core/memberSettings.js');
+  const plan = planMemberUpdate({ member: a1, patch: { timeoutMinutes: '25' } });
+  assert.equal(plan.ok, true);
+  const merged = { ...a1, ...plan.member };
+  assert.equal(timeoutSource(merged), 'member');
+  assert.equal(resolveMemberTimeoutMs(merged, 20 * 60_000), 25 * 60_000);
+});

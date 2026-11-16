@@ -18,7 +18,7 @@ import { randomUUID } from 'node:crypto';
 import { DEFAULT_DATA_DIR } from './core/config.js';
 import { RoomManager } from './core/sessions.js';
 import { availableTiers, TIER, TIER_DESC, normalizeTier } from './core/probe.js';
-import { DEFAULT_TURN_TIMEOUT_MS } from './core/room.js';
+import { DEFAULT_TURN_TIMEOUT_MS, resolveMemberTimeoutMs, timeoutSource } from './core/room.js';
 import { planMemberUpdate } from './core/memberSettings.js';
 import { detectTierOverride, EFFORT_HINTS } from './core/extraargs.js';
 import { exportMarkdown } from './core/export.js';
@@ -104,6 +104,9 @@ export async function startServer({
     extraArgs: m.extraArgsText ?? '',
     allowedCommands: (m.allowedCommands ?? []).join(' '),
     timeoutMinutes: m.timeoutMinutes ?? null,
+    // 实际生效值 + 来源：界面据此显示，避免"界面一个值、实际另一个值"
+    effectiveTimeoutMinutes: Math.round(resolveMemberTimeoutMs(m, room?.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS) / 60_000),
+    timeoutSource: timeoutSource(m),
     overridesTier: detectTierOverride(m.backend, m.extraArgs ?? []),
     colors: m.color ?? null,
     tiers: availableTiers(m.backend),

@@ -127,6 +127,18 @@ export async function buildRoom({ cfg, dataDir = DEFAULT_DATA_DIR, onEvent, shar
       }
     }
 
+    /**
+     * 手写的 `timeoutMs` 不是界面写的。它优先于房间设置生效，
+     * 所以必须显式标出来——否则界面显示 20 分钟、实际 30 分钟，
+     * 这正是老板这次踩的那类"界面撒谎"。
+     */
+    if (m.timeoutMs && !m.timeoutMinutes) {
+      warnings.push(
+        `${m.name} 的单轮上限来自 room.json 里手写的 timeoutMs（${Math.round(m.timeoutMs / 60_000)} 分钟），`
+        + '界面上的设置对它不生效。建议在成员设置里改用「单轮上限」重新填一次。',
+      );
+    }
+
     members.push({
       ...m, tier, cwd, sessionId, sessionResetReason, aliases: [m.name.toLowerCase()],
     });

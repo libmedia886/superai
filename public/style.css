@@ -922,3 +922,10 @@ a.btn { text-decoration: none; display: flex; align-items: center; }
 
 .approval-note.cmd { color: var(--text-dim); }
 .approval-note .cmd-risk { color: var(--warn); font-size: 10px; }
+
+/* 手写的 timeoutMs：必须让人看到"界面上这个值没生效" */
+.timeout-legacy {
+  font-size: 10px; color: var(--warn);
+  border: 1px dashed var(--warn); border-radius: 999px;
+  padding: 0 7px; margin-top: 4px; display: inline-block;
+}

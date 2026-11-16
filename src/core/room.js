@@ -58,6 +58,33 @@ export const DEFAULT_TURN_TIMEOUT_MS = 20 * 60_000;
  */
 export const TOOL_FLIGHT_SILENCE_MS = 10 * 60_000;
 
+/**
+ * 解析某个成员本轮实际生效的单轮上限。
+ *
+ * 优先级：`timeoutMinutes`（界面字段） > `timeoutMs`（旧的手写字段） > 房间默认。
+ *
+ * ★ 为什么保留旧的 `timeoutMs` 支路、但要单独暴露出来：
+ *   删掉它会让 room.json 里已有的手写值**静默失效**——老板刚经历过
+ *   "界面显示 20 分钟、实际 30 分钟"，反向再来一次同样不可接受。
+ *   所以：行为不变，但把"这个值不是从界面来的"显式告诉界面（见 timeoutSource）。
+ */
+export function resolveMemberTimeoutMs(agent, roomDefaultMs = DEFAULT_TURN_TIMEOUT_MS) {
+  if (agent?.timeoutMinutes) return Math.round(agent.timeoutMinutes * 60_000);
+  if (agent?.timeoutMs) return agent.timeoutMs;
+  return roomDefaultMs;
+}
+
+/**
+ * 这个上限是从哪来的。界面必须显示它——否则"界面上的值和实际值不一样"
+ * 这类问题会一直复发。
+ * @returns {'member'|'legacy'|'room'}
+ */
+export function timeoutSource(agent) {
+  if (agent?.timeoutMinutes) return 'member';
+  if (agent?.timeoutMs) return 'legacy';
+  return 'room';
+}
+
 export const PAUSE_LABEL = {
   no_target: '说完了，没点名下一位',
   timeout: '超时被中止（不是说完）',
@@ -663,9 +690,7 @@ export class Room {
     let adapterResult = null;
 
     // 成员可单独配单轮上限（分钟）；留空用房间默认
-    const timeoutMs = agent.timeoutMinutes
-      ? Math.round(agent.timeoutMinutes * 60_000)
-      : (agent.timeoutMs ?? this.turnTimeoutMs);
+    const timeoutMs = resolveMemberTimeoutMs(agent, this.turnTimeoutMs);
 
     /**
      * 会话与工作目录按 **(agent, 任务)** 绑定，不是按 agent。
