@@ -1688,6 +1688,24 @@ $('mm-backend').onchange = (e) => {
 for (const id of ['mm-model', 'mm-effort', 'mm-extra', 'mm-commands']) {
   $(id).addEventListener('input', updatePreview);
 }
+$('mm-commands').addEventListener('input', updateCurlWarn);
+$('mm-netget').addEventListener('change', updatePreview);
+
+/**
+ * 自定义命令里写了 curl/wget 时，必须红字说清它的真实边界。
+ *
+ * 管理方 22:11 的要求：保留入口（老板房间里 4 个成员正在用，突然移除会让它们
+ * 无声失能——那正是我们今天修了一整天的"界面与事实不符"），但必须标红。
+ */
+function updateCurlWarn() {
+  const v = $('mm-commands').value;
+  const risky = /(^|\s)(curl|wget)(\s|$)/.test(v);
+  const el = $('mm-curl-warn');
+  el.textContent = risky
+    ? '⚠️ curl/wget 不受目录限制：能读本机任意文件（如 file:///etc/hostname）、能写到工作目录之外、能上传外传。'
+    : '';
+  el.classList.toggle('hidden', !risky);
+}
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('member-modal').classList.contains('hidden')) closeMemberSettings();
@@ -1737,7 +1755,9 @@ function openMemberSettings(id) {
   $('mm-model').value = m.model ?? '';
   $('mm-effort').value = m.effort ?? '';
   $('mm-extra').value = m.extraArgs ?? '';
-  $('mm-commands').value = m.allowedCommands ?? '';
+  $('mm-commands').value = (m.allowedCommands ?? '').replace(/\bnetget\b\s*/g, '').trim();
+  $('mm-netget').checked = /\bnetget\b/.test(m.allowedCommands ?? '');
+  updateCurlWarn();
   $('mm-timeout').value = m.timeoutMinutes ?? '';
   $('mm-timeout-hint').textContent = m.timeoutSource === 'legacy'
     ? `⚠️ 当前实际生效的是 ${m.effectiveTimeoutMinutes} 分钟，来自 room.json 里手写的 timeoutMs；`
@@ -1769,6 +1789,8 @@ function openNewMember() {
   $('mm-effort').value = '';
   $('mm-extra').value = '';
   $('mm-commands').value = '';
+  $('mm-netget').checked = false;
+  updateCurlWarn();
   $('mm-timeout').value = '';
   $('mm-timeout-hint').textContent = '这是「防无限跑」的上限，不是卡死判定——卡死由看门狗判（90 秒无输出）。';
   $('mm-role').value = isFirst ? 'leader' : 'member';
@@ -1860,9 +1882,14 @@ function updatePreview() {
     else if (backend === 'codex') parts.push(`-c model_reasoning_effort="${effort}"`);
     else parts.push('--variant', effort);
   }
-  const cmds = $('mm-commands').value.trim().split(/[\s,，]+/).filter(Boolean);
+  const cmds = [
+    $('mm-netget').checked ? 'netget' : null,
+    ...$('mm-commands').value.trim().split(/[\s,，]+/).filter(Boolean),
+  ].filter(Boolean);
   if (cmds.length && tier === 'write-exec') {
-    parts.push('--allowedTools', ...cmds.map((c) => `"Bash(${c}:*)"`));
+    parts.push('--allowedTools', ...cmds.map((c) => (c === 'netget'
+      ? '"Bash(<数据目录>/bin/netget:*)"'
+      : `"Bash(${c}:*)"`)));
   } else if (cmds.length) {
     parts.push('（命令只对「可写+执行」档生效）');
   }
@@ -1908,7 +1935,10 @@ async function saveMemberSettings() {
     model: $('mm-model').value.trim(),
     effort: $('mm-effort').value.trim(),
     extraArgs: extraText,
-    allowedCommands: $('mm-commands').value,
+    allowedCommands: [
+      $('mm-netget').checked ? 'netget' : null,
+      $('mm-commands').value.trim(),
+    ].filter(Boolean).join(' '),
     timeoutMinutes: $('mm-timeout').value,
     role: $('mm-role').value,
     persona: $('mm-persona').value,

@@ -17,7 +17,8 @@
  * 复用实例才是 bug 的源头，所以这里绝不复用。
  */
 
-import { mkdir } from 'node:fs/promises';
+import { chmod, copyFile, mkdir } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 
 import { loadConfig, saveConfig, buildRoom } from './config.js';
@@ -92,12 +93,37 @@ export class RoomManager {
     const sharedDir = join(dir, 'shared');
     await mkdir(sharedDir, { recursive: true });
 
+    /**
+     * ★ 受约束的网络读取器必须生成在**成员 cwd 之外**。
+     *
+     * 包装器是安全边界本身（只允许 http/https GET、-o 限定在 cwd 内）。
+     * 如果它躺在成员自己的工作目录里，那个有 Write 权限的成员可以改写它——
+     * 边界就成了它自己写的。所以放在 `<data>/bin/netget`，
+     * 而成员的 cwd 是 `<data>/agents/<id>`。
+     */
+    const binDir = join(dir, 'bin');
+    await mkdir(binDir, { recursive: true });
+    const netgetPath = join(binDir, 'netget');
+    try {
+      await copyFile(fileURLToPath(new URL('../../bin/netget', import.meta.url)), netgetPath);
+      await chmod(netgetPath, 0o755);
+    } catch (err) {
+      // 生成失败不能静默：成员配了 netget 也跑不了，界面必须知道
+      this.notices.push(`网络读取器生成失败（${err.message}），配了 netget 的成员将无法联网`);
+    }
+
     const { room, store, members, warnings } = await buildRoom({
       cfg, dataDir: dir, onEvent, sharedDir,
     });
     for (const w of warnings) this.notices.push(w);
 
-    this.session = { id, name: cfg.name, dir, cfg, room, store, members, saveConfig: () => saveConfig(cfg, dir) };
+    // netget 路径挂到每个成员上：适配器按 agent 配置构建，拿不到 session
+    for (const m of members) m.netgetPath = netgetPath;
+
+    this.session = {
+      id, name: cfg.name, dir, cfg, room, store, members, netgetPath,
+      saveConfig: () => saveConfig(cfg, dir),
+    };
     return this.session;
   }
 

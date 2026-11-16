@@ -1,0 +1,81 @@
+#!/bin/bash
+# 受约束的网络读取器（CR-032）。
+#
+# 为什么需要它：`--allowedTools "Bash(curl:*)"` 的审批器**只看命令名，不看副作用**——
+# 实测同一条 curl 能 `file:///etc/hostname` 读本机文件、能 `-o /tmp/x` 写目录外、
+# 能 `-T` 上传外传。也就是说放行 curl 等价于「读本机任意可读文件 + 任意方向网络访问」。
+#
+# 这个包装器把「能联网取资料」这一件事单独摘出来，并把它限制成：
+#   · 只有 http/https（file/ftp/scp 等一律拒）
+#   · 只有 GET（上传类参数一律拒：上传 = 数据离开这台机器，不可逆）
+#   · -o 必须落在 $PWD 内（realpath 解析后比较，防 ../ 与符号链接）
+#   · 强制超时，避免挂死；限制重定向次数
+#
+# 由 app 生成在**成员 cwd 之外**（<data>/bin/netget），成员即使有 Write 也改不到它。
+#
+# 退出码（调用方与测试据此判断）：
+#   0 成功
+#   2 参数/协议不允许
+#   3 拒绝写到工作目录之外
+#   4 下载失败（curl 非 0）
+
+set -u
+
+MAX_TIME="${NETGET_MAX_TIME:-25}"     # 单次最长秒数
+MAX_REDIRECTS="${NETGET_MAX_REDIRECTS:-3}"
+MAX_BYTES="${NETGET_MAX_BYTES:-5242880}"   # 5 MB，查资料够用
+
+out=""
+url=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o|--output)
+      [ $# -ge 2 ] || { echo "netget: -o 缺少路径" >&2; exit 2; }
+      out="$2"; shift 2 ;;
+    -o=*|--output=*)
+      out="${1#*=}"; shift ;;
+    http://*|https://*)
+      url="$1"; shift ;;
+    *://*)
+      # 明确拒绝所有其他协议；这条是本工具存在的核心理由
+      echo "netget: 协议不允许「$1」（只支持 http/https）" >&2; exit 2 ;;
+    -T|--upload-file|-d|--data|--data-raw|--data-binary|--data-urlencode|-F|--form|-X|--request)
+      # 上传类参数：数据离开这台机器不可逆
+      echo "netget: 参数不允许「$1」（本工具只做 GET，不支持上传/自定义方法）" >&2; exit 2 ;;
+    -s|--silent|-S|--show-error|-L|--location|-sS|-sSL|--compressed|-I|--head)
+      # 允许少量无害的 curl 兼容参数，但重定向与超时由本脚本强制
+      case "$1" in
+        -I|--head) HEAD=1 ;;
+      esac
+      shift ;;
+    --)
+      shift ;;
+    -*)
+      echo "netget: 参数不允许「$1」" >&2; exit 2 ;;
+    *)
+      # 裸参数：只接受绝对 http(s) URL；其余当错误（防把路径当 URL）
+      echo "netget: 无法识别「$1」，用法：netget [-o 输出路径] <http(s) URL>" >&2; exit 2 ;;
+  esac
+done
+
+[ -z "$url" ] && { echo "netget: 需要 http/https URL" >&2; exit 2; }
+
+CURL_ARGS=(-sS -L --max-time "$MAX_TIME" --max-redirs "$MAX_REDIRECTS"
+           --proto '=http,https' --proto-redir '=http,https'
+           --max-filesize "$MAX_BYTES")
+[ "${HEAD:-0}" = "1" ] && CURL_ARGS+=(-I)
+
+if [ -n "$out" ]; then
+  # realpath -m：允许目标还不存在；解析 .. 与符号链接，防止绕过
+  real_out=$(realpath -m -- "$out") || { echo "netget: 无法解析输出路径" >&2; exit 2; }
+  real_cwd=$(realpath -m -- "$PWD") || { echo "netget: 无法解析工作目录" >&2; exit 2; }
+
+  case "$real_out" in
+    "$real_cwd"/*) ;;
+    *) echo "netget: 拒绝写到工作目录之外（$real_out 不在 $real_cwd 内）" >&2; exit 3 ;;
+  esac
+
+  exec curl "${CURL_ARGS[@]}" -o "$real_out" "$url" 2>&1
+fi
+
+exec curl "${CURL_ARGS[@]}" "$url" 2>&1

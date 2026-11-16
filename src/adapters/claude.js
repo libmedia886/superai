@@ -41,13 +41,34 @@ const BASE_ARGS = [
  *   "只能在目录内动手"这两个承诺无法同时成立。
  *   白名单让老板自己决定放开到什么程度，界面必须明说这层风险。
  */
-export function allowedCommandArgs(cmds = []) {
+/**
+ * 命令白名单 → `--allowedTools` 参数。
+ *
+ * ★ token `netget` 必须解析成**绝对路径**再放行。
+ *   实测审批器是**字面前缀匹配**：模型写 `./bin/netget` 会被拒，
+ *   只认绝对路径。所以这里必须替模型把路径补全，否则它会以为没权限。
+ *
+ * @param {string[]} cmds  成员配置里的命令清单
+ * @param {{netgetPath?: string|null}} [o]  app 生成的包装器绝对路径
+ */
+export function allowedCommandArgs(cmds = [], { netgetPath = null } = {}) {
   const list = (cmds ?? []).map((c) => String(c ?? '').trim()).filter(Boolean);
   if (!list.length) return [];
-  return ['--allowedTools', ...list.map((c) => `Bash(${c}:*)`)];
+
+  const resolved = list.map((c) => {
+    if (c === 'netget') {
+      // 没生成包装器时不能静默降级成 "Bash(netget:*)"——那会被审批器拒，
+      // 表现为"配了却用不了"，正是本项目一路在抓的界面撒谎。
+      if (!netgetPath) throw new Error('成员要了 netget，但 app 没有生成包装器');
+      return netgetPath;
+    }
+    return c;
+  });
+
+  return ['--allowedTools', ...resolved.map((c) => `Bash(${c}:*)`)];
 }
 
-export function tierArgs(tier = 'readonly', { allowedCommands = [] } = {}) {
+export function tierArgs(tier = 'readonly', { allowedCommands = [], netgetPath = null } = {}) {
   if (tier === 'read') {
     // 可读档：实测 `--tools "Read,Grep,Glob" --permission-prompts none`
     // 能读 cwd 内文件，目录外被权限系统拦下。这是老板说的「可读」。
@@ -70,7 +91,7 @@ export function tierArgs(tier = 'readonly', { allowedCommands = [] } = {}) {
       ? 'Read,Write,Edit'
       : (hasCommands ? 'Read,Write,Edit,Bash' : 'Read,Write,Edit');
     const args = ['--tools', tools, '--permission-mode', 'acceptEdits', '--permission-prompts', 'none'];
-    if (hasCommands) args.push(...allowedCommandArgs(allowedCommands));
+    if (hasCommands) args.push(...allowedCommandArgs(allowedCommands, { netgetPath }));
     return args;
   }
   return ['--tools', '', '--permission-prompts', 'none'];
@@ -120,7 +141,10 @@ export class ClaudeAdapter extends AgentAdapter {
   buildArgs({ sessionId = null } = {}) {
     const args = [
       ...BASE_ARGS,
-      ...tierArgs(this.config.tier, { allowedCommands: this.config.allowedCommands }),
+      ...tierArgs(this.config.tier, {
+        allowedCommands: this.config.allowedCommands,
+        netgetPath: this.config.netgetPath ?? null,
+      }),
       ...modelArgs('claude', this.config.model),
       ...effortArgs('claude', this.config.effort),
     ];

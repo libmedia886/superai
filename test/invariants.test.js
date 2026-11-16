@@ -331,3 +331,21 @@ test('清单：超时路径的 fake adapter 契约（不能用"自己声明的 t
   const files = await readdir(dir);
   assert.ok(files.includes('adapter-contract.test.js'), '必须有这条契约测试守着');
 });
+
+test('清单：CR-032 网络读取的边界（能联网取资料，但写不出工作目录）', async () => {
+  // 包装器本身存在且可执行
+  const { stat } = await import('node:fs/promises');
+  const st = await stat(new URL('../bin/netget', import.meta.url));
+  assert.ok(st.mode & 0o100, 'netget 必须可执行');
+
+  const src = await readFile(new URL('../bin/netget', import.meta.url), 'utf8');
+  assert.match(src, /--proto '=http,https'/, '必须限定协议（file:// 是本项目最危险的用例）');
+  assert.match(src, /--proto-redir '=http,https'/, '重定向也不能跳到别的协议');
+  assert.match(src, /拒绝写到工作目录之外/, '-o 必须受 cwd 约束');
+  assert.match(src, /上传/, '上传类参数必须拒绝');
+
+  // 档位文案必须写实：netget 不是"能执行任意命令"
+  const { TIER_DESC } = await import('../src/core/probe.js');
+  assert.doesNotMatch(TIER_DESC['write-exec'], /执行任意命令/);
+  assert.match(TIER_DESC['write-exec'], /默认全禁|需单独允许/);
+});

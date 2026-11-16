@@ -205,13 +205,25 @@
         </label>
       </div>
 
+      <div class="field">
+        <span class="field-label">联网查询</span>
+        <label class="switch-row">
+          <input type="checkbox" id="mm-netget">
+          <span>允许联网查资料（推荐）</span>
+        </label>
+        <span class="field-hint">
+          只允许 http/https <b>GET</b>：能下载网页，<b>读不到本机文件、写不出工作目录、不能上传</b>。
+        </span>
+      </div>
+
       <label class="field">
-        <span class="field-label">允许执行的命令（留空 = 一条都不许）</span>
-        <input id="mm-commands" placeholder="例：curl wget；留空则该成员跑不了任何命令" autocomplete="off" spellcheck="false">
+        <span class="field-label">自定义命令（留空 = 一条都不许）</span>
+        <input id="mm-commands" placeholder="例：git status；一般不需要填" autocomplete="off" spellcheck="false">
         <!-- ★ 这句话必须显示在界面上，不能只写在文档里 -->
         <span class="field-hint danger-hint">
           放开命令后，该成员可以用这些命令读写工作目录之外的任何文件（命令行没有目录围墙）。
         </span>
+        <span class="field-hint danger-hint" id="mm-curl-warn"></span>
       </label>
 
       <label class="field">
