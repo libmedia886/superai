@@ -24,6 +24,7 @@ export class Store {
     this.toolLog = [];          // 写操作日志（只追加）
     this.actionLog = [];        // 动作执行结果（只追加）
     this.membersCreated = [];   // 成员创建记录（谁加的、为什么）
+    this.memberAudit = [];      // 成员变更/删除（before → after），事后追责用
     this.loopWarnings = [];     // 循环护栏警告（事后复盘用）
     this._seq = 0;
     this._writeChain = Promise.resolve();
@@ -117,6 +118,15 @@ export class Store {
         // 谁加了谁、为什么加——老板回头看名册要知道这个
         this.membersCreated.push({
           member: ev.member, createdBy: ev.createdBy, reason: ev.reason, at: ev.at,
+        });
+        break;
+      case 'member.updated':
+      case 'member.removed':
+        // 老板哪天问"为什么这个 agent 突然能写"，要答得出来：谁改的、改了什么
+        this.memberAudit.push({
+          kind: ev.kind, agentId: ev.agentId, by: ev.by ?? 'human',
+          changed: ev.changed ?? [], before: ev.before ?? null, after: ev.after ?? null,
+          at: ev.at,
         });
         break;
       case 'compact':

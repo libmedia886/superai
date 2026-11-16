@@ -8,8 +8,9 @@ import { join } from 'node:path';
 
 import { Store } from './store.js';
 import { Room } from './room.js';
-import { createAdapter } from '../adapters/index.js';
-import { availableTiers, TIER } from './probe.js';
+import { getCachedAdapter } from '../adapters/index.js';
+import { availableTiers, TIER, normalizeTier } from './probe.js';
+import { classifyExtraArgs } from './extraargs.js';
 
 export const DEFAULT_DATA_DIR = process.env.MAROOM_DATA || join(homedir(), '.multiagent-chat');
 
@@ -125,19 +126,11 @@ export async function buildRoom({ cfg, dataDir = DEFAULT_DATA_DIR, onEvent }) {
       await saveConfig(cfg, dataDir);
       return { ...member, cwd, aliases: [member.name.toLowerCase()] };
     },
-    resolveAdapter: (agent) => {
-      if (!adapters.has(agent.id)) {
-        adapters.set(agent.id, createAdapter({
-          id: agent.id,
-          backend: agent.backend,
-          model: agent.model,
-          persona: agent.persona,
-          tier: agent.tier,
-          bin: agent.bin,
-        }));
-      }
-      return adapters.get(agent.id);
-    },
+    /**
+     * 按**配置签名**缓存：改了档位/模型/参数立刻生效，不需要重启。
+     * 只按 agent.id 缓存会让"界面显示可写、实际写不了"——见 adapters/index.js。
+     */
+    resolveAdapter: (agent) => getCachedAdapter(adapters, agent),
     onEvent,
   });
 

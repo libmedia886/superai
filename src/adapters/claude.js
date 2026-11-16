@@ -10,6 +10,7 @@
 
 import { AgentAdapter, EXIT, withPersona } from './types.js';
 import { runJsonCli, DEFAULT_TIMEOUT_MS } from '../core/runner.js';
+import { modelArgs, effortArgs } from '../core/extraargs.js';
 
 const BASE_ARGS = [
   '-p',
@@ -32,6 +33,11 @@ const BASE_ARGS = [
  *    默认档是"从来不问"，不是"每次都会问我"。
  */
 export function tierArgs(tier = 'readonly') {
+  if (tier === 'read') {
+    // 可读档：实测 `--tools "Read,Grep,Glob" --permission-prompts none`
+    // 能读 cwd 内文件，目录外被权限系统拦下。这是老板说的「可读」。
+    return ['--tools', 'Read,Grep,Glob', '--permission-prompts', 'none'];
+  }
   if (tier === 'write-ask') {
     return ['--tools', 'Read,Write,Edit', '--permission-mode', 'default', '--permission-prompts', 'host'];
   }
@@ -44,7 +50,8 @@ export function tierArgs(tier = 'readonly') {
 
 /** 界面文案：说清楚"问不问人"，而不是只说"能不能写" */
 export function approvalLabel(tier) {
-  if (tier === 'readonly') return '不写文件';
+  if (tier === 'readonly') return '不碰文件';
+  if (tier === 'read') return '只读';
   if (tier === 'write-ask') return '每次询问';
   return '自动批准';
 }
@@ -75,9 +82,27 @@ function summarizeToolInput(name, input) {
 export class ClaudeAdapter extends AgentAdapter {
   get supportsStreaming() { return true; }
 
-  async run({ prompt, cwd, sessionId, timeoutMs = DEFAULT_TIMEOUT_MS, onEvent, signal = null }) {
-    const args = [...BASE_ARGS, ...tierArgs(this.config.tier)];
+  /**
+   * 参数顺序：应用自有参数 → 模型/思考等级 → 会话 → 用户附加参数。
+   *
+   * 附加参数放最后，让用户的 `-c` / 覆盖值能盖过自家配置里同名的项，
+   * 和 CLI 自身的"后者优先"语义一致。协议参数与档位参数在保存时就被
+   * 拒绝/确认过了，不会走到这里。
+   */
+  buildArgs({ sessionId = null } = {}) {
+    const args = [
+      ...BASE_ARGS,
+      ...tierArgs(this.config.tier),
+      ...modelArgs('claude', this.config.model),
+      ...effortArgs('claude', this.config.effort),
+    ];
     if (sessionId) args.push('--resume', sessionId);
+    args.push(...(this.config.extraArgs ?? []));
+    return args;
+  }
+
+  async run({ prompt, cwd, sessionId, timeoutMs = DEFAULT_TIMEOUT_MS, onEvent, signal = null }) {
+    const args = this.buildArgs({ sessionId });
 
     let newSessionId = sessionId ?? null;
     let sawResult = false;

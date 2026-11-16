@@ -17,7 +17,16 @@ import { mkdir, writeFile, readFile, rm, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export const TIER = {
+  /** 无工具：连读文件都不给（claude 的硬隔离档） */
   READONLY: 'readonly',
+  /**
+   * 可读：Read/Grep/Glob。老板说的「可读可写」里的"可读"就是这一档。
+   *
+   * 为什么必须单独一档：claude 的 readonly 是 `--tools ""`，连读文件都不行，
+   * 而 codex 的 readonly 能读——同名不同义。老板要"只让看不让改"时，
+   * 选 readonly 会得到一个瞎的 agent，选 write 又给了写权限，中间是空的。
+   */
+  READ: 'read',
   /** 可写，但每次写入需要人批准——重要目录上的最后一道防线 */
   WRITE_ASK: 'write-ask',
   WRITE: 'write',
@@ -33,10 +42,41 @@ export const TIER = {
  */
 export const TIER_SUPPORT = {
   // Claude 是唯一能表达"每次询问"的：--permission-prompts host
-  claude: [TIER.READONLY, TIER.WRITE_ASK, TIER.WRITE, TIER.WRITE_EXEC],
-  codex: [TIER.READONLY, TIER.WRITE_EXEC],
-  opencode: [TIER.READONLY, TIER.WRITE, TIER.WRITE_EXEC],
+  claude: [TIER.READONLY, TIER.READ, TIER.WRITE_ASK, TIER.WRITE, TIER.WRITE_EXEC],
+  // codex 的 read-only 沙箱本来就能读，所以它没有"无工具"那一档
+  codex: [TIER.READ, TIER.WRITE_EXEC],
+  opencode: [TIER.READONLY, TIER.READ, TIER.WRITE, TIER.WRITE_EXEC],
 };
+
+/**
+ * 档位强弱（用于天花板判定与迁移归一化）。
+ * read 在 readonly 之上：只读档什么都不能碰，可读档能看。
+ */
+export const TIER_RANK = {
+  [TIER.READONLY]: 0,
+  [TIER.READ]: 1,
+  [TIER.WRITE_ASK]: 2,
+  [TIER.WRITE]: 3,
+  [TIER.WRITE_EXEC]: 4,
+};
+
+/** 每一档用一句人话说清"实际能干什么"（界面上每档都要显示这句） */
+export const TIER_DESC = {
+  [TIER.READONLY]: '完全不碰文件：看不见也改不了，只能对话',
+  [TIER.READ]: '能读文件和搜代码，不能改、不能执行命令',
+  [TIER.WRITE_ASK]: '能改文件，但每次写入都要你批准',
+  [TIER.WRITE]: '能改工作目录内的文件，不能执行命令',
+  [TIER.WRITE_EXEC]: '能改文件也能执行命令，都限制在工作目录内',
+};
+
+/**
+ * 迁移归一化：旧配置里 `codex + readonly` 的实际语义就是 read
+ * （`-s read-only` 允许读）。只改标签，行为不变。
+ */
+export function normalizeTier(backend, tier) {
+  if (backend === 'codex' && tier === TIER.READONLY) return TIER.READ;
+  return tier;
+}
 
 /** 该后端的目录边界是否由 cwd 强制（决定自检怎么判） */
 export const CWD_IS_BOUNDARY = {

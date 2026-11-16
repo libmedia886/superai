@@ -26,6 +26,13 @@ const port = portArg >= 0 ? Number(args[portArg + 1]) : 4321;
 const hostArg = args.indexOf('--host');
 const host = hostArg >= 0 ? args[hostArg + 1] : '127.0.0.1';
 const noOpen = args.includes('--no-open');
+/**
+ * 迁移必须显式要求。
+ *
+ * 生产上出过一次：服务重启时自动把真实数据迁到了新布局。结果是对的，
+ * 但没人决定过——这类"动真实数据"的事不能藏在启动流程里。
+ */
+const migrate = args.includes('--migrate');
 const noToken = args.includes('--no-token');
 
 const exposed = host === '0.0.0.0' || host === '::';
@@ -62,7 +69,16 @@ async function readOnlyFresh() {
 
 const { token, resolved: tokenInfo } = await resolveToken();
 
-const { url, port: actualPort } = await startServer({ port, host, token });
+const { url, port: actualPort, manager } = await startServer({
+  port, host, token, allowMigrate: migrate,
+});
+
+// 旧布局没迁移时说清楚：能继续用，但要多房间得人点头
+if (manager?.meta?.pendingMigration) {
+  console.log('');
+  console.log('⚠️  检测到单房间旧数据（尚未迁移多房间）。数据未被改动，当前按单房间模式运行。');
+  console.log('   要迁移请在启动命令后加 --migrate（会先整目录备份，失败自动回滚）。');
+}
 
 // 令牌从旧房间目录捞回来时必须说一声：这说明历史迁移搬错过它，
 // 而且这次没换令牌（老板的链接还能用）。

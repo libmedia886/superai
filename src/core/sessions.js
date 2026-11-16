@@ -29,9 +29,11 @@ export class RoomManager {
    * @param {string} o.dataDir
    * @param {(ev:object)=>void} o.onEvent
    */
-  constructor({ dataDir, onEvent }) {
+  constructor({ dataDir, onEvent, allowMigrate = true }) {
     this.dataDir = dataDir;
     this.onEvent = onEvent;
+    /** 是否允许在启动时迁移旧布局。生产服务默认关，必须显式 --migrate。 */
+    this.allowMigrate = allowMigrate;
     this.meta = null;
     /** @type {null | {id:string, name:string, dir:string, cfg:object, room:object, store:object, members:Array}} */
     this.session = null;
@@ -41,7 +43,9 @@ export class RoomManager {
   }
 
   async init() {
-    const { meta, single, warning } = await ensureRoomsLayout(this.dataDir);
+    const { meta, single, warning } = await ensureRoomsLayout(this.dataDir, {
+      allowMigrate: this.allowMigrate,
+    });
     this.meta = meta;
     this.singleFallback = single;
     if (warning) this.notices.push(warning);

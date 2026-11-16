@@ -31,6 +31,7 @@ import { join } from 'node:path';
 
 import { AgentAdapter, EXIT, withPersona } from './types.js';
 import { runJsonCli, DEFAULT_TIMEOUT_MS } from '../core/runner.js';
+import { modelArgs, effortArgs } from '../core/extraargs.js';
 
 /**
  * 权限档位 → opencode.json 的 permission 块。
@@ -39,6 +40,21 @@ import { runJsonCli, DEFAULT_TIMEOUT_MS } from '../core/runner.js';
 export function permissionConfig(tier) {
   const deny = 'deny';
   const allow = 'allow';
+
+  /**
+   * 可读档：读/搜/列目录放行，写与命令全禁。
+   *
+   * ⚠️ `external_directory: deny` 必须显式写：opencode **默认没有目录边界**
+   * （实测能直接写 /tmp）。少这一行，"可读"就会变成"全盘可读"。
+   */
+  if (tier === 'read') {
+    return {
+      read: allow, glob: allow, grep: allow, list: allow,
+      edit: deny, bash: deny, task: deny,
+      external_directory: deny,
+      webfetch: deny, skill: deny, todowrite: deny, websearch: deny, lsp: deny,
+    };
+  }
 
   if (tier === 'readonly') {
     return {
@@ -88,8 +104,11 @@ export class OpencodeAdapter extends AgentAdapter {
   #args(cwd, sessionId) {
     const args = ['run', '--format', 'json', '--dir', cwd];
     if (sessionId) args.push('-s', sessionId);
-    if (this.config.model) args.push('-m', this.config.model);
     if (this.config.agent) args.push('--agent', this.config.agent);
+    args.push(...modelArgs('opencode', this.config.model));
+    args.push(...effortArgs('opencode', this.config.effort));
+    // 附加参数放最后：让用户能盖过上面的默认值
+    args.push(...(this.config.extraArgs ?? []));
     return args;
   }
 
@@ -98,7 +117,14 @@ export class OpencodeAdapter extends AgentAdapter {
 
     const tier = this.config.tier ?? 'readonly';
     const needsHint = tier === 'write' || tier === 'writeExec';
-    const fullPrompt = withPersona(this.config.persona, (needsHint ? WRITE_HINT : '') + prompt);
+    /**
+     * read 档也要注入提示：`edit:deny + bash:deny` 会让部分模型反复重试
+     * 直到挂死（和"混合档位"是同一个病）。明确告诉它没写入权限，它才会收手。
+     */
+    const readHint = tier === 'read'
+      ? '注意：本会话没有写入与命令权限，不要尝试用 shell 或编辑工具。只阅读和回答。\n\n'
+      : '';
+    const fullPrompt = withPersona(this.config.persona, readHint + (needsHint ? WRITE_HINT : '') + prompt);
 
     let newSessionId = sessionId ?? null;
     let sawFinish = false;

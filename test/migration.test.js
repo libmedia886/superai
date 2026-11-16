@@ -241,3 +241,43 @@ test('★ 迁移不动 access-token（令牌是服务级的，不是房间级的
     '不能把令牌搬进房间目录',
   );
 });
+
+/* ---------- 迁移必须是人明确要求的动作 ---------- */
+
+test('★ 默认不迁移：服务重启不能悄悄动真实数据', async () => {
+  const dir = await makeLegacy({ lines: 5 });
+  const { ensureRoomsLayout } = await import('../src/core/rooms.js');
+
+  const r = await ensureRoomsLayout(dir, { allowMigrate: false });
+
+  assert.equal(r.single, true, '应保持单房间模式');
+  assert.equal(r.meta.pendingMigration, true);
+  assert.match(r.warning, /尚未迁移/);
+
+  // 磁盘一个字节都没动
+  assert.equal(await exists(join(dir, 'room.json')), true, 'room.json 还在原处');
+  assert.equal(await countLines(join(dir, 'room.jsonl')), 5);
+  assert.equal(await exists(join(dir, ROOMS_FILE)), false, '不能写 rooms.json');
+  assert.equal(await exists(join(dir, 'rooms')), false, '不能建 rooms/ 目录');
+});
+
+test('显式允许时才迁移', async () => {
+  const dir = await makeLegacy({ lines: 5 });
+  const { ensureRoomsLayout } = await import('../src/core/rooms.js');
+  const r = await ensureRoomsLayout(dir, { allowMigrate: true });
+  assert.equal(r.single, false);
+  assert.equal(await countLines(join(dir, 'rooms', LEGACY_ROOM_ID, 'room.jsonl')), 5);
+});
+
+test('★ startServer 默认不迁移（生产重启不会动数据）', async () => {
+  const dir = await makeLegacy({ lines: 3 });
+  const { startServer } = await import('../src/server.js');
+  const { server, manager } = await startServer({ port: 0, dataDir: dir });
+  try {
+    assert.equal(manager.meta.pendingMigration, true);
+    assert.equal(await exists(join(dir, 'rooms', LEGACY_ROOM_ID)), false, '不能建 rooms/r-legacy');
+    assert.equal(await exists(join(dir, 'room.json')), true);
+  } finally {
+    server.close();
+  }
+});

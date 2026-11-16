@@ -41,10 +41,12 @@ test('★ 不支持的后端档位必须明确拒绝，不能静默降级', asyn
   // 用户以为设成可写了，实际跑了半天什么都没改。
   const { availableTiers, TIER } = await import('../src/core/probe.js');
 
-  for (const backend of ['claude', 'codex', 'opencode']) {
-    const tiers = availableTiers(backend);
-    assert.ok(tiers.includes(TIER.READONLY), `${backend} 必须支持只读`);
+  // codex 的 read-only 沙箱本来就能读，所以它没有"无工具"那一档；
+  // claude/opencode 都能表达真正的"完全不给工具"
+  for (const backend of ['claude', 'opencode']) {
+    assert.ok(availableTiers(backend).includes(TIER.READONLY), `${backend} 必须支持只读`);
   }
+  assert.ok(availableTiers('codex').includes(TIER.READ), 'codex 的只读语义就是 read');
   // codex 没有中间档，这条语义要一直成立
   assert.ok(!availableTiers('codex').includes(TIER.WRITE));
   // 只有 claude 能表达"每次询问"

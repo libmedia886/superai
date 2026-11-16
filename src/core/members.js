@@ -22,20 +22,17 @@
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { availableTiers, TIER } from './probe.js';
+import { availableTiers, TIER, TIER_RANK } from './probe.js';
 
 export const MAX_MEMBERS = 8;
 
 /** 天花板的默认值。最安全的那一档。 */
 export const DEFAULT_AI_CAB_TIER = TIER.READONLY;
 
-/** 档位的强弱顺序，用来判断"是否超过天花板" */
-const TIER_RANK = {
-  [TIER.READONLY]: 0,
-  [TIER.WRITE_ASK]: 1,
-  [TIER.WRITE]: 2,
-  [TIER.WRITE_EXEC]: 3,
-};
+/**
+ * 档位强弱顺序见 probe.js 的 TIER_RANK —— **只此一份**。
+ * 曾经这里复制过一份，加 read 档时就漏了，天花板判定会把 read 当成"未知档位"。
+ */
 
 /**
  * 把请求的档位收敛到天花板以内。

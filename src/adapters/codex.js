@@ -12,6 +12,7 @@
 
 import { AgentAdapter, EXIT, withPersona } from './types.js';
 import { runJsonCli, DEFAULT_TIMEOUT_MS } from '../core/runner.js';
+import { modelArgs, effortArgs } from '../core/extraargs.js';
 
 export class CodexAdapter extends AgentAdapter {
   get supportsStreaming() { return false; }
@@ -38,8 +39,30 @@ export class CodexAdapter extends AgentAdapter {
       : 'read-only';
   }
 
+  /**
+   * 模型 / 思考等级：**两条路径都用 `-c`**。
+   *
+   * `codex exec resume` 不认 `-m`（实测 0.167.0 只有 -c/--json/--last/--all/-i），
+   * 首轮如果改用 `-m`，就会出现"首轮生效、第二轮丢了"这种最难查的半生效状态。
+   * 所以首轮也用 `-c`，保证两条路径参数一致。
+   *
+   * 留空 = 一个参数都不传：本机 codex 指向自家配置（~/.codex/config.toml
+   * 里有 model / model_provider），硬塞默认值会直接把它弄坏。
+   */
+  #modelEffortArgs() {
+    return [
+      ...modelArgs('codex', this.config.model),
+      ...effortArgs('codex', this.config.effort),
+    ];
+  }
+
   #baseArgs(cwd) {
-    return ['exec', '--json', '--skip-git-repo-check', '-s', this.#sandboxMode(this.config.tier), '-C', cwd];
+    return [
+      'exec', '--json', '--skip-git-repo-check',
+      '-s', this.#sandboxMode(this.config.tier), '-C', cwd,
+      ...this.#modelEffortArgs(),
+      ...(this.config.extraArgs ?? []),
+    ];
   }
 
   /**
@@ -49,7 +72,10 @@ export class CodexAdapter extends AgentAdapter {
   #resumeArgs(sessionId) {
     return [
       'exec', 'resume', '--json', '--skip-git-repo-check',
-      '-c', `sandbox_mode=${this.#sandboxMode(this.config.tier)}`, sessionId, '-',
+      '-c', `sandbox_mode=${this.#sandboxMode(this.config.tier)}`,
+      ...this.#modelEffortArgs(),
+      ...(this.config.extraArgs ?? []),
+      sessionId, '-',
     ];
   }
 

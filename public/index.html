@@ -146,6 +146,92 @@
   </div>
 </div>
 
+<!-- 成员设置弹窗（替代连问四次的 prompt） -->
+<div id="member-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="mm-title">
+  <div class="modal-panel">
+    <header class="modal-head">
+      <h2 id="mm-title">成员设置</h2>
+      <button id="mm-close" class="btn ghost" type="button">关闭</button>
+    </header>
+
+    <div class="modal-body">
+      <label class="field">
+        <span class="field-label">名字</span>
+        <input id="mm-name" autocomplete="off" spellcheck="false">
+        <span class="field-hint">@ 用它叫人。改名不影响历史记录。</span>
+      </label>
+
+      <label class="field">
+        <span class="field-label">后端</span>
+        <select id="mm-backend">
+          <option value="claude">claude</option>
+          <option value="codex">codex</option>
+          <option value="opencode">opencode</option>
+        </select>
+        <span class="field-hint" id="mm-backend-hint"></span>
+      </label>
+
+      <div class="field">
+        <span class="field-label">能力档位</span>
+        <div id="mm-tiers" class="tier-choices"></div>
+        <span class="field-hint" id="mm-tier-hint"></span>
+      </div>
+
+      <div class="field-row">
+        <label class="field">
+          <span class="field-label">模型</span>
+          <input id="mm-model" list="mm-model-list" placeholder="留空 = 用该 CLI 自己的配置" autocomplete="off" spellcheck="false">
+          <datalist id="mm-model-list"></datalist>
+          <span class="field-hint">留空不会传任何模型参数。</span>
+        </label>
+        <label class="field">
+          <span class="field-label">思考等级</span>
+          <input id="mm-effort" list="mm-effort-list" placeholder="留空 = 不传" autocomplete="off" spellcheck="false">
+          <datalist id="mm-effort-list"></datalist>
+          <span class="field-hint">按后端可选值。</span>
+        </label>
+      </div>
+
+      <label class="field">
+        <span class="field-label">附加启动参数</span>
+        <input id="mm-extra" placeholder="例：--add-dir /home/hope/notes" autocomplete="off" spellcheck="false">
+        <span class="field-hint" id="mm-extra-hint">破坏通信协议的参数会被拒绝；覆盖档位的需要你确认。</span>
+      </label>
+
+      <div class="cmd-preview">
+        <div class="cmd-preview-title">最终命令行预览</div>
+        <code id="mm-preview"></code>
+      </div>
+
+      <div id="mm-override-warn" class="override-warn hidden">
+        档位被启动参数覆盖：实际权限以参数为准，上面的档位不再生效。
+      </div>
+
+      <label class="field">
+        <span class="field-label">角色</span>
+        <select id="mm-role">
+          <option value="member">成员</option>
+          <option value="leader">头头</option>
+        </select>
+      </label>
+
+      <label class="field">
+        <span class="field-label">persona（人设）</span>
+        <textarea id="mm-persona" rows="4" placeholder="它会出现在这个成员每一轮的提示词里"></textarea>
+      </label>
+
+      <div id="mm-error" class="modal-error hidden"></div>
+    </div>
+
+    <footer class="modal-foot">
+      <button id="mm-remove" class="btn danger" type="button">删除成员</button>
+      <span class="grow"></span>
+      <button id="mm-cancel" class="btn ghost" type="button">取消</button>
+      <button id="mm-save" class="btn primary" type="button">保存</button>
+    </footer>
+  </div>
+</div>
+
 <!-- 任务详情抽屉 -->
 <div id="drawer" class="drawer hidden">
   <div class="drawer-panel">

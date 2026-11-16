@@ -270,7 +270,7 @@ export function roomDataDir(dataDir, meta, id) {
  *
  * @returns {Promise<{meta:object, single:boolean, warning:string|null}>}
  */
-export async function ensureRoomsLayout(dataDir, { log = () => {} } = {}) {
+export async function ensureRoomsLayout(dataDir, { log = () => {}, allowMigrate = true } = {}) {
   const layout = await detectLayout(dataDir);
 
   if (layout.mode === 'multi') {
@@ -279,6 +279,31 @@ export async function ensureRoomsLayout(dataDir, { log = () => {} } = {}) {
   }
 
   if (layout.mode === 'single') {
+    /**
+     * ★ 迁移必须是人明确要求的动作，不能因为"服务重启了一次"就自动发生。
+     *
+     * 这条是被真实事故推出来的：生产服务重启时自动迁移了真实数据。
+     * 结果没错（有备份、逐项核对通过），但流程上的问题是**没人决定过**。
+     * 在老板的机器上，一次没被批准的迁移如果出错，损失不可逆。
+     *
+     * 所以默认只识别、不动盘；要迁移请显式 `--migrate`。
+     */
+    if (!allowMigrate) {
+      const oldCfg = await readJson(join(dataDir, 'room.json'), {});
+      const meta = {
+        version: 1,
+        singleFallback: true,
+        pendingMigration: true,
+        rooms: [{ id: LEGACY_ROOM_ID, name: oldCfg?.name ?? '默认房间', createdAt: null }],
+        activeRoomId: LEGACY_ROOM_ID,
+      };
+      return {
+        meta,
+        single: true,
+        warning: '检测到单房间旧数据，尚未迁移。数据未被改动；确认要迁移请用 `node bin/serve.mjs --migrate` 启动（会先备份，失败自动回滚）。',
+      };
+    }
+
     const r = await migrateSingleRoom(dataDir, { log });
     if (r.ok) {
       const meta = await loadRoomsMeta(dataDir);

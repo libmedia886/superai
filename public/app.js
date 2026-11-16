@@ -106,7 +106,8 @@ function renderMemberList() {
   for (const m of state.members) {
     const li = document.createElement('li');
     li.className = 'member';
-    const tierKey = m.tier;
+    li.title = '点开设置：档位 / 模型 / 思考等级 / 启动参数';
+    const modelInfo = [m.model, m.effort].filter(Boolean).join(' · ');
     li.innerHTML = `
       <div class="member-top">
         <span class="member-name">${escapeHtml(m.name)}</span>
@@ -114,20 +115,26 @@ function renderMemberList() {
       </div>
       <div class="member-meta">
         <span>${escapeHtml(m.backend)}</span>
-        <span class="tier-badge ${tierKey}">${tierLabel(tierKey)}</span>
+        <span class="tier-badge ${m.tier}">${tierLabel(m.tier)}</span>
+        ${modelInfo ? `<span class="member-model">${escapeHtml(modelInfo)}</span>` : ''}
+        ${m.overridesTier ? '<span class="member-flag" title="启动参数里有覆盖档位的项">档位被参数覆盖</span>' : ''}
       </div>
       ${approvalNote(m.tier)}`;
     li.querySelector('.member-top').prepend(avatarEl(m.name));
+    li.onclick = () => openMemberSettings(m.id);
     ul.appendChild(li);
   }
 }
 
 function cabTierLabel(tier) {
-  return { readonly: '只读', write: '可写', 'write-exec': '可写+执行' }[tier] ?? tier;
+  return {
+    readonly: '无工具', read: '可读', 'write-ask': '可写·询问', write: '可写', 'write-exec': '可写+执行',
+  }[tier] ?? tier;
 }
 
 function tierLabel(tier) {
-  if (tier === 'readonly') return '只读';
+  if (tier === 'readonly') return '无工具';
+  if (tier === 'read') return '可读';
   if (tier === 'write-ask') return '可写·询问';
   if (tier === 'write') return '可写';
   if (tier === 'write-exec') return '可写+执行';
@@ -140,6 +147,7 @@ function tierLabel(tier) {
  */
 function approvalNote(tier) {
   if (tier === 'readonly') return '';
+  if (tier === 'read') return '';
   if (tier === 'write-ask') return '<div class="approval-note">文件写入：每次询问</div>';
   return '<div class="approval-note auto">文件写入：自动批准，不会询问</div>';
 }
@@ -831,6 +839,23 @@ function handle(ev) {
       renderStatus();
       break;
 
+    case 'member.updated': {
+      const idx = state.members.findIndex((x) => x.id === ev.member.id);
+      if (idx >= 0) state.members[idx] = ev.member;
+      renderMemberList();
+      renderRoster();
+      appendSystemNote(`@${ev.member.name} 的设置已更新`
+        + (ev.sessionReset ? '（换后端，会话已重置）' : '')
+        + (ev.member.overridesTier ? '；档位被启动参数覆盖' : ''));
+      break;
+    }
+
+    case 'member.removed':
+      state.members = state.members.filter((x) => x.id !== ev.agentId);
+      renderMemberList();
+      renderRoster();
+      break;
+
     case 'rooms.updated':
       state.rooms = ev.rooms ?? [];
       renderRoomList();
@@ -1480,33 +1505,297 @@ $('btn-add-repo').onclick = async () => {
   appendSystemNote(`已登记仓库：${path.trim()}`);
 };
 
-async function addMemberDialog() {
-  const isFirst = state.members.length === 0;
-  const name = window.prompt(
-    isFirst
-      ? '第一个成员的名字（它会是这个房间的头头，可以再让它自己加人）：'
-      : '新成员的名字（在群里用 @名字 叫它）：',
-  );
-  if (!name || !name.trim()) return;
-  const backend = (window.prompt('用哪个后端？claude / codex / opencode', 'claude') ?? '').trim();
-  if (!backend) return;
-  const tiers = { claude: 'readonly / write-ask / write / write-exec', codex: 'readonly / write-exec', opencode: 'readonly / write / write-exec' }[backend] ?? '';
-  const tier = (window.prompt(`权限档位？（${tiers}）`, 'readonly') ?? 'readonly').trim();
-  // 第一个成员固定是头头，不再问——多问一次只多一个选错的机会
-  const role = isFirst ? 'leader'
-    : (window.prompt('角色？输入 leader（头头）或 member（成员）', 'member') ?? 'member').trim();
+$('btn-add-member').onclick = () => openNewMember();
 
-  const res = await fetch('/api/member', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: name.trim(), backend, tier, role }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) return appendSystemNote(`添加失败：${data.error ?? res.status}`, 'warn');
-  appendSystemNote(`已添加成员 @${data.member?.name ?? name.trim()}（${backend} / ${tier}${data.role === 'leader' ? ' · 头头' : ''}）`);
+$('mm-close').onclick = closeMemberSettings;
+$('mm-cancel').onclick = closeMemberSettings;
+$('mm-save').onclick = saveMemberSettings;
+$('mm-remove').onclick = removeMember;
+$('member-modal').onclick = (e) => { if (e.target.id === 'member-modal') closeMemberSettings(); };
+
+// 换后端：档位列表要跟着变（codex 没有 write-ask，claude 没有 read 之外的差别）
+$('mm-backend').onchange = (e) => {
+  mm.backend = e.target.value;
+  // 档位收敛：新后端不支持当前档就落到它最保守的一档
+  const support = {
+    claude: ['readonly', 'read', 'write-ask', 'write', 'write-exec'],
+    codex: ['read', 'write-exec'],
+    opencode: ['readonly', 'read', 'write', 'write-exec'],
+  }[mm.backend] ?? ['readonly'];
+  if (!support.includes(mm.tier)) mm.tier = support[0];
+  renderTierChoices(support);
+  renderModelHints();
+  updatePreview();
+};
+
+for (const id of ['mm-model', 'mm-effort', 'mm-extra']) {
+  $(id).addEventListener('input', updatePreview);
 }
 
-$('btn-add-member').onclick = () => addMemberDialog();
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('member-modal').classList.contains('hidden')) closeMemberSettings();
+});
+
+/* ---------------- 成员设置弹窗 ---------------- */
+
+/** 档位说明文案（后端也有一份，这里是为了不依赖网络就能显示） */
+const TIER_TEXT = {
+  readonly: ['无工具', '完全碰不到文件：看不见也改不了，只能对话'],
+  read: ['可读', '能读文件和搜代码，不能改、不能执行命令'],
+  'write-ask': ['可写·每次询问', '能改文件，但每次写入都要你批准'],
+  write: ['可写', '能改工作目录内的文件，不能执行命令'],
+  'write-exec': ['可写+执行', '能改文件也能执行命令，都限制在工作目录内'],
+};
+
+const MODEL_HINTS = {
+  claude: ['fable', 'opus', 'sonnet', 'haiku'],
+  codex: [],
+  opencode: [],
+};
+
+/** 当前弹窗状态。id 为 null 表示"新建"。 */
+let mm = null;
+
+function memberByIdForSettings(id) {
+  return state.members.find((m) => m.id === id) ?? null;
+}
+
+function openMemberSettings(id) {
+  const m = memberByIdForSettings(id);
+  if (!m) return;
+
+  mm = {
+    id: m.id,
+    original: { ...m },
+    backend: m.backend,
+    tier: m.tier,
+    confirmOverride: false,
+    isNew: false,
+  };
+
+  $('mm-title').textContent = `成员设置 · ${m.name}`;
+  $('mm-name').value = m.name;
+  $('mm-backend').value = m.backend;
+  $('mm-model').value = m.model ?? '';
+  $('mm-effort').value = m.effort ?? '';
+  $('mm-extra').value = m.extraArgs ?? '';
+  $('mm-role').value = m.role;
+  $('mm-persona').value = m.persona ?? '';
+  $('mm-remove').classList.remove('hidden');
+  $('mm-error').classList.add('hidden');
+
+  renderTierChoices(m.tiers ?? []);
+  renderModelHints();
+  updatePreview();
+  $('member-modal').classList.remove('hidden');
+  $('mm-name').focus();
+}
+
+/** 新建成员也走同一个弹窗（现在新增成员要连问四次 prompt） */
+function openNewMember() {
+  const isFirst = state.members.length === 0;
+  mm = {
+    id: null, original: null, backend: 'claude',
+    tier: isFirst ? 'readonly' : 'readonly', confirmOverride: false, isNew: true, isFirst,
+  };
+  $('mm-title').textContent = isFirst ? '添加第一个成员（它会是头头）' : '添加成员';
+  $('mm-name').value = '';
+  $('mm-backend').value = 'claude';
+  $('mm-model').value = '';
+  $('mm-effort').value = '';
+  $('mm-extra').value = '';
+  $('mm-role').value = isFirst ? 'leader' : 'member';
+  $('mm-role').disabled = isFirst;   // 第一个成员固定头头，不再多问一次
+  $('mm-persona').value = '';
+  $('mm-remove').classList.add('hidden');
+  $('mm-error').classList.add('hidden');
+  renderTierChoices(['readonly', 'read', 'write-ask', 'write', 'write-exec']);
+  renderModelHints();
+  updatePreview();
+  $('member-modal').classList.remove('hidden');
+  $('mm-name').focus();
+}
+
+function closeMemberSettings() {
+  $('member-modal').classList.add('hidden');
+  $('mm-role').disabled = false;
+  mm = null;
+}
+
+function renderTierChoices(tiers) {
+  const box = $('mm-tiers');
+  box.innerHTML = '';
+  const list = tiers.length ? tiers : ['readonly'];
+
+  // 档位按强弱排序，和"只读→可写→可执行"的直觉一致
+  const order = ['readonly', 'read', 'write-ask', 'write', 'write-exec'];
+  const sorted = [...list].sort((a, b) => order.indexOf(a) - order.indexOf(b));
+
+  for (const tier of sorted) {
+    const [name, desc] = TIER_TEXT[tier] ?? [tier, ''];
+    const label = document.createElement('label');
+    label.className = `tier-choice${mm.tier === tier ? ' selected' : ''}`;
+    label.innerHTML = `
+      <input type="radio" name="mm-tier" value="${tier}" ${mm.tier === tier ? 'checked' : ''}>
+      <span class="tier-choice-main">
+        <span class="tier-choice-name">${escapeHtml(name)}</span>
+        <span class="tier-choice-desc">${escapeHtml(desc)}</span>
+      </span>`;
+    label.querySelector('input').onchange = () => {
+      mm.tier = tier;
+      renderTierChoices(list);
+      updatePreview();
+    };
+    box.appendChild(label);
+  }
+
+  // 当前档位不在该后端支持列表里（换后端后）：明确说一声，别让界面显示一个选不中的档
+  $('mm-tier-hint').textContent = list.includes(mm.tier)
+    ? ''
+    : `当前后端不支持「${mm.tier}」，请重选一档。`;
+}
+
+function renderModelHints() {
+  const hints = MODEL_HINTS[mm.backend] ?? [];
+  $('mm-model-list').innerHTML = hints.map((h) => `<option value="${escapeHtml(h)}">`).join('');
+  const m = mm.isNew ? null : memberByIdForSettings(mm.id);
+  const efforts = (m?.effortHints) ?? [];
+  $('mm-effort-list').innerHTML = efforts.map((h) => `<option value="${escapeHtml(h)}">`).join('');
+  $('mm-backend-hint').textContent = mm.backend === 'codex'
+    ? 'codex 的沙箱只有"可读"和"可写+执行"两档；模型/等级必须留空或填它自己认识的值。'
+    : '';
+}
+
+/** 参数预览：只做展示，真正的拒绝/确认在保存时由服务端判定 */
+function updatePreview() {
+  const backend = $('mm-backend').value;
+  const model = $('mm-model').value.trim();
+  const effort = $('mm-effort').value.trim();
+  const extra = $('mm-extra').value.trim();
+  const tier = mm?.tier ?? 'readonly';
+
+  const parts = [backend];
+  // 档位参数（按后端近似拼，只为让人看懂会发生什么）
+  if (backend === 'claude') {
+    if (tier === 'readonly') parts.push('--tools ""');
+    else if (tier === 'read') parts.push('--tools "Read,Grep,Glob"');
+    else parts.push('--tools "Read,Write,Edit"');
+  } else if (backend === 'codex') {
+    parts.push('-s', tier === 'write-exec' ? 'workspace-write' : 'read-only');
+  }
+  if (model) {
+    if (backend === 'claude') parts.push('--model', model);
+    else if (backend === 'codex') parts.push(`-c model="${model}"`);
+    else parts.push('-m', model);
+  }
+  if (effort) {
+    if (backend === 'claude') parts.push('--effort', effort);
+    else if (backend === 'codex') parts.push(`-c model_reasoning_effort="${effort}"`);
+    else parts.push('--variant', effort);
+  }
+  if (extra) parts.push(extra);
+
+  $('mm-preview').textContent = parts.join(' ');
+  // 覆盖标注：每次输入都重算，参数删掉就消失
+  const overrides = /(^|\s)(--tools|--permission-mode|--permission-prompts|--dangerously-skip-permissions|-s|--sandbox|sandbox_mode=|--dangerously-bypass-approvals-and-sandbox|--variant)/.test(` ${extra} `);
+  $('mm-override-warn').classList.toggle('hidden', !overrides || !extra);
+}
+
+async function saveMemberSettings() {
+  if (!mm) return;
+  const err = $('mm-error');
+  err.classList.add('hidden');
+
+  const backend = $('mm-backend').value;
+  const name = $('mm-name').value.trim();
+  if (!name) { return showModalError('名字不能为空'); }
+
+  // 换后端要说清上下文会重置（会话 id 属于旧 CLI）
+  const changingBackend = !mm.isNew && backend !== mm.original.backend;
+  if (changingBackend && !window.confirm(
+    `把这个成员的后端从 ${mm.original.backend} 换成 ${backend}？\n\n`
+    + '会话 id 属于原来的 CLI，换后端会**重置上下文**——它之前的对话记忆会丢。\n继续？',
+  )) return;
+
+  // 覆盖档位的参数要二次确认
+  const extraText = $('mm-extra').value;
+  const overrides = /(--tools|--permission-mode|--permission-prompts|--dangerously-skip-permissions|(^|\s)-s(\s|$)|--sandbox|sandbox_mode=|--dangerously-bypass-approvals-and-sandbox)/.test(extraText);
+  if (overrides && !mm.confirmOverride) {
+    if (!window.confirm(
+      '这些启动参数会覆盖能力档位，实际权限以参数为准。\n\n'
+      + `参数：${extraText}\n\n确认要用这些参数？保存后卡片上会常驻标注"档位被参数覆盖"。`,
+    )) return;
+    mm.confirmOverride = true;
+  }
+
+  const payload = {
+    name,
+    backend,
+    tier: mm.tier,
+    model: $('mm-model').value.trim(),
+    effort: $('mm-effort').value.trim(),
+    extraArgs: extraText,
+    role: $('mm-role').value,
+    persona: $('mm-persona').value,
+  };
+
+  if (mm.isNew) {
+    const res = await fetch('/api/member', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...payload, tier: mm.tier }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return showModalError(data.error ?? `保存失败（${res.status}）`);
+    appendSystemNote(`已添加成员 @${data.member?.name ?? name}（${backend} / ${tierLabel(mm.tier)}${data.role === 'leader' ? ' · 头头' : ''}）`);
+    closeMemberSettings();
+    return;
+  }
+
+  const res = await fetch('/api/member/update', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: mm.id, patch: payload, confirmOverride: mm.confirmOverride }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    return showModalError(data.error ?? `保存失败（${res.status}）`);
+  }
+
+  const bits = [];
+  if (data.changed?.includes('tier')) bits.push('档位');
+  if (data.changed?.includes('model')) bits.push('模型');
+  if (data.changed?.includes('effort')) bits.push('思考等级');
+  if (data.changed?.includes('extraArgs')) bits.push('启动参数');
+  if (data.changed?.includes('name')) bits.push('名字');
+  if (data.sessionReset) bits.push('会话已重置');
+  appendSystemNote(bits.length ? `已更新 ${name}：${bits.join('、')}（立即生效，不用重启）` : '没有改动');
+  closeMemberSettings();
+}
+
+function showModalError(text) {
+  const el = $('mm-error');
+  el.textContent = text;
+  el.classList.remove('hidden');
+}
+
+async function removeMember() {
+  if (!mm?.id) return;
+  const m = memberByIdForSettings(mm.id);
+  const isOnlyLeader = m?.role === 'leader' && state.members.filter((x) => x.role === 'leader').length === 1;
+  const warn = isOnlyLeader ? '\n\n注意：这是唯一的头头，删掉之后没有人能自动接手任务。' : '';
+  if (!window.confirm(`删除成员「${m?.name}」？\n\n历史消息会保留，只从名册移除。${warn}`)) return;
+
+  const res = await fetch('/api/member/remove', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: mm.id, confirmNoLeader: isOnlyLeader }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return showModalError(data.error ?? `删除失败（${res.status}）`);
+  appendSystemNote(`已删除成员 ${data.removed?.name ?? ''}（历史消息保留）`);
+  closeMemberSettings();
+}
 
 /* ---------------- 房间切换 ---------------- */
 
@@ -1567,7 +1856,7 @@ window.addEventListener('hashchange', () => {
   else hideRoomList();
 });
 
-$('btn-first-member').onclick = () => addMemberDialog();
+$('btn-first-member').onclick = () => openNewMember();
 
 $('btn-send').onclick = send;
 $('btn-stop').onclick = async () => {

@@ -17,7 +17,9 @@ import { randomUUID } from 'node:crypto';
 
 import { DEFAULT_DATA_DIR } from './core/config.js';
 import { RoomManager } from './core/sessions.js';
-import { availableTiers, TIER } from './core/probe.js';
+import { availableTiers, TIER, TIER_DESC, normalizeTier } from './core/probe.js';
+import { planMemberUpdate } from './core/memberSettings.js';
+import { detectTierOverride, EFFORT_HINTS } from './core/extraargs.js';
 import { exportMarkdown } from './core/export.js';
 import {
   diffAgainstBase, commitWorktree, mergeTaskBranch, finalizeTaskWorktree,
@@ -36,7 +38,16 @@ const MIME = {
  * @param {string} [o.token] 访问令牌。绑定非本机地址时**必须**提供，
  *   否则这个 URL 就是一台能让 AI 改你代码的遥控器。
  */
-export async function startServer({ port = 4321, host = '127.0.0.1', dataDir = DEFAULT_DATA_DIR, token = null } = {}) {
+export async function startServer({
+  port = 4321, host = '127.0.0.1', dataDir = DEFAULT_DATA_DIR, token = null,
+  /**
+   * 是否允许启动时把单房间旧布局迁到多房间。
+   *
+   * **默认关。** 迁移会动真实数据，必须是人的明确决定，不能因为
+   * "服务重启了一次"就悄悄发生——生产上踩过一次。
+   */
+  allowMigrate = false,
+} = {}) {
   const clients = new Set();
   const replay = [];   // 最近事件，供新连上的页面补齐状态
 
@@ -56,7 +67,7 @@ export async function startServer({ port = 4321, host = '127.0.0.1', dataDir = D
     }
   };
 
-  const manager = new RoomManager({ dataDir, onEvent: broadcast });
+  const manager = new RoomManager({ dataDir, onEvent: broadcast, allowMigrate });
   await manager.init();
 
   // 这些引用随房间切换而更新。全部经由 sync() 刷新，**不要**在别处缓存它们。
@@ -74,6 +85,29 @@ export async function startServer({ port = 4321, host = '127.0.0.1', dataDir = D
   manager.notices.length = 0;
 
   const nameOf = (id) => (id === 'human' ? '老板' : (members.find((m) => m.id === id)?.name ?? id));
+
+  /**
+   * 成员对外表示。档位覆盖标记**每次现算**，不从存储里读——
+   * 参数删掉后标记必须自己消失，否则又是一条"界面撒谎"。
+   */
+  const publicMember = (m) => ({
+    id: m.id,
+    name: m.name,
+    role: m.role,
+    backend: m.backend,
+    tier: m.tier,
+    tierDesc: TIER_DESC[m.tier] ?? '',
+    persona: m.persona ?? '',
+    model: m.model ?? '',
+    effort: m.effort ?? '',
+    extraArgs: m.extraArgsText ?? '',
+    overridesTier: detectTierOverride(m.backend, m.extraArgs ?? []),
+    colors: m.color ?? null,
+    tiers: availableTiers(m.backend),
+    effortHints: EFFORT_HINTS[m.backend] ?? [],
+    createdBy: m.createdBy ?? null,
+    createdReason: m.createdReason ?? null,
+  });
 
   // 注意：初始化信息**不能只广播一次**——页面通常在服务启动之后才连上来，
   // 所以每个新连接都要收到一份完整的 init，否则界面是空的。
@@ -97,11 +131,7 @@ export async function startServer({ port = 4321, host = '127.0.0.1', dataDir = D
       rooms: rooms.rooms,
       activeRoomId: session.id,
       singleFallback: rooms.singleFallback,
-      members: members.map((m) => ({
-        id: m.id, name: m.name, role: m.role, backend: m.backend,
-        tier: m.tier, persona: m.persona, colors: m.color ?? null,
-        tiers: availableTiers(m.backend),
-      })),
+      members: members.map(publicMember),
       history: store.messages.slice(-200),
       tasks: [...store.tasks.values()],
       roster: [...store.roster.entries()],
@@ -430,6 +460,149 @@ export async function startServer({ port = 4321, host = '127.0.0.1', dataDir = D
         return json(res, 200, { ok: true, member, role });
       }
 
+      /**
+       * 修改成员（人类专用）。
+       *
+       * 为什么单独一个接口而不是复用 /api/member：
+       * 改档位/换后端有额外的前置条件（confirmOverride、会话重置），
+       * 塞进"新建"里会让新建那条路径也带上这些含义模糊的开关。
+       */
+      if (url.pathname === '/api/member/update' && req.method === 'POST') {
+        if (!requireRoom(res)) return;
+        const body = await readJson(req);
+        const agentId = String(body.id ?? body.agentId ?? '');
+        const target = room.members.find((m) => m.id === agentId);
+        if (!target) return json(res, 404, { error: '找不到这个成员' });
+
+        const plan = planMemberUpdate({
+          member: {
+            ...cfg.members.find((m) => m.id === agentId) ?? {},
+            id: target.id,
+            name: target.name,
+            backend: target.backend,
+            tier: target.tier,
+            role: target.role,
+            persona: target.persona,
+            model: target.model,
+            effort: target.effort,
+            extraArgs: target.extraArgs ?? [],
+            extraArgsText: target.extraArgsText ?? '',
+          },
+          patch: body.patch ?? body,
+          members: room.members,
+          confirmOverride: Boolean(body.confirmOverride),
+        });
+        if (!plan.ok) {
+          return json(res, 400, {
+            error: plan.reason, code: plan.code ?? null,
+            needingConfirm: plan.needingConfirm ?? null,
+            rejected: plan.rejected ?? null,
+            availableTiers: plan.availableTiers ?? null,
+          });
+        }
+
+        const before = publicMember(target);
+        const next = plan.member;
+        const changed = plan.changed;
+
+        // 写回 cfg（配置）与 room.members（内存）——两处必须一起改，
+        // 只改一处就是"界面变了重启就回去"或"重启变了界面没变"。
+        const cfgMember = cfg.members.find((m) => m.id === agentId);
+        if (cfgMember) {
+          Object.assign(cfgMember, {
+            name: next.name,
+            backend: next.backend,
+            tier: next.tier,
+            role: next.role,
+            persona: next.persona,
+            model: next.model ?? null,
+            effort: next.effort ?? null,
+            extraArgs: next.extraArgs ?? [],
+            extraArgsText: next.extraArgsText ?? '',
+          });
+        }
+        Object.assign(target, {
+          name: next.name,
+          backend: next.backend,
+          tier: next.tier,
+          role: next.role,
+          persona: next.persona,
+          model: next.model ?? null,
+          effort: next.effort ?? null,
+          extraArgs: next.extraArgs ?? [],
+          extraArgsText: next.extraArgsText ?? '',
+          aliases: [next.name.toLowerCase()],
+        });
+
+        // 换后端：会话 id 必须清掉（旧 CLI 的 session 交错会空轮/挂死）
+        if (next.sessionReset) {
+          target.sessionId = null;
+          store.sessions.delete(agentId);
+          await store.saveSession(agentId, { sessionId: null, cwd: target.cwd ?? null, backend: next.backend });
+        }
+
+        // 角色变化 → 头头列表要跟着变
+        if (changed.includes('role')) {
+          room.leaderIds = room.members.filter((m) => m.role === 'leader').map((m) => m.id);
+          room.leaderId = room.leaderIds[0] ?? null;
+        }
+
+        await manager.persist();
+
+        const after = publicMember(target);
+        const audit = {
+          kind: 'member.updated', agentId, by: 'human', changed,
+          before: pickAudit(before), after: pickAudit(after),
+        };
+        await store.append(audit).catch(() => {});
+
+        await broadcastInit();
+        broadcast({ type: 'member.updated', member: after, changed, sessionReset: Boolean(next.sessionReset) });
+        return json(res, 200, {
+          ok: true, member: after, changed, sessionReset: Boolean(next.sessionReset),
+          overridesTier: after.overridesTier,
+        });
+      }
+
+      /** 删除成员（人类专用）。历史消息保留，只从名册移除。 */
+      if (url.pathname === '/api/member/remove' && req.method === 'POST') {
+        if (!requireRoom(res)) return;
+        const body = await readJson(req);
+        const agentId = String(body.id ?? body.agentId ?? '');
+        const idx = room.members.findIndex((m) => m.id === agentId);
+        if (idx < 0) return json(res, 404, { error: '找不到这个成员' });
+
+        const target = room.members[idx];
+        const wasLeader = target.role === 'leader';
+        const otherLeaders = room.members.filter((m) => m.id !== agentId && m.role === 'leader');
+
+        // 删掉最后一个头头会让房间失去"默认接手的人"，必须让操作者知道
+        if (wasLeader && otherLeaders.length === 0 && body.confirmNoLeader !== true) {
+          return json(res, 400, {
+            error: '这是房间里唯一的头头。删掉之后没有人能自动接手任务；确认要继续请带 confirmNoLeader。',
+            code: 'LAST_LEADER',
+          });
+        }
+
+        const before = publicMember(target);
+        room.members.splice(idx, 1);
+        cfg.members = (cfg.members ?? []).filter((m) => m.id !== agentId);
+        room.leaderIds = room.members.filter((m) => m.role === 'leader').map((m) => m.id);
+        room.leaderId = room.leaderIds[0] ?? null;
+        // 队列里排着的它也不能再跑
+        room.queue = room.queue.filter((q) => q.agentId !== agentId);
+
+        await manager.persist();
+        await store.append({
+          kind: 'member.removed', agentId, by: 'human', changed: ['removed'],
+          before: pickAudit(before), after: null,
+        }).catch(() => {});
+
+        await broadcastInit();
+        broadcast({ type: 'member.removed', agentId, name: before.name });
+        return json(res, 200, { ok: true, removed: before, historyKept: true });
+      }
+
       if (url.pathname === '/api/interrupt' && req.method === 'POST') {
         if (!requireRoom(res)) return;
         return json(res, 200, { ok: room.interrupt() });
@@ -591,6 +764,14 @@ export function isAuthorized(req, url, token) {
 function hasCookie(req, token) {
   const cookie = req.headers?.cookie ?? '';
   return cookie.split(';').some((c) => c.trim() === `maroom_token=${token}`);
+}
+
+/** 审计只记"变了什么"，不把整个 persona 复制一遍（日志会爆） */
+function pickAudit(m) {
+  return {
+    name: m.name, backend: m.backend, tier: m.tier, model: m.model,
+    effort: m.effort, extraArgs: m.extraArgs, role: m.role,
+  };
 }
 
 function readJson(req) {

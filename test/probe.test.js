@@ -71,11 +71,27 @@ test('可写+执行档：命令跑不了 = BROKEN', () => {
 });
 
 test('Codex 没有中间档，界面不能给出选了不生效的选项', () => {
-  assert.equal(supportsTier('codex', TIER.READONLY), true);
+  // `-s read-only` 允许读，所以 codex 的"只读"实际是 read 档；
+  // `readonly`（完全不给工具）它表达不了，硬给一个选了不生效的选项才是错。
+  assert.equal(supportsTier('codex', TIER.READ), true);
+  assert.equal(supportsTier('codex', TIER.READONLY), false);
+  assert.equal(supportsTier('codex', TIER.READ), true);
   assert.equal(supportsTier('codex', TIER.WRITE), false);
   assert.equal(supportsTier('codex', TIER.WRITE_ASK), false);
   assert.equal(supportsTier('codex', TIER.WRITE_EXEC), true);
-  assert.deepEqual(availableTiers('codex'), [TIER.READONLY, TIER.WRITE_EXEC]);
+  assert.deepEqual(availableTiers('codex'), [TIER.READ, TIER.WRITE_EXEC]);
+});
+
+test('★ read 档存在且 claude/opencode 都支持（老板要的"可读"）', () => {
+  assert.ok(availableTiers('claude').includes(TIER.READ));
+  assert.ok(availableTiers('opencode').includes(TIER.READ));
+  assert.ok(!availableTiers('opencode').includes(TIER.WRITE_ASK), 'opencode 没有宿主审批通道');
+});
+
+test('旧配置 codex+readonly 归一化为 read（行为不变，只改标签）', async () => {
+  const { normalizeTier } = await import('../src/core/probe.js');
+  assert.equal(normalizeTier('codex', TIER.READONLY), TIER.READ);
+  assert.equal(normalizeTier('claude', TIER.READONLY), TIER.READONLY);
 });
 
 test('"每次询问"档只有 Claude 能表达（--permission-prompts host）', () => {
