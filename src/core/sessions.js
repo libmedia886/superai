@@ -17,7 +17,7 @@
  * 复用实例才是 bug 的源头，所以这里绝不复用。
  */
 
-import { chmod, copyFile, mkdir } from 'node:fs/promises';
+import { access, chmod, constants, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 
@@ -26,6 +26,43 @@ import {
   ensureRoomsLayout, listRooms, createRoom, renameRoom, deleteRoom, setActiveRoom,
   roomDataDir, loadRoomsMeta,
 } from './rooms.js';
+
+/** curl 的候选绝对路径。**绝不查 PATH**——PATH 可能含成员的 cwd（见 installNetget）。 */
+const CURL_CANDIDATES = ['/usr/bin/curl', '/bin/curl', '/usr/local/bin/curl'];
+
+async function resolveCurlBin() {
+  for (const p of CURL_CANDIDATES) {
+    try {
+      await access(p, constants.X_OK);
+      return p;
+    } catch { /* 下一个 */ }
+  }
+  return null;
+}
+
+/**
+ * 生成受约束的网络读取器。
+ *
+ * ★ `exec curl` 里那个 `curl` 必须是**绝对路径**，且生成时就定下来。
+ *   管理方 22:31 复现的提权：成员能写自己的 cwd，往里面放一个假的 `curl`，
+ *   而包装器用裸命令名调用 → 真正执行的就不是 curl，协议限制 / GET-only /
+ *   目录内写**全部归零**。实测那条假 curl 把 /etc/hostname 写到了 /tmp。
+ *   **能写自己目录 + 走 PATH 找工具 = 提权。**
+ *
+ * 找不到 curl 时**拒绝生成**，不回退到裸名字（否则洞又回来了）。
+ */
+export async function installNetget(targetPath) {
+  const curl = await resolveCurlBin();
+  if (!curl) throw new Error('找不到 curl 的绝对路径（/usr/bin/curl 等），拒绝生成 netget');
+
+  const template = await readFile(fileURLToPath(new URL('../../bin/netget', import.meta.url)), 'utf8');
+  const body = template.replace("'@CURL_BIN@'", `'${curl}'`);
+  if (body.includes('@CURL_BIN@')) throw new Error('netget 模板里没有 @CURL_BIN@ 占位符，生成会失效');
+
+  await writeFile(targetPath, body, { mode: 0o755 });
+  await chmod(targetPath, 0o755);
+  return { path: targetPath, curl };
+}
 
 export class RoomManager {
   /**
@@ -105,8 +142,7 @@ export class RoomManager {
     await mkdir(binDir, { recursive: true });
     const netgetPath = join(binDir, 'netget');
     try {
-      await copyFile(fileURLToPath(new URL('../../bin/netget', import.meta.url)), netgetPath);
-      await chmod(netgetPath, 0o755);
+      await installNetget(netgetPath);
     } catch (err) {
       // 生成失败不能静默：成员配了 netget 也跑不了，界面必须知道
       this.notices.push(`网络读取器生成失败（${err.message}），配了 netget 的成员将无法联网`);

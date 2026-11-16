@@ -13,6 +13,15 @@
 #
 # 由 app 生成在**成员 cwd 之外**（<data>/bin/netget），成员即使有 Write 也改不到它。
 #
+# ★ 绝不走 PATH 找 curl（管理方 22:31 复现的提权）：
+#   成员能写自己的 cwd，如果在里面放一个假的 `curl`，而本脚本用裸 `curl` 调用，
+#   那真正执行的就不是 curl —— 协议限制、GET-only、目录内写**全部归零**。
+#   实测：PATH=$PWD:$PATH netget https://… → 执行了成员放置的脚本，把 /etc/hostname
+#   写到了 /tmp。所以：
+#     · curl 用**绝对路径**（生成时解析好写死，不在运行时查）
+#     · PATH 重设为固定系统路径，不继承成员的 PATH
+#     · 用绝对路径调 coreutils，避免同样的问题
+#
 # 退出码（调用方与测试据此判断）：
 #   0 成功
 #   2 参数/协议不允许
@@ -20,6 +29,35 @@
 #   4 下载失败（curl 非 0）
 
 set -u
+set -o pipefail
+
+# 不继承调用方的 PATH：里面可能含着成员的 cwd
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+# curl 的绝对路径在生成时由 app 写死（见 sessions.js）。
+# 未替换时（例如仓库里这份模板被直接调用）回退到**固定绝对候选**——
+# 依然是绝对路径，**绝不查 PATH**。
+CURL_BIN='@CURL_BIN@'
+# 模板未被替换时（仓库里这份原件被直接调用）：回退到固定绝对候选，绝不查 PATH
+case "$CURL_BIN" in
+  *'@'*) 
+    CURL_BIN=''
+    for cand in /usr/bin/curl /bin/curl /usr/local/bin/curl; do
+      if [ -x "$cand" ]; then CURL_BIN="$cand"; break; fi
+    done ;;
+esac
+if [ -z "$CURL_BIN" ] || [ ! -x "$CURL_BIN" ]; then
+  echo "netget: 找不到可用的 curl（拒绝执行；不会去 PATH 里找）" >&2
+  exit 5
+fi
+# 再用绝对路径的 realpath 复核一次（防止 app 生成时读到的是被篡改的路径）
+REAL_CURL=$(/usr/bin/realpath -m -- "$CURL_BIN" 2>/dev/null || echo "$CURL_BIN")
+case "$REAL_CURL" in
+  /usr/bin/*|/bin/*|/usr/local/bin/*) ;;
+  *) echo "netget: curl 路径不可信（$REAL_CURL），拒绝执行" >&2; exit 5 ;;
+esac
+CURL_BIN="$REAL_CURL"
 
 MAX_TIME="${NETGET_MAX_TIME:-25}"     # 单次最长秒数
 MAX_REDIRECTS="${NETGET_MAX_REDIRECTS:-3}"
@@ -67,15 +105,16 @@ CURL_ARGS=(-sS -L --max-time "$MAX_TIME" --max-redirs "$MAX_REDIRECTS"
 
 if [ -n "$out" ]; then
   # realpath -m：允许目标还不存在；解析 .. 与符号链接，防止绕过
-  real_out=$(realpath -m -- "$out") || { echo "netget: 无法解析输出路径" >&2; exit 2; }
-  real_cwd=$(realpath -m -- "$PWD") || { echo "netget: 无法解析工作目录" >&2; exit 2; }
+  real_out=$(/usr/bin/realpath -m -- "$out") || { echo "netget: 无法解析输出路径" >&2; exit 2; }
+  real_cwd=$(/usr/bin/realpath -m -- "$PWD") || { echo "netget: 无法解析工作目录" >&2; exit 2; }
 
   case "$real_out" in
     "$real_cwd"/*) ;;
     *) echo "netget: 拒绝写到工作目录之外（$real_out 不在 $real_cwd 内）" >&2; exit 3 ;;
   esac
 
-  exec curl "${CURL_ARGS[@]}" -o "$real_out" "$url" 2>&1
+  # 注意用 exec 的是**绝对路径**，不是裸 curl
+  exec "$CURL_BIN" "${CURL_ARGS[@]}" -o "$real_out" "$url" 2>&1
 fi
 
-exec curl "${CURL_ARGS[@]}" "$url" 2>&1
+exec "$CURL_BIN" "${CURL_ARGS[@]}" "$url" 2>&1

@@ -107,7 +107,70 @@ test('★ 包装器必须生成在成员 cwd 之外（否则成员能改写边�
   const { readFile: rf } = await import('node:fs/promises');
   const src = await rf(new URL('../src/core/sessions.js', import.meta.url), 'utf8');
   assert.match(src, /const binDir = join\(dir, 'bin'\)/, '应放在房间目录的 bin/ 下');
-  assert.match(src, /chmod\(netgetPath, 0o755\)/);
+  assert.match(src, /installNetget\(netgetPath\)/, '由 installNetget 生成（内部 chmod 0755）');
   // 成员 cwd 是 <数据目录>/agents/<id>；bin 是其同级，不在里面
   assert.ok(!src.includes("join(cwd, 'netget')"), '绝不能放进成员自己的工作目录');
+});
+
+/* ---------------- PATH 提权（管理方 22:31 复现的洞） ---------------- */
+
+test('★ 真的跑脚本：cwd 里放一个假 curl，netget 不能执行它', async () => {
+  /**
+   * 这是管理方复现的提权，也是 CR-032 最关键的回归测试：
+   *   · 成员能写自己的 cwd
+   *   · 如果在里面放一个假的 `curl`，而 netget 用裸命令名调用
+   *   · 那真正执行的就不是 curl → 协议限制、GET-only、目录内写全部归零
+   * 实测那条假 curl 把 /etc/hostname 写到了 /tmp。
+   *
+   * 必须**真的跑脚本**，不能只 grep 代码里有没有 `PATH=`。
+   */
+  const { writeFile, chmod: ch } = await import('node:fs/promises');
+  const dir = await mkdtemp(join(tmpdir(), 'pwn-'));
+  const canary = `/tmp/netget-pwned-${Date.now()}.txt`;
+
+  // 放一个假 curl：只要被执行就会留下 canary
+  const fake = join(dir, 'curl');
+  await writeFile(fake, `#!/bin/bash\ntouch ${canary}\necho PWNED\n`, { mode: 0o755 });
+  await ch(fake, 0o755);
+
+  // 用污染过的 PATH 跑 netget —— 模拟成员环境的实际状况
+  let stdout = '';
+  try {
+    const r = await exec(NETGET, ['https://example.com'], {
+      cwd: dir,
+      timeout: 30_000,
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+    });
+    stdout = r.stdout;
+  } catch (err) {
+    stdout = err.stdout ?? '';
+  }
+
+  assert.equal(await exists(canary), false,
+    '假 curl 被执行了！netget 走了 PATH —— 所有边界都失效了');
+  assert.doesNotMatch(stdout, /PWNED/, '输出里不能有假 curl 的痕迹');
+});
+
+test('★ netget 里不能出现裸 `exec curl`（静态兜底）', async () => {
+  const src = await readFile(NETGET, 'utf8');
+  const lines = src.split('\n').filter((l) => !l.trim().startsWith('#'));
+  for (const l of lines) {
+    assert.doesNotMatch(l, /\bexec\s+curl\b/,
+      `不能 exec 裸 curl（会走 PATH）：${l.trim()}`);
+  }
+  assert.match(src, /CURL_BIN/, '必须有绝对路径的 curl');
+  assert.match(src, /^PATH=\/usr\/local\/sbin:/m, 'PATH 必须被重设为固定系统路径');
+});
+
+test('★ 生成的 netget 里 curl 是绝对路径（不是占位符、不是裸名字）', async () => {
+  const { installNetget } = await import('../src/core/sessions.js');
+  const dir = await mkdtemp(join(tmpdir(), 'gen-'));
+  const target = join(dir, 'netget');
+  const r = await installNetget(target);
+
+  assert.match(r.curl, /^\/(usr|bin)\//, `解析出的 curl 必须是绝对路径：${r.curl}`);
+  const body = await readFile(target, 'utf8');
+  assert.ok(!body.includes('@CURL_BIN@'), '占位符必须被替换');
+  assert.match(body, new RegExp(`CURL_BIN='${r.curl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'`),
+    '写死解析出的绝对路径');
 });

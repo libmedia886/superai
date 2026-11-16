@@ -349,3 +349,12 @@ test('清单：CR-032 网络读取的边界（能联网取资料，但写不出�
   assert.doesNotMatch(TIER_DESC['write-exec'], /执行任意命令/);
   assert.match(TIER_DESC['write-exec'], /默认全禁|需单独允许/);
 });
+
+test('清单：netget 绝不走 PATH 找 curl（成员能写自己 cwd）', async () => {
+  await mustMention('core/sessions.js', 'CURL_CANDIDATES', 'curl 必须是绝对路径候选');
+  await mustMention('core/sessions.js', 'installNetget', '生成时写死 curl 路径');
+  const src = await readFile(new URL('../bin/netget', import.meta.url), 'utf8');
+  assert.match(src, /^PATH=\/usr\/local\/sbin:/m, 'PATH 必须重设为固定系统路径');
+  assert.doesNotMatch(src.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n'),
+    /\bexec\s+curl\b/, '不能 exec 裸 curl');
+});
