@@ -67,8 +67,10 @@
 
     <footer class="composer">
       <div class="mention-hint" id="mention-hint"></div>
+      <!-- @ 候选列表：打 @ 就出现，可点选 / 上下键 / 回车插入 -->
+      <div id="mention-menu" class="mention-menu hidden" role="listbox" aria-label="选择要 @ 的成员"></div>
       <div class="composer-row">
-        <textarea id="input" rows="1" placeholder="对房间说话；用 @名字 点名让谁发言。Enter 发送，Shift+Enter 换行"></textarea>
+        <textarea id="input" rows="1" placeholder="对房间说话；打 @ 会弹出成员列表。Enter 发送，Shift+Enter 换行"></textarea>
         <button id="btn-send" class="btn primary">发送</button>
       </div>
     </footer>

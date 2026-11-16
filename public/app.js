@@ -675,23 +675,120 @@ function connect() {
 
 const names = () => state.members.map((m) => m.name);
 
+/** @ 候选菜单的状态 */
+const mention = {
+  open: false,
+  items: [],        // [{name, role, backend, id}]
+  active: 0,        // 当前高亮项
+  atIndex: -1,      // 触发这次补全的 '@' 在输入框里的位置
+};
+
+/**
+ * 找出光标前是否有"正在输入的 @"。
+ *
+ * 关键：**只打一个 @ 也要出列表**（frag 为空时返回全部候选）。
+ * 之前要求 frag.length > 0 才算，所以用户打 @ 什么都没出现，
+ * 感觉就是"这功能不存在"。
+ */
+function findMentionContext(value, caret) {
+  const before = value.slice(0, caret);
+  const at = before.lastIndexOf('@');
+  if (at < 0) return null;
+
+  const frag = before.slice(at + 1);
+  // 名字里不会有空格/换行，所以遇到空白就说明这个 @ 已经结束了
+  if (/\s/.test(frag)) return null;
+  return { atIndex: at, frag };
+}
+
+function openMentionMenu(ctx) {
+  const frag = ctx.frag.toLowerCase();
+  // 头头优先，其余按加入顺序——和广播顺序一致，用户看到的就是联系人顺序
+  const ordered = [...state.members].sort((a, b) => {
+    const la = a.role === 'leader' ? 0 : 1;
+    const lb = b.role === 'leader' ? 0 : 1;
+    return la - lb;
+  });
+
+  const hits = ordered.filter((m) => m.name.toLowerCase().startsWith(frag));
+  if (!hits.length) { closeMentionMenu(); return; }
+
+  mention.open = true;
+  mention.items = hits;
+  mention.atIndex = ctx.atIndex;
+  mention.active = 0;
+
+  const menu = $('mention-menu');
+  menu.classList.remove('hidden');
+  menu.innerHTML = '';
+  hits.forEach((m, i) => {
+    const row = document.createElement('div');
+    row.className = `mention-item${i === 0 ? ' active' : ''}`;
+    row.setAttribute('role', 'option');
+    row.dataset.index = String(i);
+    row.innerHTML = `
+      <span class="mention-name">@${escapeHtml(m.name)}</span>
+      <span class="mention-role ${m.role === 'leader' ? '' : 'member'}">${m.role === 'leader' ? '头头' : '成员'}</span>
+      <span class="mention-backend">${escapeHtml(m.backend ?? '')}</span>`;
+    // 点选
+    row.onmousedown = (e) => {
+      e.preventDefault();   // 别让输入框失焦
+      pickMention(i);
+    };
+    menu.appendChild(row);
+  });
+}
+
+function closeMentionMenu() {
+  mention.open = false;
+  mention.items = [];
+  mention.atIndex = -1;
+  $('mention-menu').classList.add('hidden');
+  $('mention-menu').innerHTML = '';
+}
+
+function highlightMention(index) {
+  mention.active = index;
+  const menu = $('mention-menu');
+  [...menu.children].forEach((el, i) => el.classList.toggle('active', i === index));
+  menu.children[index]?.scrollIntoView({ block: 'nearest' });
+}
+
+/** 选中第 i 个候选：把 @frag 替换成 @名字 + 空格，光标放到名字后 */
+function pickMention(i) {
+  const item = mention.items[i];
+  if (!item) return;
+
+  const input = $('input');
+  const v = input.value;
+  const caret = input.selectionStart ?? v.length;
+  const start = mention.atIndex;
+  const insert = `@${item.name} `;
+
+  input.value = v.slice(0, start) + insert + v.slice(caret);
+  const pos = start + insert.length;
+  input.setSelectionRange(pos, pos);
+  input.focus();
+
+  closeMentionMenu();
+  autoGrow(input);
+  updateMentionHint();
+}
+
 function updateMentionHint() {
   const v = $('input').value;
   const hint = $('mention-hint');
+  const caret = $('input').selectionStart ?? v.length;
 
-  // 补全：正在打某个 @名字
-  const at = v.lastIndexOf('@');
-  if (at >= 0) {
-    const frag = v.slice(at + 1).split(/\s/)[0];
-    if (frag.length > 0 && !v.slice(at + 1).includes(' ')) {
-      const hits = names().filter((n) => n.toLowerCase().startsWith(frag.toLowerCase()));
-      if (hits.length) {
-        hint.textContent = '点名：' + hits.map((h) => '@' + h).join('  ');
-        hint.className = 'mention-hint';
-        return;
-      }
-    }
+  // 光标前有未完成的 @ → 弹候选列表
+  const ctx = findMentionContext(v, caret);
+  if (ctx) {
+    openMentionMenu(ctx);
+    hint.textContent = '';
+    hint.className = 'mention-hint';
+    return;
   }
+  closeMentionMenu();
 
   // 广播预告：不写 @ 会叫起所有人，得先让人知道
   const mentionsAnyone = /[@＠]\s*[\w一-鿿]/.test(v);
@@ -935,10 +1032,40 @@ $('drawer').onclick = (e) => { if (e.target.id === 'drawer') $('drawer').classLi
 
 $('input').addEventListener('input', (e) => { autoGrow(e.target); updateMentionHint(); });
 $('input').addEventListener('keydown', (e) => {
+  // 候选列表开着时，方向键/回车/Tab 归它用
+  if (mention.open) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      highlightMention((mention.active + 1) % mention.items.length);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      highlightMention((mention.active - 1 + mention.items.length) % mention.items.length);
+      return;
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      pickMention(mention.active);
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeMentionMenu();
+      return;
+    }
+  }
+
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     send();
   }
+});
+
+// 光标移动也要更新候选（在已有 @ 中间点来点去时）
+$('input').addEventListener('click', updateMentionHint);
+$('input').addEventListener('keyup', (e) => {
+  if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) updateMentionHint();
 });
 
 renderStatus();
