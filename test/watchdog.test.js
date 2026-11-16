@@ -154,3 +154,90 @@ test('工具结束后 in-flight 标记清理，看门狗恢复常规窗口', asy
   assert.equal(h.isStalled('a', { timeoutMs: 180_000, now: t0 + 89_000 }), false);
   assert.equal(h.isStalled('a', { timeoutMs: 180_000, now: t0 + 91_000 }), true);
 });
+
+/* ---------- 慢启动提示：首 token 前要有人看得见 ---------- */
+
+test('★ 首 token 前沉默超阈值 → 发一条"还在等第一个 token"的提示（不杀）', async () => {
+  const { Room } = await import('../src/core/room.js');
+  const { Store } = await import('../src/core/store.js');
+  const { mkdtemp } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+
+  const dir = await mkdtemp(join(tmpdir(), 'slow-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+  const events = [];
+
+  const room = new Room({
+    id: 'r', name: 't',
+    members: [{ id: 'a', name: 'a', role: 'leader', backend: 'claude', tier: 'readonly', cwd: dir, aliases: ['a'] }],
+    store,
+    resolveAdapter: () => ({
+      async run({ onEvent, signal }) {
+        onEvent?.({ type: 'meta', sessionId: 's' });
+        // 首 token 前沉默 400ms（测试里压缩；真实是几十秒）
+        await new Promise((r) => setTimeout(r, 400));
+        if (signal?.aborted) return { text: '', reason: 'interrupted' };
+        onEvent?.({ type: 'text', text: '终于开口了', done: false });
+        return { text: '终于开口了', sessionId: 's', reason: 'completed', usage: null };
+      },
+    }),
+    onEvent: (e) => events.push(e),
+  });
+  room.turnTimeoutMs = 20_000;
+  room.slowStartMs = 80;   // 阈值压到 80ms，确定会触发
+
+  await room.humanSay('@a 说说');
+  await room.drain();
+
+  const notice = events.find((e) => e.type === 'notice' && e.slowStart);
+  assert.ok(notice, '首 token 前要给一条可见提示（否则用户看到的就是"卡住了"）');
+  assert.match(notice.text, /还在等第一个 token/);
+  // 关键：只是提示，不能因此杀掉这一轮
+  assert.ok(events.some((e) => e.type === 'message' && e.message.body.includes('终于开口了')),
+    '提示之后这一轮必须正常跑完');
+});
+
+test('已经吐过 token 之后不再发慢启动提示', async () => {
+  const { Room } = await import('../src/core/room.js');
+  const { Store } = await import('../src/core/store.js');
+  const { mkdtemp } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+
+  const dir = await mkdtemp(join(tmpdir(), 'slow2-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+  const events = [];
+
+  const room = new Room({
+    id: 'r', name: 't',
+    members: [{ id: 'a', name: 'a', role: 'leader', backend: 'claude', tier: 'readonly', cwd: dir, aliases: ['a'] }],
+    store,
+    resolveAdapter: () => ({
+      async run({ onEvent }) {
+        onEvent?.({ type: 'meta', sessionId: 's' });
+        onEvent?.({ type: 'text', text: '开', done: false });   // 立刻吐字
+        await new Promise((r) => setTimeout(r, 400));
+        onEvent?.({ type: 'text', text: '完了', done: false });
+        return { text: '开了完了', sessionId: 's', reason: 'completed', usage: null };
+      },
+    }),
+    onEvent: (e) => events.push(e),
+  });
+  room.turnTimeoutMs = 20_000;
+  room.slowStartMs = 80;
+
+  await room.humanSay('@a 说说');
+  await room.drain();
+  assert.ok(!events.some((e) => e.type === 'notice' && e.slowStart), '已经开口了不该再提示');
+});
+
+test('slowStartThreshold 必须早于卡死窗口（否则提示出来时已经被杀了）', async () => {
+  const { slowStartThreshold, stallThreshold } = await import('../src/core/health.js');
+  for (const t of [30_000, 120_000, 180_000, 20 * 60_000, 120 * 60_000]) {
+    assert.ok(slowStartThreshold(t) < stallThreshold(t),
+      `上限 ${t}：慢启动提示(${slowStartThreshold(t)}) 必须早于卡死判定(${stallThreshold(t)})`);
+  }
+});

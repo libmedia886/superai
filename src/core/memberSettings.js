@@ -200,7 +200,16 @@ export function planMemberUpdate({ member, patch = {}, members = [], confirmOver
   if (patch.timeoutMinutes !== undefined) {
     const raw = String(patch.timeoutMinutes ?? '').trim();
     if (!raw) {
+      /**
+       * 清空 = 「用房间默认」。
+       *
+       * ★ 同时把旧的 `timeoutMs` 一起清掉。否则清空只是"删掉界面字段"，
+       * 实际值会静默回落到 room.json 里手写的那个值——用户以为变成默认了，
+       * 其实还是 30 分钟。这种"看起来改了、实际没改"正是本项目的头号问题。
+       * 用户能看到手写标记，弹窗里也写明了清空的后果，所以这不是隐藏行为。
+       */
       if (next.timeoutMinutes != null) { next.timeoutMinutes = null; changed.push('timeoutMinutes'); }
+      if (next.timeoutMs != null) { next.timeoutMs = null; changed.push('timeoutMs'); }
     } else {
       const n = Number(raw);
       if (!Number.isFinite(n) || n < 1 || n > 120) {
@@ -208,6 +217,8 @@ export function planMemberUpdate({ member, patch = {}, members = [], confirmOver
       }
       if (n !== next.timeoutMinutes) {
         next.timeoutMinutes = n;
+        // 界面字段一旦有了明确值，手写的旧字段就该让位，别留两个来源
+        if (next.timeoutMs != null) { next.timeoutMs = null; changed.push('timeoutMs'); }
         changed.push('timeoutMinutes');
       }
     }

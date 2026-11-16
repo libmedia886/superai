@@ -413,3 +413,28 @@ test('★ 手写 timeoutMs 会压过界面设置 → 必须显式暴露，不能
   assert.equal(timeoutSource(merged), 'member');
   assert.equal(resolveMemberTimeoutMs(merged, 20 * 60_000), 25 * 60_000);
 });
+
+test('★ 清空「单轮上限」= 用房间默认，同时清掉手写的 timeoutMs（不能静默回落到 30 分钟）', async () => {
+  const { planMemberUpdate } = await import('../src/core/memberSettings.js');
+  const member = {
+    id: 'a1', name: 'a1', backend: 'claude', tier: 'readonly',
+    timeoutMinutes: 12, timeoutMs: 30 * 60_000,
+  };
+
+  const cleared = planMemberUpdate({ member, patch: { timeoutMinutes: '' } });
+  assert.equal(cleared.ok, true);
+  assert.equal(cleared.member.timeoutMinutes, null);
+  assert.equal(cleared.member.timeoutMs, null, '不清掉的话实际值会静默回到 30 分钟');
+  assert.ok(cleared.changed.includes('timeoutMs'));
+
+  // 清空后来源回到房间默认
+  const { timeoutSource, resolveMemberTimeoutMs } = await import('../src/core/room.js');
+  const merged = { ...member, ...cleared.member };
+  assert.equal(timeoutSource(merged), 'room');
+  assert.equal(resolveMemberTimeoutMs(merged, 20 * 60_000), 20 * 60_000);
+
+  // 直接填新值也会把旧字段让位
+  const set = planMemberUpdate({ member: { ...member }, patch: { timeoutMinutes: '25' } });
+  assert.equal(set.member.timeoutMinutes, 25);
+  assert.equal(set.member.timeoutMs, null);
+});

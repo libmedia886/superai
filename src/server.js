@@ -516,6 +516,7 @@ export async function startServer({
             extraArgsText: target.extraArgsText ?? '',
             allowedCommands: target.allowedCommands ?? [],
             timeoutMinutes: target.timeoutMinutes ?? null,
+            timeoutMs: target.timeoutMs ?? null,
           },
           patch: body.patch ?? body,
           members: room.members,
@@ -551,6 +552,8 @@ export async function startServer({
             allowedCommands: next.allowedCommands ?? [],
             allowedCommandsText: next.allowedCommandsText ?? '',
             timeoutMinutes: next.timeoutMinutes ?? null,
+            // 清空界面字段时也要把手写的旧字段一起清掉（见 memberSettings）
+            timeoutMs: next.timeoutMs ?? null,
           });
         }
         Object.assign(target, {
@@ -566,6 +569,7 @@ export async function startServer({
           allowedCommands: next.allowedCommands ?? [],
           allowedCommandsText: next.allowedCommandsText ?? '',
           timeoutMinutes: next.timeoutMinutes ?? null,
+          timeoutMs: next.timeoutMs ?? null,
           aliases: [next.name.toLowerCase()],
         });
 

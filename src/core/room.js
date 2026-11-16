@@ -15,7 +15,7 @@ import {
 } from './compact.js';
 import { EXIT } from '../adapters/types.js';
 import { LoopGuard } from './guard.js';
-import { HealthTracker, retryDecision, stallThreshold } from './health.js';
+import { HealthTracker, retryDecision, stallThreshold, slowStartThreshold } from './health.js';
 import { HandoffState, ASK_INSTRUCTION, buildHandoffRebootstrap, extractHandoff } from './handoff.js';
 import { AutoAdvanceGuard } from './autoadvance.js';
 import { UsageWatcher } from './usage.js';
@@ -177,6 +177,8 @@ export class Room {
      * 正文一个字没产出。越认真干活越容易被杀——这是设计错误，不是参数没调好。
      */
     this.turnTimeoutMs = turnTimeoutMs;
+    /** 慢启动提示阈值（毫秒）。null = 按硬上限推算；测试可覆盖。 */
+    this.slowStartMs = null;
     /** 只读档的自动重试次数。可写及以上永不自动重试（可能已产生副作用） */
     this.maxRetries = 2;
     this.summaries = new Map(); // agentId -> 最新摘要
@@ -688,6 +690,10 @@ export class Room {
     let aborted = false;
     let acc = '';
     let adapterResult = null;
+    /** 本轮工具调用次数：决定"零产出能不能续做"与超时原因的措辞 */
+    let rowToolsInTurn = 0;
+    /** 是否已经吐出过第一个 token（正文或思考都算） */
+    let sawFirstToken = false;
 
     // 成员可单独配单轮上限（分钟）；留空用房间默认
     const timeoutMs = resolveMemberTimeoutMs(agent, this.turnTimeoutMs);
@@ -719,7 +725,9 @@ export class Room {
             sessionId: ev.sessionId, cwd: runCwd, backend: agent.backend, taskId: job.taskId ?? null,
           }).catch(() => {});
         }
-        if (ev.type === 'text' && ev.text) acc += ev.text;
+        if (ev.type === 'text' && ev.text) { acc += ev.text; sawFirstToken = true; }
+        if (ev.type === 'thinking' && ev.text) sawFirstToken = true;
+        if (ev.type === 'tool') sawFirstToken = true;
         // 写操作日志：每次工具调用落一条事件。
         // 可写档出问题时，没有这个就只能靠猜"它到底改了什么"。
         if (ev.type === 'tool') {
@@ -751,6 +759,7 @@ export class Room {
          * 放宽不等于永不杀：硬上限（本轮 timeoutMs）仍然兜底。
          */
         if (ev.type === 'tool') {
+          rowToolsInTurn += 1;
           this._toolFlight = this._toolFlight ?? new Map();
           const cur = this._toolFlight.get(agent.id) ?? { count: 0, since: Date.now() };
           this._toolFlight.set(agent.id, { count: cur.count + 1, since: Date.now() });
@@ -796,6 +805,29 @@ export class Room {
       ac.abort('stalled');
     }, Math.max(5000, Math.floor(stallThreshold(timeoutMs) / 4)));
 
+    /**
+     * 慢启动提示。
+     *
+     * 首 token 之前应用里什么都没有，用户看到的就是"卡住了"——而它可能正在
+     * 很深地思考。说一句"还在等第一个 token（已 N 秒）"改变不了速度，
+     * 但能让人知道系统没死，别去点停止（点了就是这一轮全废）。
+     *
+     * 只提示一次，且不打断任何东西（这只是个 notice）。
+     */
+    // 允许测试压缩时间；生产用阈值函数
+    const slowStartMs = this.slowStartMs ?? slowStartThreshold(timeoutMs);
+    const slowTimer = setTimeout(() => {
+      if (sawFirstToken || ac.signal.aborted) return;
+      this.onEvent({
+        type: 'notice',
+        level: 'info',
+        agentId: agent.id,
+        slowStart: true,
+        elapsedMs: slowStartMs,
+        text: `${agent.name} 还在等第一个 token（已 ${Math.round(slowStartMs / 1000)} 秒）——它没死，只是还没开始说话`,
+      });
+    }, slowStartMs);
+
     try {
       adapterResult = await adapter.run({ ...runInput, signal: ac.signal });
       if (ac.signal.aborted) {
@@ -812,6 +844,7 @@ export class Room {
       adapterResult = { text: acc, reason: EXIT.CRASHED, error: String(err?.message ?? err) };
     } finally {
       clearInterval(stallTimer);
+      clearTimeout(slowTimer);
       this.current = null;
     }
 
@@ -935,9 +968,17 @@ export class Room {
         });
       }
 
-      // 自动重试：只允许只读档（可写档重试可能重复执行副作用）
+      // 自动重试：判据是「有没有可能产生副作用」，不是「有没有权限」。
+      // 零产出且一次工具都没跑 → 磁盘和外部世界都没被碰过，续做安全；
+      // 有工具调用则绝不续做（可能已经写了文件/发了请求）。
+      // 这条区分也顺手修了 write-exec 成员"最容易超时却永不续做"的不对称。
       const decision = retryDecision({
-        tier: agent.tier, reason, attempt: job.attempt ?? 0, maxAttempts: this.maxRetries,
+        tier: agent.tier,
+        reason,
+        attempt: job.attempt ?? 0,
+        maxAttempts: this.maxRetries,
+        stalled: stalledOut || isStall(adapterResult, durationMs),
+        toolCalls: rowToolsInTurn,
       });
       if (decision.retry) {
         this.onEvent({ type: 'retry', agentId: agent.id, reason: decision.reason });
@@ -996,12 +1037,12 @@ export class Room {
         stalled: stalledOut,
         durationMs,
         timeoutMs,
-        toolCalls: (this.toolLog ?? []).filter((t) => t.agentId === agent.id && t.at >= startedAt).length,
+        toolCalls: rowToolsInTurn,
         at: Date.now(),
       }).catch(() => {});
       this._pause('timeout',
         `${agent.name} 跑满 ${Math.round(timeoutMs / 1000)} 秒被中止`
-        + `（本轮有 ${(this.toolLog ?? []).filter((t) => t.agentId === agent.id && t.at >= startedAt).length} 次工具调用）`
+        + `（本轮有 ${rowToolsInTurn} 次工具调用）`
         + '。它可能正在干活——看门狗没有判它卡死，是硬上限到了。');
     }
 

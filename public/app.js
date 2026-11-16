@@ -1132,7 +1132,16 @@ function handle(ev) {
       break;
 
     case 'notice':
-      appendSystemNote(ev.text, ev.level);
+      // 慢启动提示是"它还活着"的信号，不是警告：用 info 样式，别用黄色
+      appendSystemNote(ev.text, ev.slowStart ? 'info' : ev.level);
+      break;
+
+    case 'retry':
+      appendSystemNote(`${nameOf(ev.agentId)} 续做一次：${ev.reason}`, 'info');
+      break;
+
+    case 'retry.given-up':
+      appendSystemNote(`${nameOf(ev.agentId)} 不会自动续做：${ev.reason}`, 'warn');
       break;
 
     case 'failure':
@@ -1659,7 +1668,7 @@ function openMemberSettings(id) {
   $('mm-timeout-hint').textContent = m.timeoutSource === 'legacy'
     ? `⚠️ 当前实际生效的是 ${m.effectiveTimeoutMinutes} 分钟，来自 room.json 里手写的 timeoutMs；`
       + '在这里填一个值会覆盖它，并让界面与实际情况重新一致。'
-    : `实际生效：${m.effectiveTimeoutMinutes} 分钟。`;
+    : `实际生效：${m.effectiveTimeoutMinutes} 分钟。清空 = 用房间默认，并删除配置里手写的旧值。`;
   $('mm-role').value = m.role;
   $('mm-persona').value = m.persona ?? '';
   $('mm-remove').classList.remove('hidden');

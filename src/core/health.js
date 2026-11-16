@@ -32,6 +32,22 @@ export const STATE = { CLOSED: 'closed', OPEN: 'open', HALF_OPEN: 'half-open' };
  */
 export const STALL_MS = 90_000;
 
+/**
+ * 「慢启动」提示阈值：多久还没等到第一个 token 就告诉人一声。
+ *
+ * 为什么需要它：模型首 token 之前可能沉思很久（尤其大上下文 + 深思考）。
+ * 这段时间应用里**什么都没有**，用户看到的就是"卡住了"。
+ * 一条"还在等第一个 token（已 N 秒）"的提示不解决性能问题，但能让人知道
+ * 系统没死、不需要去点停止。
+ *
+ * 取硬上限的 1/4，并夹在 [5s, 60s]：必须**早于**卡死窗口（90s），
+ * 否则提示还没出来进程就被判死了，等于没有。
+ */
+export function slowStartThreshold(timeoutMs) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return 45_000;
+  return Math.max(5_000, Math.min(60_000, Math.floor(timeoutMs / 4)));
+}
+
 export function stallThreshold(timeoutMs) {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return STALL_MS;
   // 上限很短时（比如测试里 30 秒），窗口不能比上限还长，否则永远等不到判定
@@ -160,7 +176,29 @@ export function canAutoRetry(tier) {
 }
 
 /** 重试决策与原因（供界面显示） */
-export function retryDecision({ tier, reason, attempt = 0, maxAttempts = 2 }) {
+export function retryDecision({
+  tier, reason, attempt = 0, maxAttempts = 2, stalled = false, toolCalls = 0,
+}) {
+  /**
+   * ★ 零产出且没跑过任何工具 → 允许续做一次，**与档位无关**。
+   *
+   * 判据是「有没有可能产生副作用」，不是「有没有权限」：
+   * 一次工具都没调用，说明它只是没吐出字来（网络抖动、网关 5xx、首 token 超时），
+   * 磁盘和外部世界都没被碰过，续做是安全的。
+   *
+   * 反过来，有工具调用就绝不续做——那可能已经写了文件、发了请求。
+   * 这条区分正是"能不能重试"的全部内容；按档位一刀切会误伤
+   * write-exec 成员：它们干活最容易超时，却恰恰永不续做。
+   */
+  const noSideEffectsYet = stalled === true && toolCalls === 0;
+  if (noSideEffectsYet && attempt === 0) {
+    return {
+      retry: true,
+      reason: '本轮没有任何工具调用就断了（无副作用），续做一次',
+      zeroOutputRetry: true,
+    };
+  }
+
   if (!canAutoRetry(tier)) {
     return {
       retry: false,

@@ -145,3 +145,40 @@ test('snapshot 供界面展示每个 agent 的健康状态', () => {
   assert.equal(all.find((x) => x.agentId === 'a').state, STATE.OPEN);
   assert.equal(all.find((x) => x.agentId === 'b').state, STATE.CLOSED);
 });
+
+/* ---------- 零产出续做：判据是副作用，不是权限 ---------- */
+
+test('★ write-exec 成员零产出且没跑工具 → 允许续做一次', async () => {
+  const { retryDecision } = await import('../src/core/health.js');
+  const d = retryDecision({
+    tier: 'write-exec', reason: 'timeout', attempt: 0, maxAttempts: 2, stalled: true, toolCalls: 0,
+  });
+  assert.equal(d.retry, true, '一次工具都没跑过 = 磁盘和外部世界都没被碰过，续做安全');
+  assert.equal(d.zeroOutputRetry, true);
+});
+
+test('★ 有工具调用 → 可写档绝不续做（可能已经写了文件/发了请求）', async () => {
+  const { retryDecision } = await import('../src/core/health.js');
+  // readonly 档本来就没有工具（toolCalls 恒为 0），保持不变：超时可重试。
+  for (const tier of ['write', 'write-exec']) {
+    const d = retryDecision({
+      tier, reason: 'timeout', attempt: 0, maxAttempts: 2, stalled: true, toolCalls: 3,
+    });
+    assert.equal(d.retry, false, `${tier}: 有副作用可能就不能自动重来`);
+  }
+});
+
+test('零产出续做只给一次（第二次失败就停）', async () => {
+  const { retryDecision } = await import('../src/core/health.js');
+  const d = retryDecision({
+    tier: 'write-exec', reason: 'timeout', attempt: 1, maxAttempts: 2, stalled: true, toolCalls: 0,
+  });
+  assert.equal(d.retry, false);
+});
+
+test('只读档原有行为不变：超时可重试，业务失败不重试', async () => {
+  const { retryDecision } = await import('../src/core/health.js');
+  assert.equal(retryDecision({ tier: 'readonly', reason: 'timeout', attempt: 0 }).retry, true);
+  assert.equal(retryDecision({ tier: 'readonly', reason: 'failed', attempt: 0 }).retry, false);
+  assert.equal(retryDecision({ tier: 'write', reason: 'timeout', attempt: 0 }).retry, false, '可写档普通重试仍禁止');
+});
