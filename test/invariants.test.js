@@ -105,7 +105,9 @@ test('清单：CR-036 停止/打断必须落盘，且能「接着做完」', asy
   // 落盘只解决"事后能查"；当场看到的必须是"被打断、可以接着做"
   await mustMention('core/room.js', 'resumeTarget', '记下被中断的那一轮');
   await mustMention('core/room.js', 'resumeInterruptedTurn', '「接着做完」的入口');
-  await mustMention('server.js', 'resumeTarget = null', '人发新指令时清掉过期的待续');
+  // 人发新指令要清掉过期待续 —— 但只能有**一处**清（humanSay 内部），
+  // 不然改一处忘一处就会分叉。这里断言唯一来源在 room.js。
+  await mustMention('core/room.js', '人的新指令作废「待续」', '人发新指令时清掉过期的待续');
 });
 
 test('清单：CR-037 卡死后续做一次', async () => {

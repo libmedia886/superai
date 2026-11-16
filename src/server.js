@@ -255,8 +255,10 @@ export async function startServer({
         const body = await readJson(req);
         const text = String(body.text ?? '').trim();
         if (!text) return json(res, 400, { error: '空消息' });
-        // 人发了新指令，旧的「待续」就不再成立（否则点「接着做完」会回到过期的话题）
-        room.resumeTarget = null;
+        /**
+         * 旧的「待续」由 `humanSay()` 内部清空（管理方 20:05 代修时挪进去的）。
+         * 这里不再重复 —— 同一件事两个地方各清一次，以后改一处忘一处就会分叉。
+         */
         if (room.current) {
           // 有人正在说：入队，界面会显示"已排队"
           broadcast({ type: 'notice', level: 'info', text: '有人正在发言，你的消息已排队' });
