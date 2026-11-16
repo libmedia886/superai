@@ -180,3 +180,10 @@ test('清单：撞上限自动续做与失败重试互斥（否则白跑一轮�
   await mustMention('core/room.js', 'capAutoContinued', '两条路径会同时满足同一个超时');
   await mustMention('core/room.js', 'MAX_CAP_CONTINUES', '续做次数必须有上限');
 });
+
+test('清单：被拒的动作要跨轮重现，且不许写成已完成（16:27 事故）', async () => {
+  await mustMention('core/room.js', 'unresolvedActions', '未完成清单');
+  await mustMention('core/room.js', '_detectFalseClaims', '正文与真实状态对账');
+  await mustMention('core/prompt.js', '未完成清单', '每轮 prompt 都要重现');
+  await mustMention('core/actions.js', 'targetId', '校验失败也要带上"想改哪个对象"');
+});

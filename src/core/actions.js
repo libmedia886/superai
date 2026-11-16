@@ -272,7 +272,19 @@ export function extractActions(text, { actor, turn = 0, sessionId = '' } = {}) {
     for (const item of items) {
       const reason = validateAction(item);
       if (reason) {
-        errors.push({ raw: JSON.stringify(item).slice(0, 200), reason });
+        /**
+         * 校验失败也要带上**它想改哪个对象**。
+         *
+         * 否则日志里只剩一条「未识别动作」，事后既查不到是哪个任务被拒，
+         * 也没法在做成之后把这条从"未完成清单"里清掉——
+         * 而"三次被拒 → 报告里写成已改"正是这样发生的。
+         */
+        errors.push({
+          raw: JSON.stringify(item).slice(0, 200),
+          reason,
+          action: typeof item?.action === 'string' ? item.action : null,
+          targetId: item?.id ?? item?.name ?? item?.assignee ?? null,
+        });
         continue;
       }
       actions.push({

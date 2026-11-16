@@ -643,6 +643,69 @@ export class Room {
   }
 
   /**
+   * 未完成清单：**跨轮保留**的"没做成的动作"。
+   *
+   * ★ 为什么必须是"清单"而不是"上一轮的回注"：
+   * 实测事故（15:27:54）：管理员连续三次 `task.update T-008 status=阻塞·需外部渠道`
+   * 三次都被拒。被拒结果确实回注进了下一轮 prompt —— 但**只活那一轮**。
+   * 它跨了很多轮之后写报告，那条"你被拒了"早已被长上下文淹掉，
+   * 于是报告里明确写着「T-008/T-009 已改为阻塞」，而任务板至今是「待办」。
+   *
+   * 从 `store.actionLog` 派生（同一个 label 以最新一条为准），所以：
+   *  - 重启后仍然有效（actionLog 是落盘事件流）
+   *  - 后面成功一次自动消失（不需要额外的"解决"动作）
+   */
+  unresolvedActions({ limit = 20 } = {}) {
+    const last = new Map();
+    for (const e of this.store?.actionLog ?? []) {
+      if (!e?.label) continue;
+      last.set(e.label, e);   // 后出现的覆盖先出现的
+    }
+    return [...last.entries()]
+      .filter(([, e]) => e.ok === false)
+      .map(([label, e]) => ({ label, reason: e.reason ?? '', at: e?.at ?? null }))
+      .slice(-limit);
+  }
+
+  /**
+   * 检测"把没做成的动作写成已完成"。
+   *
+   * 光在 prompt 里提醒不够——模型仍可能按自己的意图写报告。所以在它写完、
+   * 落库之前做一次对照：正文若把某个**仍未成功**的任务 id 说成已改/已完成，
+   * 就在界面上标出来，并把这条塞进它下一轮的说明里。
+   * 这不是拦截（不擅改它的正文），是**不让界面替它圆谎**。
+   */
+  _detectFalseClaims(body, agentId) {
+    const text = String(body ?? '');
+    if (!text) return [];
+    const claimed = [];
+    for (const p of this.unresolvedActions()) {
+      // label 形如 "task.update T-008"；取出目标 id
+      const id = p.label.split(/\s+/).slice(1).join(' ').trim();
+      if (!id || !text.includes(id)) continue;
+      // 只有紧跟在 id 附近说"已…"才算声称完成，避免误伤"T-008 还需要…"
+      const near = text.split(id).slice(1).join(id).slice(0, 40);
+      if (/(已改|已完成|已更新|已设为|已调整|已处理|已完成修改|改成)/.test(near)) {
+        claimed.push({ id, label: p.label, reason: p.reason });
+      }
+    }
+    if (claimed.length) {
+      this.onEvent({
+        type: 'notice',
+        level: 'warn',
+        agentId,
+        text: `正文声称 ${claimed.map((c) => c.id).join('、')} 已处理，但系统里这些动作**没有成功**`
+          + `（${claimed[0].reason || '被拒'}）。任务板上它们仍是原状态。`,
+      });
+      for (const c of claimed) {
+        this._note(agentId, `${c.id} 的那个动作（${c.label}）**没有成功**（${c.reason || '被拒'}），`
+          + '但你在正文里写成了已完成。下一轮请如实说明，或重新发一次正确的动作。');
+      }
+    }
+    return claimed;
+  }
+
+  /**
    * 把被打断的那一轮重新交给同一个人（CR-036）。
    *
    * 与 `resumeRoom()` 不同：那个只解「停止」这个总闸，这个是**真的重跑**。
@@ -730,15 +793,26 @@ export class Room {
     // 上一轮被拒的越权 @ 等说明：必须在它开口之前告诉它，否则它会继续按错误的理解做
     const pendingNotes = this._takeNotes(agent.id);
 
+    /**
+     * 未完成清单必须**每轮**出现，不能只靠上一轮的回注。
+     * 实测：被拒三次的动作，跨十轮之后模型已经"不记得"，照样在报告里写"已改"。
+     */
+    const pendingActions = this.unresolvedActions();
+
     let prompt = rebootstrap ?? buildPrompt({
       agent, room: this, store: this.store,
       trigger: job.triggerMsg, mode: delivery,
       taskId: job.taskId, actionResults,
       notes: pendingNotes,
+      pendingActions,
     });
     if (rebootstrap && pendingNotes.length) {
       prompt += '\n\n--- 系统上次拦下了你的一个动作 ---\n'
         + pendingNotes.map((n) => `- ${n.text}`).join('\n');
+    }
+    if (rebootstrap && pendingActions.length) {
+      prompt += '\n\n--- 未完成清单（这些动作没有成功，不要写成已完成）---\n'
+        + pendingActions.map((p) => `- ❌ ${p.label}${p.reason ? ` —— ${p.reason}` : ''}`).join('\n');
     }
 
     // 总结模式：明确告诉它这是收尾，不是继续讨论
@@ -993,6 +1067,9 @@ export class Room {
       });
     }
 
+    // 写完先对一遍账：正文有没有把"没成功"写成"已完成"（见 _detectFalseClaims）
+    if (!aborted && displayBody) this._detectFalseClaims(displayBody, agent.id);
+
     const msg = await this.store.addMessage({
       senderId: agent.id,
       role: agent.role,
@@ -1030,7 +1107,14 @@ export class Room {
       results.push(r);
     }
     for (const s of skipped) results.push({ ok: true, label: s.action, detail: '该动作此前已执行，跳过' });
-    for (const e of errors) results.push({ ok: false, label: '未识别动作', reason: e.reason });
+    for (const e of errors) {
+      // 带目标的错误用真名（`task.update T-008`），这样清单能对上、成功了能清掉；
+      // 纯解析失败（JSON 坏了、没有 id）才退回「未识别动作」。
+      const label = e.action && e.targetId
+        ? `${e.action} ${e.targetId}`
+        : (e.action ? e.action : '未识别动作');
+      results.push({ ok: false, label, reason: e.reason });
+    }
     this._lastActionResults = results;
     if (results.length) {
       // 动作结果也要落盘：出事之后能不能查，全看这一条。
