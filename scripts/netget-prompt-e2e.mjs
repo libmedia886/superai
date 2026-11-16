@@ -117,8 +117,15 @@ console.log(`   模型最后一条：${String(last?.body ?? '').slice(0, 200).re
 if (got) {
   const body = await readFile(pagePath, 'utf8');
   check(/Example Domain/i.test(body), '文件内容确实是 example.com 的页面');
+} else if (found) {
+  // 模型可能落在 work/page.html 之类的相对路径（prompt 里就是这么示例的）
+  const { readdir } = await import('node:fs/promises');
+  const entries = await readdir(agentDir, { recursive: true });
+  const hit = entries.find((f) => /\.html?$/.test(f));
+  const body = hit ? await readFile(join(agentDir, hit), 'utf8') : '';
+  check(/Example Domain/i.test(body), `文件内容确实是 example.com 的页面（${hit}）`);
 } else {
-  console.log('   （未在预期路径找到文件，跳过内容核对）');
+  console.log('   （没有任何下载产物，跳过内容核对）');
 }
 
 console.log(`\n${failed ? `❌ ${failed} 项失败` : '✅ 全部通过'}`);
