@@ -220,8 +220,55 @@ export function permissionSentence(agent) {
       return '你可以修改工作目录内的文件。**这个会话不能执行任何命令**——'
         + '不要尝试用 shell（会被拒绝，白费一轮）。需要执行命令请让老板在成员设置里放开。';
     }
-    return `你可以修改工作目录内的文件，并且**只能执行这些命令**：${cmds.join('、')}。`
-      + '其他命令一律被拒。注意：这些命令不受工作目录限制，可以用来访问外部网络和任意路径。';
+
+    /**
+     * ★ 两种命令必须分开说，它们的能力**恰好相反**。
+     *
+     * `netget` 是 app 生成的受约束包装器：只允许 http/https GET，
+     * 读不到本机文件、写不出工作目录、不能上传。
+     * 裸命令（curl/wget/…）恰恰相反——命令行没有目录墙。
+     *
+     * 写成同一句「这些命令不受工作目录限制」会造成两种损失：
+     *   1. 模型会拿 netget 去试 `file://` / `-o /tmp`，每次吃 exit 2/3，白烧轮次；
+     *   2. 反过来，它会以为 curl 也被关在目录里。
+     *
+     * ★ 更要紧的是**绝对路径**：审批器是字面前缀匹配，模型写 `netget`
+     *   或 `./netget` 都会被拒。实测（2026-11-16 23:30，claude 2.1.325）：
+     *   只告诉它「netget」→ 执行裸 netget → permission reject；
+     *   给出绝对路径 → accept 且文件真的落盘。
+     *   所以提示词里必须给出**确切命令行**，否则这个功能配了也用不了。
+     */
+    const hasNetget = cmds.includes('netget');
+    const rawCmds = cmds.filter((c) => c !== 'netget');
+    const parts = ['你可以修改工作目录内的文件。'];
+
+    if (hasNetget) {
+      const p = agent.netgetPath;
+      if (p) {
+        parts.push(
+          '联网查资料**只能用这条命令，且必须写全路径**（写 `netget` 或 `./netget` 都会被拒）：',
+          `   \`${p} -o <工作目录内的相对路径> <http(s) URL>\`（只输出到屏幕就去掉 -o）`,
+          '它只允许 http/https GET：读不到本机文件（`file://` 会被拒）、写不出工作目录、不能上传。',
+        );
+      } else {
+        // 包装器没生成：不能装作可用，否则它会反复试到把这一轮耗光
+        parts.push('**联网查询本次不可用**（应用没有生成受约束的下载器），不要尝试调用 netget——会被拒。'
+          + '需要联网请告诉老板检查启动日志。');
+      }
+    }
+
+    if (rawCmds.length) {
+      // 没有 netget 段时不能说"除上述之外"——那个"上述"不存在
+      const lead = hasNetget && agent.netgetPath ? '除上述之外，' : '';
+      parts.push(`${lead}只能执行这些命令：${rawCmds.join('、')}。其他命令一律被拒。`);
+      parts.push('⚠️ 这些命令**不受工作目录限制**——它们可以读写工作目录之外的任意路径，务必只用于老板要求的用途。');
+    } else if (hasNetget && agent.netgetPath) {
+      parts.push('除上述联网查询命令外，**不能执行任何其他命令**。');
+    } else {
+      parts.push('**这个会话不能执行任何命令**——不要尝试用 shell（会被拒绝，白费一轮）。');
+    }
+
+    return parts.join('\n');
   }
 
   return '你的可用权限由系统配置决定，越界操作会被拒绝并告知原因。';

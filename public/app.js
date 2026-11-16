@@ -1770,6 +1770,7 @@ function openMemberSettings(id) {
 
   renderTierChoices(m.tiers ?? []);
   renderModelHints();
+  updateNetgetAvailability();
   updatePreview();
   $('member-modal').classList.remove('hidden');
   $('mm-name').focus();
@@ -1800,6 +1801,7 @@ function openNewMember() {
   $('mm-error').classList.add('hidden');
   renderTierChoices(['readonly', 'read', 'write-ask', 'write', 'write-exec']);
   renderModelHints();
+  updateNetgetAvailability();
   updatePreview();
   $('member-modal').classList.remove('hidden');
   $('mm-name').focus();
@@ -1833,6 +1835,7 @@ function renderTierChoices(tiers) {
     label.querySelector('input').onchange = () => {
       mm.tier = tier;
       renderTierChoices(list);
+      updateNetgetAvailability();
       updatePreview();
     };
     box.appendChild(label);
@@ -1856,6 +1859,26 @@ function renderModelHints() {
 }
 
 /** 参数预览：只做展示，真正的拒绝/确认在保存时由服务端判定 */
+/**
+ * 「联网查询」只在「可写+执行」档生效：别的档根本不给 Bash 工具。
+ *
+ * 不置灰的话会出现另一种"界面与事实不符"：勾着「允许联网查资料」，
+ * 成员却一条命令都跑不了。服务端也会拒绝这种组合，但界面不该先让人填错。
+ */
+function updateNetgetAvailability() {
+  const ok = mm?.tier === 'write-exec';
+  const box = $('mm-netget');
+  box.disabled = !ok;
+  if (!ok) box.checked = false;
+  const hint = box.closest('.field')?.querySelector('.field-hint');
+  if (hint) {
+    hint.dataset.orig ??= hint.textContent;
+    hint.textContent = ok
+      ? hint.dataset.orig
+      : '只有「可写+执行」档才能联网：其他档连命令工具都不给。';
+  }
+}
+
 function updatePreview() {
   const backend = $('mm-backend').value;
   const model = $('mm-model').value.trim();

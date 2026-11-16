@@ -294,10 +294,26 @@ test('★ 默认空 = 一条命令都不许（不改变现状）', () => {
 });
 
 test('人设置命令清单：去重、按空格或逗号都能分', () => {
-  const r = planMemberUpdate({ member: base, patch: { allowedCommands: 'curl, wget curl' } });
+  // 命令清单只对「可写+执行」档有意义（别的档不给 Bash），故基线用该档
+  const exec = { ...base, tier: TIER.WRITE_EXEC };
+  const r = planMemberUpdate({ member: exec, patch: { allowedCommands: 'curl, wget curl' } });
   assert.equal(r.ok, true);
   assert.deepEqual(r.member.allowedCommands, ['curl', 'wget']);
   assert.ok(r.changed.includes('allowedCommands'));
+});
+
+test('★ 命令清单配上不能跑命令的档 → 拒绝（不留"配了却不生效"的状态）', () => {
+  const r = planMemberUpdate({ member: base, patch: { allowedCommands: 'curl' } });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /只在「可写\+执行」档生效/);
+
+  // 同一个 patch 里把档位一起改对 → 允许
+  const ok = planMemberUpdate({
+    member: base,
+    patch: { tier: TIER.WRITE_EXEC, allowedCommands: 'curl' },
+  });
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.member.allowedCommands, ['curl']);
 });
 
 test('命令名不合法 → 拒绝（防注入到命令行）', () => {
@@ -307,10 +323,11 @@ test('命令名不合法 → 拒绝（防注入到命令行）', () => {
 });
 
 test('★ 写 * 等于整片放开：必须二次确认', () => {
-  const no = planMemberUpdate({ member: base, patch: { allowedCommands: '*' } });
+  const exec = { ...base, tier: TIER.WRITE_EXEC };
+  const no = planMemberUpdate({ member: exec, patch: { allowedCommands: '*' } });
   assert.equal(no.ok, false);
   assert.equal(no.code, 'NEEDS_CONFIRM');
-  const yes = planMemberUpdate({ member: base, patch: { allowedCommands: '*' }, confirmOverride: true });
+  const yes = planMemberUpdate({ member: exec, patch: { allowedCommands: '*' }, confirmOverride: true });
   assert.equal(yes.ok, true);
 });
 

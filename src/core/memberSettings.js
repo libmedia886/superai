@@ -240,6 +240,25 @@ export function planMemberUpdate({ member, patch = {}, members = [], confirmOver
    */
   next.overridesTier = detectTierOverride(next.backend, next.extraArgs ?? []);
 
+  /**
+   * ★ 命令白名单只对「可写+执行」档有意义。
+   *
+   * 别的档位根本不给 Bash 工具（`tierArgs` 里 `write` 只给 Read,Write,Edit），
+   * 于是 `allowedCommands` 会变成一个**看起来配好、实际不生效**的状态：
+   * 界面勾着「允许联网查资料」，成员却一条命令都跑不了——又一种"界面与事实不符"。
+   *
+   * 以前面那种"两处各算一次迟早分叉"的教训，这里不让它存在：
+   * 存档时直接拒绝，并说清该改成哪一档。
+   */
+  const nextCmds = next.allowedCommands ?? [];
+  if (nextCmds.length && next.tier !== TIER.WRITE_EXEC) {
+    return {
+      ok: false,
+      reason: `「允许执行的命令 / 联网查询」只在「可写+执行」档生效，当前档位是「${next.tier}」。`
+        + '要么把档位改成「可写+执行」，要么清空命令清单——留着不会生效。',
+    };
+  }
+
   return { ok: true, member: next, changed };
 }
 
