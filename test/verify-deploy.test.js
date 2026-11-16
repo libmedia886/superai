@@ -98,3 +98,11 @@ test('清单：部署流程文档存在，且写明「核对是硬门槛」', as
   assert.match(doc, /PIPESTATUS|管道会吃掉退出码/, '要提醒管道会吃掉退出码（管理方踩过）');
   assert.match(doc, /pkill node/, '要提醒不要 pkill node');
 });
+
+test('清单：文档必须解释 skipped 3（否则读者以为被绕过）', async () => {
+  const doc = await readFile(new URL('../docs/DEPLOY.md', import.meta.url), 'utf8');
+  assert.match(doc, /skipped 3/, '要点名这个数字');
+  assert.match(doc, /不是被绕过|不是.*掩盖/, '要说明它不是绕过');
+  assert.match(doc, /没有 \.git|无 \.git|解包产物没有/, '要说清为什么跳过');
+  assert.match(doc, /仓库内跑|仓库里单独/, '要给出补跑的方法');
+});
