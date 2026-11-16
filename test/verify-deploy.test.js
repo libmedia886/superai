@@ -88,3 +88,13 @@ test('★ 脚本必须锁住 locale（否则中文环境下所有差异被静默
   assert.doesNotMatch(src, /--exclude=src|--exclude=public/,
     '不能列举目录——那正是漏掉 bin/ 的原因');
 });
+
+test('清单：部署流程文档存在，且写明「核对是硬门槛」', async () => {
+  const doc = await readFile(new URL('../docs/DEPLOY.md', import.meta.url), 'utf8');
+  assert.match(doc, /verify-deploy\.sh/, '必须点名核对脚本');
+  assert.match(doc, /必须 exit=0|不是 0 就不要继续/, '必须说明"不是 0 就停"');
+  assert.match(doc, /部署前/, '要有部署前核对');
+  assert.match(doc, /部署后/, '要有部署后核对（核对进程 cwd）');
+  assert.match(doc, /PIPESTATUS|管道会吃掉退出码/, '要提醒管道会吃掉退出码（管理方踩过）');
+  assert.match(doc, /pkill node/, '要提醒不要 pkill node');
+});

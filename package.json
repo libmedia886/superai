@@ -14,7 +14,9 @@
     "start": "node bin/room.mjs",
     "demo": "node bin/room.mjs --demo",
     "test": "node --test \"test/*.test.js\"",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "verify-deploy": "bash scripts/verify-deploy.sh",
+    "test:deploy": "bash scripts/verify-deploy.sh"
   },
   "files": [
     "bin/",

@@ -15,7 +15,16 @@ TARGET="${1:-}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 
 if [ -z "$TARGET" ] || [ ! -d "$TARGET" ]; then
-  echo "用法：$0 <部署目录>" >&2
+  cat >&2 <<'USAGE'
+用法：bash scripts/verify-deploy.sh <部署目录>
+      npm run verify-deploy -- <部署目录>
+
+用途：核对"线上跑的那份"是否就是 HEAD。
+     **部署前后各跑一次**，两次都必须是 exit=0。
+
+今天的教训：知道该检查 ≠ 会去检查。
+     所以这一步不该靠记性——把它放进部署流程的第一步。
+USAGE
   exit 2
 fi
 
