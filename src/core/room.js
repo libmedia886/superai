@@ -694,7 +694,25 @@ export class Room {
       return prev;
     }
     this.waitingForHuman = true;
-    this.pauseReason = { reason, detail: String(detail ?? ''), at: new Date().toISOString() };
+    const text = String(detail ?? '');
+
+    /**
+     * ★ 按钮与暂停原因必须成对出现 —— **双向**。
+     *
+     * 管理方 20:18 用复现脚本抓到反方向的分叉：
+     *   turn2 超时 → 设 resumeTarget(A) + 暂停 timeout（此时一致）
+     *   turn3 零产出 → 熔断暂停 breaker
+     *   结果：breakert 的文案不提按钮，但 resumeTarget 还是 turn2 的 A
+     *   → 界面上并排放着一个「接着做完」和一个「连续失败，已暂停」，谁也没说它们不是一回事
+     *
+     * `canResume` 只统一了「文案→按钮」；这里统一「按钮→文案」，判据是**文案本身**：
+     * 只有提到「接着做完」的暂停才有按钮。反过来，不提到的暂停一律清掉。
+     * 于是 `Boolean(resumeTarget) === detail.includes('接着做完')` 恒成立，
+     * 不依赖任何一处"记得清"。
+     */
+    if (!text.includes('接着做完')) this.resumeTarget = null;
+
+    this.pauseReason = { reason, detail: text, at: new Date().toISOString() };
     // 落盘：内存字段活不过重启，重启后"为什么停着"不能变成谜
     this.store?.append?.({ kind: 'room.pause', reason, detail: this.pauseReason.detail }).catch?.(() => {});
     /**

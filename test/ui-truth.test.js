@@ -298,7 +298,7 @@ test('★ room.paused 的实时事件必须带 resumeTarget（不能只靠 room.
     }
 
     manager.session.room.resumeTarget = { agentId: 'a', taskId: null, partialChars: 4, reason: 'timeout' };
-    manager.session.room._pause('timeout', '测试：有可续的轮次');
+    manager.session.room._pause('timeout', '测试：有可续的轮次，点「接着做完」');
 
     const deadline = Date.now() + 3000;
     let pausedEv = null;
@@ -338,7 +338,7 @@ test('★ resumeTarget 与 pauseReason 同生共死（不能指向上一件事�
   });
 
   room.resumeTarget = { agentId: 'a', taskId: 'T-A', partialChars: 9, reason: 'timeout' };
-  room._pause('timeout', '某轮超时');
+  room._pause('timeout', '某轮超时，点「接着做完」可以继续');
   assert.ok(room.resumeTarget, '暂停期间按钮应当可用');
 
   room._clearPause();
@@ -384,4 +384,72 @@ test('清单：resumeTarget 必须在 _clearPause 里一起清（唯一来源）
   // 取函数体（到下一个同级方法定义为止）
   const body = src.slice(start, src.indexOf('\n  }\n', start) + 4);
   assert.match(body, /this\.resumeTarget = null/, '_clearPause 必须同时清 resumeTarget');
+});
+
+test('★ 反方向分叉：熔断暂停必须清掉旧的 resumeTarget（管理方 20:18 的复现）', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'reverse-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+  const room = new Room({
+    id: 'r', name: 't', members: [], store, resolveAdapter: () => ({}), onEvent: () => {},
+  });
+
+  // turn2：超时暂停，按钮可用（此时一致）
+  room.resumeTarget = { agentId: 'a', taskId: 'T-A', partialChars: 7, reason: 'timeout' };
+  room._pause('timeout', 'a 跑满上限被中止（耗时 20 秒）。点「接着做完」可以接着做。');
+  assert.ok(room.resumeTarget);
+
+  // turn3：无人说话，系统自己又跑一轮 → 熔断暂停 breaker（文案不提按钮）
+  room._pause('breaker', 'a 连续失败，已暂停');
+
+  assert.equal(room.resumeTarget, null,
+    '熔断的文案不提按钮，旧的 resumeTarget 就必须清掉——否则界面上并排摆着一个'
+    + '「接着做完」和一个「连续失败」，谁也没说它们不是一回事');
+
+  // 恒等式：两个方向都成立
+  for (const [target, reason, detail] of [
+    [true, 'timeout', '…点「接着做完」可以接着做。'],
+    [false, 'breaker', 'a 连续失败，已暂停'],
+  ]) {
+    room.resumeTarget = target ? { agentId: 'a' } : null;
+    room._clearPause();
+    if (target) {
+      room.resumeTarget = { agentId: 'a' };
+      room._pause(reason, detail);
+    } else {
+      room._pause(reason, detail);
+    }
+    assert.equal(Boolean(room.resumeTarget), String(room.pauseReason.detail).includes('接着做完'),
+      `不变量被破坏：target=${Boolean(room.resumeTarget)} 文案提按钮=${String(room.pauseReason.detail).includes('接着做完')}`);
+  }
+});
+
+test('★ 不变量：任意时刻 Boolean(resumeTarget) === detail 含「接着做完」', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'invariant-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+
+  const room = new Room({
+    id: 'r', name: 't',
+    members: [{ id: 'a', name: 'a', role: 'leader', backend: 'claude', tier: 'readonly', cwd: dir, aliases: ['a'] }],
+    store,
+    resolveAdapter: () => ({
+      async run({ onEvent }) {
+        onEvent?.({ type: 'meta', sessionId: 's' });
+        onEvent?.({ type: 'text', text: '写了一半', done: false });
+        return { text: '写了一半', sessionId: 's', reason: 'timeout' };
+      },
+    }),
+    onEvent: () => {},
+  });
+  room.maxRetries = 0;
+
+  await room.humanSay('@a 干活');
+  await room.drain();
+
+  // drain 结束处断言（管理方建议的判据）
+  const hasTarget = Boolean(room.resumeTarget);
+  const mentions = String(room.pauseReason?.detail ?? '').includes('接着做完');
+  assert.equal(hasTarget, mentions,
+    `drain 结束时按钮与文案必须一致：target=${hasTarget} 文案提按钮=${mentions}`);
 });
