@@ -55,6 +55,8 @@ html, body {
   border-right: 1px solid var(--line);
   padding: 14px 12px;
   overflow-y: auto;
+  /* 成员多了以后左栏也要能滚，理由同 .main */
+  min-height: 0;
 }
 
 .brand {
@@ -296,6 +298,10 @@ html, body {
   border-left: 1px solid var(--line);
   padding: 10px 12px;
   overflow-y: auto;
+  /* 和 .main 同理：grid 子项默认 min-height:auto，任务多了会被撑开。
+     实测在 Chrome 里 grid 已经是按 100vh 约束的，但这条加上更保险
+     ——不同浏览器对 grid 子项 min-height 的处理不完全一致。 */
+  min-height: 0;
 }
 .board-title { padding-top: 6px; }
 .board-cols { display: flex; flex-direction: column; gap: 14px; }
