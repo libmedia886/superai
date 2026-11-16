@@ -266,9 +266,10 @@ test('清单：提示里提到的按钮必须真实存在（不变量，不只�
   const { Room } = await import('../src/core/room.js');
 
   // 有产出 → 文案提「接着做完」→ 代码里必须真的设 resumeTarget
+  // canResume 由调用方传入（= 是否真的设了 resumeTarget），函数只负责如实反映
   const withOutput = timeoutPauseText({
     name: 'x', stalledOut: true, durationMs: 20_000, timeoutMs: 600_000,
-    toolCalls: 0, textChars: 9, stallMs: 90_000,
+    toolCalls: 0, textChars: 9, stallMs: 90_000, canResume: true,
   });
   assert.match(withOutput, /接着做完/);
   const src = Room.prototype._runTurn.toString();

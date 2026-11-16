@@ -453,3 +453,83 @@ test('★ 不变量：任意时刻 Boolean(resumeTarget) === detail 含「接着
   assert.equal(hasTarget, mentions,
     `drain 结束时按钮与文案必须一致：target=${hasTarget} 文案提按钮=${mentions}`);
 });
+
+/* ---------------- 第 ② 类的反向断言：「该说的没说」 ---------------- */
+
+/**
+ * 之前只测「说出来的都对」，测不出**「该说的没说」**。
+ * 今天的漏项恰是这一类：有工具调用但文案没提、有正文但文案说没输出。
+ *
+ * 规则：**运行时有的数字，文案里必须出现它的对应物。**
+ *
+ * `timeoutPauseText` 是纯函数，可以直接穷举所有分支组合 ——
+ * 这一层不需要造真实卡死，也不会漏掉任何一条路径。
+ */
+test('★ 反向断言：运行时有的数字，文案里必须出现对应物（穷举所有分支）', async () => {
+  const { timeoutPauseText } = await import('../src/core/room.js');
+
+  const DURATION_MS = 112_584;       // 112.6 秒 → 113
+  const TIMEOUT_MS = 1_800_000;      // 配置上限 1800 秒
+  const cases = [];
+
+  for (const stalledOut of [true, false]) {
+    for (const toolCalls of [0, 1, 3]) {
+      for (const textChars of [0, 9, 500]) {
+        for (const capContinues of [0, 2]) {
+          for (const canResume of [true, false]) {
+            cases.push({
+              stalledOut, toolCalls, textChars, capContinues, canResume,
+              name: 'a', durationMs: DURATION_MS, timeoutMs: TIMEOUT_MS,
+              maxCapContinues: 2, stallMs: 90_000,
+            });
+          }
+        }
+      }
+    }
+  }
+  assert.ok(cases.length >= 70, `应当穷举出足够多的组合（实际 ${cases.length}）`);
+
+  for (const c of cases) {
+    const text = timeoutPauseText(c);
+    const tag = `[stalled=${c.stalledOut} tools=${c.toolCalls} text=${c.textChars} cap=${c.capContinues}]`;
+
+    // ① 有工具调用 → 必须说出次数（运行时有的数字不能省）
+    if (c.toolCalls > 0) {
+      assert.ok(text.includes(`${c.toolCalls} 次工具调用`), `${tag} 有工具调用却没写次数：${text}`);
+    }
+    // ② 有正文 → 必须说出字数
+    if (c.textChars > 0) {
+      assert.ok(text.includes(`已输出 ${c.textChars} 字`), `${tag} 有正文却没写字数：${text}`);
+      // 而且绝不能说"没有输出"
+      assert.doesNotMatch(text, /也没有输出|没有任何工具调用、也没有输出/, `${tag} 有正文却说没输出：${text}`);
+    }
+    // ③ 耗时必须出现（且用 durationMs，不是配置上限）
+    const secs = Math.round(c.durationMs / 1000);
+    assert.ok(text.includes(`耗时 ${secs} 秒`), `${tag} 没写实际耗时 ${secs} 秒：${text}`);
+    assert.ok(!text.includes(`耗时 ${TIMEOUT_MS / 1000} 秒`), `${tag} 拿配置上限冒充耗时：${text}`);
+
+    // ④ 有产出就不能说"空转"
+    if (c.toolCalls > 0 || c.textChars > 0) {
+      assert.doesNotMatch(text, /空转/, `${tag} 有产出却说空转：${text}`);
+    }
+    /**
+     * ⑤ 按钮与文案必须一致（双向）。
+     *
+     * 结构化规则：按钮出现 ⟺ 传了 canResume **且**确实有产出。
+     * 后半句是函数内部强制的——没产出就没有「接着做完」可做，
+     * 调用方传错也不该让文案自相矛盾（穷举抓到的正是这个组合）。
+     */
+    const expectButton = c.canResume && (c.toolCalls > 0 || c.textChars > 0);
+    assert.equal(text.includes('接着做完'), expectButton,
+      `${tag} 按钮与文案不一致（期望 ${expectButton}，canResume=${c.canResume}）：${text}`);
+
+    // ⑥ stalled 与硬上限是两种完全不同的说法
+    if (c.stalledOut) {
+      assert.ok(text.includes('被看门狗判定卡死'), `${tag} stalled 却没说是看门狗判的：${text}`);
+      assert.ok(!text.includes('跑满上限'), `${tag} stalled 却说撞硬上限：${text}`);
+    } else {
+      assert.ok(text.includes('跑满上限'), `${tag} 硬上限却没说是跑满上限：${text}`);
+      assert.ok(!text.includes('被看门狗判定卡死'), `${tag} 硬上限却说被看门狗判死：${text}`);
+    }
+  }
+});

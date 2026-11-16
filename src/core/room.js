@@ -200,14 +200,25 @@ export function timeoutPauseText({
   const didSomething = toolCalls > 0 || hadText;
   const textPart = hadText ? `，已输出 ${textChars} 字` : '';
 
-  const resumeHint = canResume ? '点「接着做完」可以接着做，不会重做已完成的部分。' : '';
+  /**
+   * ★ 结构上消除一种不可能组合：什么都没干（0 工具 0 正文）却声称有可续轮次。
+   *
+   * 没产出就没有「接着做完」可做——那个按钮续的是"半截工作"，
+   * 而这里根本没有半截。调用方万一传错（`canResume: true` 配 0 产出），
+   * 这里直接压成 false，而不是让文案自相矛盾。
+   * 穷举测试抓到的就是这个组合。
+   */
+  const effectiveCanResume = Boolean(canResume) && didSomething;
+  const resumeHint = effectiveCanResume
+    ? '点「接着做完」可以接着做，不会重做已完成的部分。'
+    : '';
 
   if (stalledOut) {
     return `${name} 静默 ${stallSecs} 秒，被看门狗判定卡死（耗时 ${secs} 秒，${toolPart}${textPart}）。`
       + (toolCalls > 0
         ? '它跑过工具，结果都还在会话里。' + resumeHint
         : hadText
-          ? '它已经写了一部分，会话仍在。' + (resumeHint || '点「接着做完」接着写，不会重来。')
+          ? '它已经写了一部分，会话仍在。' + resumeHint
           : '本轮没有任何工具调用、也没有输出，多半是空转了。');
   }
   if (capContinues >= maxCapContinues) {

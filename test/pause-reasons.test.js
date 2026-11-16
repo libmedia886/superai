@@ -604,10 +604,10 @@ test('★ 硬上限：用"跑满上限 N 秒 + 耗时 X 秒"两个数字区分�
 test('★ rowToolsInTurn=0 但已输出正文 → 不得说"没有输出"', async () => {
   // 管理方 18:34 实测：已经输出了 9 个字，文案却说"也没有输出"
   const { timeoutPauseText } = await import('../src/core/room.js');
-  const t = timeoutPauseText({ ...base, stalledOut: true, textChars: 9 });
+  const t = timeoutPauseText({ ...base, stalledOut: true, textChars: 9, canResume: true });
   assert.doesNotMatch(t, /也没有输出/, `已输出内容时不能说"也没有输出"：${t}`);
   assert.match(t, /已输出 9 字/);
-  assert.match(t, /接着写完|接着做完/, '要给出可操作的下一步');
+  assert.match(t, /接着写完|接着做完/, '有可续轮次时要给出可操作的下一步');
 });
 
 test('★ 有工具调用时：不说空转，说"结果还在会话里"', async () => {
