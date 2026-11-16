@@ -180,23 +180,36 @@ export function retryDecision({
   tier, reason, attempt = 0, maxAttempts = 2, stalled = false, toolCalls = 0,
 }) {
   /**
-   * ★ 零产出且没跑过任何工具 → 允许续做一次，**与档位无关**。
+   * ★ 被看门狗判死的一轮 → 允许**一次**续做，与档位无关（CR-037）。
    *
-   * 判据是「有没有可能产生副作用」，不是「有没有权限」：
-   * 一次工具都没调用，说明它只是没吐出字来（网络抖动、网关 5xx、首 token 超时），
-   * 磁盘和外部世界都没被碰过，续做是安全的。
+   * 判据是「有没有正在进行的副作用」，不是「有没有权限」：
+   *  - 进程已经被杀了，此刻没有任何工具正在跑
+   *  - 已完成的工具结果都还在会话历史里，续做时模型能看到自己做过什么
+   *  - 因此续做 ≠ 从头发一遍 prompt，而是接着往下走
    *
-   * 反过来，有工具调用就绝不续做——那可能已经写了文件、发了请求。
-   * 这条区分正是"能不能重试"的全部内容；按档位一刀切会误伤
-   * write-exec 成员：它们干活最容易超时，却恰恰永不续做。
+   * 实测依据：审校员跑了 698 秒、11 次工具调用、抓到多个网页，然后 90 秒静默
+   * 被判卡死，整轮丢弃、零产出——10 分钟的工作白烧。而 HOTFIX3 上线的当天
+   * 06:03:32 超时 → 06:03:34 同 session 继续 → 正常收尾，接上了。
+   *
+   * 上限只有 1 次，且**只对 stalled**（看门狗判死）开放：
+   * 硬上限超时、业务失败都不走这条——那些可能是模型自己陷在循环里，
+   * 再给它一次只会再烧一遍。
+   *
+   * ⚠️ 残留风险（写在这里，因为它是真实存在的）：
+   * 如果模型在第一轮里已经写了文件，续做时它可能重做同一件事。缓解手段是
+   * 上限 1 次 + 会话里有完整的工具结果可查；彻底避免需要幂等写，那是另一个量级的工作。
    */
-  const noSideEffectsYet = stalled === true && toolCalls === 0;
-  if (noSideEffectsYet && attempt === 0) {
-    return {
-      retry: true,
-      reason: '本轮没有任何工具调用就断了（无副作用），续做一次',
-      zeroOutputRetry: true,
-    };
+  if (stalled === true) {
+    const cap = canAutoRetry(tier) ? maxAttempts : 1;
+    if (attempt < cap) {
+      return {
+        retry: true,
+        stalledRetry: true,
+        reason: `卡死被中止，已完成的工具结果仍在会话中，续做第 ${attempt + 1} 次`
+          + `（本轮 ${toolCalls} 次工具调用）`,
+      };
+    }
+    return { retry: false, reason: `卡死后续做已达上限（${cap} 次），请人工确认` };
   }
 
   if (!canAutoRetry(tier)) {
@@ -214,5 +227,5 @@ export function retryDecision({
 }
 
 function tierLabel(tier) {
-  return { readonly: '只读', write: '可写', 'write-exec': '可写+执行' }[tier] ?? tier;
+  return { readonly: '只读', read: '可读', write: '可写', 'write-exec': '可写+执行' }[tier] ?? tier;
 }

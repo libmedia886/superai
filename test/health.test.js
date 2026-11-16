@@ -148,32 +148,40 @@ test('snapshot 供界面展示每个 agent 的健康状态', () => {
 
 /* ---------- 零产出续做：判据是副作用，不是权限 ---------- */
 
-test('★ write-exec 成员零产出且没跑工具 → 允许续做一次', async () => {
+test('★ CR-037：write / write-exec 被看门狗判死 → 允许续做一次（不管有没有工具调用）', async () => {
   const { retryDecision } = await import('../src/core/health.js');
-  const d = retryDecision({
-    tier: 'write-exec', reason: 'timeout', attempt: 0, maxAttempts: 2, stalled: true, toolCalls: 0,
-  });
-  assert.equal(d.retry, true, '一次工具都没跑过 = 磁盘和外部世界都没被碰过，续做安全');
-  assert.equal(d.zeroOutputRetry, true);
-});
-
-test('★ 有工具调用 → 可写档绝不续做（可能已经写了文件/发了请求）', async () => {
-  const { retryDecision } = await import('../src/core/health.js');
-  // readonly 档本来就没有工具（toolCalls 恒为 0），保持不变：超时可重试。
   for (const tier of ['write', 'write-exec']) {
     const d = retryDecision({
-      tier, reason: 'timeout', attempt: 0, maxAttempts: 2, stalled: true, toolCalls: 3,
+      tier, reason: 'timeout', attempt: 0, maxAttempts: 2, stalled: true, toolCalls: 11,
     });
-    assert.equal(d.retry, false, `${tier}: 有副作用可能就不能自动重来`);
+    assert.equal(d.retry, true, `${tier}: 进程已死、结果在会话里，续做不会重复副作用`);
+    assert.equal(d.stalledRetry, true);
+    assert.match(d.reason, /11 次工具调用/, '理由里要能看出它跑了多少工具');
   }
 });
 
-test('零产出续做只给一次（第二次失败就停）', async () => {
+test('★ 卡死续做只给一次（第二次就停，等人工）', async () => {
   const { retryDecision } = await import('../src/core/health.js');
-  const d = retryDecision({
-    tier: 'write-exec', reason: 'timeout', attempt: 1, maxAttempts: 2, stalled: true, toolCalls: 0,
-  });
-  assert.equal(d.retry, false);
+  for (const tier of ['write', 'write-exec']) {
+    const d = retryDecision({
+      tier, reason: 'timeout', attempt: 1, maxAttempts: 2, stalled: true, toolCalls: 3,
+    });
+    assert.equal(d.retry, false);
+    assert.match(d.reason, /已达上限/);
+  }
+});
+
+test('★ 非 stalled 的失败仍不给可写档重试（业务失败/硬超时不走这条）', async () => {
+  const { retryDecision } = await import('../src/core/health.js');
+  assert.equal(retryDecision({ tier: 'write', reason: 'timeout', attempt: 0, stalled: false }).retry, false);
+  assert.equal(retryDecision({ tier: 'write-exec', reason: 'failed', attempt: 0, stalled: false }).retry, false);
+});
+
+test('只读档卡死可以用满 maxAttempts（它本来就没有副作用）', async () => {
+  const { retryDecision } = await import('../src/core/health.js');
+  assert.equal(retryDecision({ tier: 'readonly', reason: 'timeout', attempt: 0, stalled: true }).retry, true);
+  assert.equal(retryDecision({ tier: 'readonly', reason: 'timeout', attempt: 1, stalled: true }).retry, true);
+  assert.equal(retryDecision({ tier: 'readonly', reason: 'timeout', attempt: 2, stalled: true }).retry, false);
 });
 
 test('只读档原有行为不变：超时可重试，业务失败不重试', async () => {
