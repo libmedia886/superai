@@ -87,6 +87,22 @@ export async function startServer({
   for (const w of manager.notices) broadcast({ type: 'notice', level: 'warn', text: w });
   manager.notices.length = 0;
 
+  /**
+   * seq 不唯一时要说一句。
+   *
+   * 历史撞号是真实存在的（重启时 _seq 归零，生产上 1052 条事件只有 163 个不同 seq）。
+   * 我们不回写历史（append-only 优先），但不能让人在不知情的情况下拿 seq 做对账。
+   */
+  if (session?.store?.seqUnique === false) {
+    broadcast({
+      type: 'notice',
+      level: 'warn',
+      text: `本房间有 ${session.store.seqDuplicates} 条事件的 seq 与更早事件重复`
+        + '（2026-11-16 之前重启会重置计数）。新事件已保证唯一；'
+        + '回溯历史请以文件行序与 at 为准，不要用 seq 做 join。',
+    });
+  }
+
   const nameOf = (id) => (id === 'human' ? '老板' : (members.find((m) => m.id === id)?.name ?? id));
 
   /**
@@ -751,6 +767,10 @@ export async function startServer({
           actionLog: store.actionLog,
           members: room.members,
           nameOf,
+          seqWarning: store.seqUnique === false
+            ? `本房间有 ${store.seqDuplicates} 条事件的 seq 与更早事件重复（2026-11-16 之前重启会重置计数）。`
+              + '回溯请以消息顺序与时间戳为准，不要用 seq 对账。'
+            : null,
         });
         const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
         res.writeHead(200, {

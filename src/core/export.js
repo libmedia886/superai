@@ -55,6 +55,7 @@ function stripActionBlocks(text) {
 export function exportMarkdown({
   room, messages = [], tasks = [], roster = [], toolLog = [], actionLog = [],
   members = [], nameOf, generatedAt = new Date().toISOString(),
+  seqWarning = null,
 }) {
   const who = nameOf ?? ((id) => (id === 'human' ? '老板' : (members.find((m) => m.id === id)?.name ?? id)));
   const rosterMap = roster instanceof Map ? roster : new Map(roster);
@@ -74,6 +75,11 @@ export function exportMarkdown({
   }
   out.push(`导出时间：${fmtTime(generatedAt)}`);
   out.push('');
+  if (seqWarning) {
+    // 导出件会被别人拿去对账，这句必须写在最前面
+    out.push(`> ⚠️ **${seqWarning}**`);
+    out.push('');
+  }
   out.push('| 项目 | 数量 |');
   out.push('| --- | --- |');
   out.push(`| 对话条数 | ${messages.length}（其中 AI 发言 ${agentMsgs.length}） |`);

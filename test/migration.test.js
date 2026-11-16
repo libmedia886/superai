@@ -315,3 +315,29 @@ test('seq 有洞时取最大值而不是行数（删过行也不会撞号）', a
   await s.load();
   assert.equal((await s.addMessage({ senderId: 'human', body: 'c' })).seq, 8);
 });
+
+test('★ load 时识别 seq 重复，并如实计数（历史撞号不回写，但要让人知道）', async () => {
+  const { Store } = await import('../src/core/store.js');
+  const dir = await mkdtemp(join(tmpdir(), 'dupseq-'));
+  const f = join(dir, 'room.jsonl');
+  await writeFile(f, [1, 1, 2, 2, 3].map((n) => JSON.stringify({
+    v: 1, seq: n, kind: 'message', message: { id: `M-${n}`, senderId: 'human', body: 'x' },
+  })).join('\n') + '\n');
+
+  const s = new Store(f);
+  await s.load();
+  assert.equal(s.seqUnique, false);
+  assert.equal(s.seqDuplicates, 2, '两条重复');
+  assert.equal((await s.addMessage({ senderId: 'human', body: 'new' })).seq, 4,
+    '新事件仍然唯一（不再撞号）');
+
+  // 干净文件不该被误报
+  const f2 = join(dir, 'clean.jsonl');
+  await writeFile(f2, [1, 2, 3].map((n) => JSON.stringify({
+    v: 1, seq: n, kind: 'message', message: { id: `M${n}`, senderId: 'human', body: 'y' },
+  })).join('\n') + '\n');
+  const s2 = new Store(f2);
+  await s2.load();
+  assert.equal(s2.seqUnique, true);
+  assert.equal(s2.seqDuplicates, 0);
+});

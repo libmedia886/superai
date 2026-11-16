@@ -30,6 +30,16 @@ export class Store {
     this.pause = null;
     this.loopWarnings = [];     // 循环护栏警告（事后复盘用）
     this._seq = 0;
+    /**
+     * seq 是否唯一。
+     *
+     * 2026-11-16 之前 `load()` 不恢复计数，每次重启 `_seq` 归零 → 生产数据里
+     * 大量重复 seq（真实房间 1052 条事件只有 163 个不同 seq）。
+     * 历史不回写（append-only 比"看起来整齐"重要），但**必须让人知道**：
+     * 拿 seq 做 join 会得出错误结论，回溯应以文件行序与 at 为准。
+     */
+    this.seqUnique = true;
+    this.seqDuplicates = 0;
     this._writeChain = Promise.resolve();
     /**
      * 冻结标记：房间被切走之后，任何残留 turn 都不允许再写这个文件。
@@ -57,6 +67,7 @@ export class Store {
     try {
       const raw = await readFile(this.filePath, 'utf8');
       let maxSeq = 0;
+      const seenSeq = new Set();
       for (const line of raw.split('\n')) {
         const l = line.trim();
         if (!l) continue;
@@ -69,11 +80,16 @@ export class Store {
            * seq 撞号。seq 是排序与审计对账的依据——撞号意味着"第 42 条事件"
            * 指向两个不同的时刻，出事之后按 seq 回溯会串行。
            */
-          if (Number.isFinite(ev?.seq)) maxSeq = Math.max(maxSeq, ev.seq);
+          if (Number.isFinite(ev?.seq)) {
+            maxSeq = Math.max(maxSeq, ev.seq);
+            if (seenSeq.has(ev.seq)) this.seqDuplicates += 1;
+            else seenSeq.add(ev.seq);
+          }
           this.apply(ev);
         } catch { /* 跳过损坏行，不阻塞启动 */ }
       }
       this._seq = Math.max(this._seq, maxSeq);
+      this.seqUnique = this.seqDuplicates === 0;
     } catch (err) {
       if (err.code !== 'ENOENT') throw err;
       await mkdir(dirname(this.filePath), { recursive: true });

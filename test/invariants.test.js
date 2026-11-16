@@ -226,3 +226,10 @@ test('清单：状态带表情要能识别（已完成✅）', async () => {
 test('清单：重启后 seq 必须接着编号', async () => {
   await mustMention('core/store.js', 'maxSeq', 'load 要恢复序号计数');
 });
+
+test('清单：seq 撞号要能被告知（历史不回写，但必须让人知道）', async () => {
+  await mustMention('core/store.js', 'seqUnique', 'load 要识别重复 seq');
+  await mustMention('core/store.js', 'seqDuplicates', '要数出来多少条受影响');
+  await mustMention('core/export.js', 'seqWarning', '导出件会被别人拿去对账');
+  await mustMention('server.js', 'seqUnique === false', '启动时要在界面说一句');
+});

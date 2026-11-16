@@ -131,3 +131,21 @@ test('头部统计准确', () => {
   assert.match(md, /对话条数 \| 3（其中 AI 发言 2）/);
   assert.match(md, /累计用量 \| 2\.0k token/);
 });
+
+test('★ seq 有重复时，导出件顶部必须有警告（别人会拿它对账）', async () => {
+  const { exportMarkdown } = await import('../src/core/export.js');
+  const warn = '本房间有 159 条事件的 seq 与更早事件重复。回溯请以消息顺序与时间戳为准。';
+  const md = exportMarkdown({
+    room: { name: 'R', goal: '' }, messages: [], tasks: [], roster: [],
+    toolLog: [], actionLog: [], members: [], nameOf: (x) => x,
+    seqWarning: warn,
+  });
+  assert.match(md, /⚠️/);
+  assert.match(md, /seq 与更早事件重复/);
+
+  const clean = exportMarkdown({
+    room: { name: 'R', goal: '' }, messages: [], tasks: [], roster: [],
+    toolLog: [], actionLog: [], members: [], nameOf: (x) => x,
+  });
+  assert.doesNotMatch(clean, /seq/, '没问题的房间不该出现这条噪音');
+});
