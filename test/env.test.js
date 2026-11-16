@@ -203,3 +203,29 @@ test('★ 我们依赖 childEnv 白名单挡住 BASH_ENV / LD_PRELOAD', async ()
     }
   }
 });
+
+test('★ 净化必须作用在最终结果上：经 extra 传入的 PATH 也要过滤（旁路）', async () => {
+  /**
+   * 管理方 2026-11-17 实测：原来先净化 base.PATH、再 `...extra`，
+   * 任何调用方传 `extra.PATH` 就把净化结果覆盖回去 ——
+   * **净化和旁路同时存在，而注释还写着"结构性消除"**。
+   */
+  const { childEnv } = await import('../src/core/runner.js');
+  const dataRoot = '/home/hope/.multiagent-chat';
+
+  // extra 传数据目录下的路径
+  assert.equal(
+    childEnv({ PATH: `${dataRoot}/rooms/x:/usr/bin` }, { backend: 'claude', forbiddenRoots: [dataRoot] }).PATH,
+    '/usr/bin',
+    'extra 传进来的数据目录条目也必须被剔除',
+  );
+
+  // extra 传相对路径（没有数据目录字符串的等价写法）
+  assert.equal(childEnv({ PATH: '.:/usr/bin' }, { backend: 'claude' }).PATH, '/usr/bin');
+  assert.equal(childEnv({ PATH: 'bin:/usr/bin' }, { backend: 'claude' }).PATH, '/usr/bin');
+  assert.equal(childEnv({ PATH: '../x:/usr/bin' }, { backend: 'claude' }).PATH, '/usr/bin');
+  assert.equal(childEnv({ PATH: ':/usr/bin' }, { backend: 'claude' }).PATH, '/usr/bin');
+
+  // 正常绝对路径要原样保留
+  assert.equal(childEnv({ PATH: '/opt/tools:/usr/bin' }, { backend: 'claude' }).PATH, '/opt/tools:/usr/bin');
+});

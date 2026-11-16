@@ -382,3 +382,15 @@ test('清单：PATH 是攻击面（数据目录不得出现在子进程 PATH 里
     assert.equal(env.PATH, '/usr/bin');
   } finally { process.env.PATH = saved; }
 });
+
+test('清单：净化写在 ...extra 之后（否则调用方传 extra.PATH 就旁路）', async () => {
+  const src = await readFile(new URL('../src/core/runner.js', import.meta.url), 'utf8');
+  const fn = src.slice(src.indexOf('export function childEnv'), src.indexOf('/** 供诊断'));
+  const extraIdx = fn.indexOf('...extra');
+  const sanitizeIdx = fn.indexOf('if (out.PATH)');
+  assert.ok(extraIdx > 0 && sanitizeIdx > 0, '两段都要在函数里');
+  assert.ok(sanitizeIdx > extraIdx,
+    '净化必须在 ...extra 之后、作用在最终结果上——放在之前就是给自己留旁路');
+  assert.doesNotMatch(fn.slice(sanitizeIdx), /base\.PATH\.split/,
+    '不能拿 base.PATH 去切分（那是净化前的值）');
+});

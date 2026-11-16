@@ -97,8 +97,16 @@ export function childEnv(extra = {}, { backend = null, forbiddenRoots = [] } = {
     base[key] = value;
   }
 
+  const out = {
+    ...base,
+    NO_COLOR: '1',
+    TERM: 'dumb',
+    LANG: base.LANG || 'C.UTF-8',
+    ...extra,
+  };
+
   /**
-   * ★ PATH 用**白名单**，不是黑名单（管理方 23:10 纠正）。
+   * ★ PATH 用**白名单**，不是黑名单（管理方 23:10 纠正），且必须作用在**最终结果**上。
    *
    * 我第一版是"剔除落在数据目录下的条目"。它挡不住等价写法：
    *   `.:/usr/bin`   —— `.` 就是当前目录，而当前目录正是成员可写的 cwd
@@ -111,9 +119,15 @@ export function childEnv(extra = {}, { backend = null, forbiddenRoots = [] } = {
    *
    * 这与 netget 里 `CURL_BIN` 的前缀白名单是同一个标准：
    * "我过滤了我知道的写法"挡不住"我不知道的等价写法"。
+   *
+   * ★ 第二层（管理方 2026-11-17 实测）：净化必须作用在**最终结果** `out` 上。
+   *   原来先净化 `base.PATH`、再 `...extra`，任何调用方传 `extra.PATH`
+   *   就把它覆盖回去了 —— **净化和旁路同时存在，而注释还写着"结构性消除"**。
+   *   目前没有调用方这么传（潜在旁路而非线上漏洞），但
+   *   "只要有机会传错就一定会被传错"，所以净化放在最后一道。
    */
-  if (base.PATH) {
-    const kept = base.PATH.split(':').filter((dir) => {
+  if (out.PATH) {
+    const kept = out.PATH.split(':').filter((dir) => {
       if (!dir.startsWith('/')) return false;   // 相对路径 / . / .. / 空段
       if (forbiddenRoots.length) {
         const norm = dir.replace(/\/+$/, '');
@@ -121,16 +135,10 @@ export function childEnv(extra = {}, { backend = null, forbiddenRoots = [] } = {
       }
       return true;
     });
-    base.PATH = kept.join(':');
+    out.PATH = kept.join(':');
   }
 
-  return {
-    ...base,
-    NO_COLOR: '1',
-    TERM: 'dumb',
-    LANG: base.LANG || 'C.UTF-8',
-    ...extra,
-  };
+  return out;
 }
 
 /** 供诊断：列出某个环境里"可能敏感"的变量名（只列名不列值） */
