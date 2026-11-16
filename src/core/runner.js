@@ -97,12 +97,29 @@ export function childEnv(extra = {}, { backend = null, forbiddenRoots = [] } = {
     base[key] = value;
   }
 
-  // 剔除 PATH 里落在受保护根下的条目（成员可写的地方不能出现在 PATH）
-  if (base.PATH && forbiddenRoots.length) {
+  /**
+   * ★ PATH 用**白名单**，不是黑名单（管理方 23:10 纠正）。
+   *
+   * 我第一版是"剔除落在数据目录下的条目"。它挡不住等价写法：
+   *   `.:/usr/bin`   —— `.` 就是当前目录，而当前目录正是成员可写的 cwd
+   *   `bin:/usr/bin` —— 任何相对路径都相对于子进程 cwd，而 cwd 永远在数据目录内
+   * 这些写法里**根本没有数据目录的字符串**，黑名单匹配不到。
+   *
+   * 判据改成：**只接受绝对路径**（`/` 开头），其余一律剔除
+   * —— 空段、`.`、`..`、相对路径全部不要。
+   * 系统 PATH 里没有相对条目，剔除它们不影响任何正常命令。
+   *
+   * 这与 netget 里 `CURL_BIN` 的前缀白名单是同一个标准：
+   * "我过滤了我知道的写法"挡不住"我不知道的等价写法"。
+   */
+  if (base.PATH) {
     const kept = base.PATH.split(':').filter((dir) => {
-      if (!dir) return false;
-      const norm = dir.replace(/\/+$/, '');
-      return !forbiddenRoots.some((root) => norm === root || norm.startsWith(root + '/'));
+      if (!dir.startsWith('/')) return false;   // 相对路径 / . / .. / 空段
+      if (forbiddenRoots.length) {
+        const norm = dir.replace(/\/+$/, '');
+        if (forbiddenRoots.some((root) => norm === root || norm.startsWith(`${root}/`))) return false;
+      }
+      return true;
     });
     base.PATH = kept.join(':');
   }

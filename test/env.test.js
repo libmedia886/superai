@@ -136,13 +136,45 @@ test('★ 数据目录下的条目必须从子进程 PATH 里剔除', async () =
   }
 });
 
-test('没传 forbiddenRoots 时 PATH 原样保留（不误伤）', async () => {
+test('★ 相对路径 / . / .. / 空段一律剔除（白名单：只接受绝对路径）', async () => {
+  /**
+   * 管理方 23:10 的纠正：我第一版是"剔除数据目录下的条目"（黑名单），
+   * 而 `.:/usr/bin` 里根本没有数据目录字符串——`.` 就是当前目录，
+   * 而当前目录正是成员可写的 cwd。等价写法还有 `./`、`bin`、`../x`。
+   *
+   * 所以判据必须是**白名单：只接受 `/` 开头**。
+   * 这与 netget 里 CURL_BIN 的前缀白名单是同一个标准。
+   */
   const { childEnv } = await import('../src/core/runner.js');
   const saved = process.env.PATH;
   try {
-    process.env.PATH = '/tmp/room/agents/a:/usr/bin';
-    const env = childEnv({}, { backend: 'claude' });
-    assert.equal(env.PATH, '/tmp/room/agents/a:/usr/bin');
+    for (const [input, expected] of [
+      [':/usr/bin', '/usr/bin'],
+      ['.:/usr/bin', '/usr/bin'],
+      ['./:/usr/bin', '/usr/bin'],
+      ['bin:/usr/bin', '/usr/bin'],
+      ['../x:/usr/bin', '/usr/bin'],
+      ['/usr/bin::', '/usr/bin'],
+      ['/usr/bin:', '/usr/bin'],
+      ['/opt/tools:/usr/bin', '/opt/tools:/usr/bin'],
+    ]) {
+      process.env.PATH = input;
+      const env = childEnv({}, { backend: 'claude', forbiddenRoots: ['/home/hope/.multiagent-chat'] });
+      assert.equal(env.PATH, expected, `PATH=${JSON.stringify(input)} 应变成 ${expected}`);
+    }
+  } finally {
+    process.env.PATH = saved;
+  }
+});
+
+test('绝对路径保留，前缀相同但不同的目录不误杀', async () => {
+  const { childEnv } = await import('../src/core/runner.js');
+  const saved = process.env.PATH;
+  try {
+    process.env.PATH = '/home/hope/.multiagent-chat-evil:/usr/bin';
+    const env = childEnv({}, { backend: 'claude', forbiddenRoots: ['/home/hope/.multiagent-chat'] });
+    assert.equal(env.PATH, '/home/hope/.multiagent-chat-evil:/usr/bin',
+      '前缀相同但不是同一个目录，不能误删');
   } finally {
     process.env.PATH = saved;
   }
