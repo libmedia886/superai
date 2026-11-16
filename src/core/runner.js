@@ -64,11 +64,22 @@ export const AUTH_VARS_BY_BACKEND = {
 };
 
 /**
+ * ★ PATH 里的攻击面必须结构性消除。
+ *
+ * 成员的 cwd 是它自己可写的目录。如果 PATH 里有任何一个目录落在数据目录内，
+ * 成员往那里放一个同名可执行文件（`curl`、`git`…），子进程就会执行它，
+ * 而这个项目的所有约束（档位、命令白名单、netget）都建立在"执行的是真命令"上。
+ *
+ * 管理方 22:55 指出的方向：**只要允许裸命令，PATH 就是攻击面**。
+ * netget 自己重设 PATH 所以安全，但成员直接跑 `curl`（自定义命令那条路）没有这层保护。
+ * 所以在**子进程环境**这一层过滤掉数据目录内的 PATH 条目——这是唯一覆盖所有后端的点。
+ *
  * @param {object} [o]
  * @param {Record<string,string>} [o.extra]     强制覆盖
  * @param {string} [o.backend]                  只放行该后端的认证变量（不传则放行全部前缀）
+ * @param {string[]} [o.forbiddenRoots]         PATH 里不许出现的目录前缀（数据目录）
  */
-export function childEnv(extra = {}, { backend = null } = {}) {
+export function childEnv(extra = {}, { backend = null, forbiddenRoots = [] } = {}) {
   const base = {};
   const allowedAuth = backend ? new Set(AUTH_VARS_BY_BACKEND[backend] ?? []) : null;
 
@@ -84,6 +95,16 @@ export function childEnv(extra = {}, { backend = null } = {}) {
       if (!allowedAuth.has(key)) continue;
     }
     base[key] = value;
+  }
+
+  // 剔除 PATH 里落在受保护根下的条目（成员可写的地方不能出现在 PATH）
+  if (base.PATH && forbiddenRoots.length) {
+    const kept = base.PATH.split(':').filter((dir) => {
+      if (!dir) return false;
+      const norm = dir.replace(/\/+$/, '');
+      return !forbiddenRoots.some((root) => norm === root || norm.startsWith(root + '/'));
+    });
+    base.PATH = kept.join(':');
   }
 
   return {
@@ -124,12 +145,13 @@ export function runJsonCli({
   backend = null,
   env = {},
   signal = null,
+  forbiddenRoots = [],
 }) {
   return new Promise((resolve) => {
     const isWin = process.platform === 'win32';
     const child = spawn(command, args, {
       cwd,
-      env: childEnv(env, { backend }),
+      env: childEnv(env, { backend, forbiddenRoots }),
       stdio: ['pipe', 'pipe', 'pipe'],
       // 非 Windows 建独立进程组，便于整组 kill
       detached: !isWin,

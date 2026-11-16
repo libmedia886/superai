@@ -97,6 +97,8 @@ export class CodexAdapter extends AgentAdapter {
       args,
       cwd,
       backend: 'codex',
+      // 数据目录下的任何条目都不能出现在子进程 PATH 里（成员可写 → 可劫持命令）
+      forbiddenRoots: this.config.forbiddenRoots ?? [],
       signal,
       prompt: withPersona(this.config.persona, prompt),
       timeoutMs,
@@ -166,6 +168,7 @@ export class CodexAdapter extends AgentAdapter {
       args: [...this.#baseArgs(cwd), '-'],
       cwd,
       backend: 'codex',
+      forbiddenRoots: this.config.forbiddenRoots ?? [],
       prompt: 'Reply with exactly: OK',
       timeoutMs,
     });

@@ -370,3 +370,15 @@ test('清单：空转判据只用结构化事实（文本不是可靠信号）',
   for (let i = 0; i < 3; i += 1) last = g.noteProgress({ actions: 0, toolCalls: 0 });
   assert.ok(last.reason, '连续 3 轮无结构化推进必须报');
 });
+
+test('清单：PATH 是攻击面（数据目录不得出现在子进程 PATH 里）', async () => {
+  await mustMention('core/runner.js', 'forbiddenRoots', 'PATH 过滤是所有后端唯一共用的一层');
+  await mustMention('core/config.js', 'forbiddenRoots: [dataDir]', '成员的 cwd 在数据目录内且可写');
+  const { childEnv } = await import('../src/core/runner.js');
+  const saved = process.env.PATH;
+  try {
+    process.env.PATH = '/data/room/agents/x:/usr/bin';
+    const env = childEnv({}, { backend: 'claude', forbiddenRoots: ['/data/room'] });
+    assert.equal(env.PATH, '/usr/bin');
+  } finally { process.env.PATH = saved; }
+});

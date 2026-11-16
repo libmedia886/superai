@@ -182,6 +182,8 @@ export class ClaudeAdapter extends AgentAdapter {
       args,
       cwd,
       backend: 'claude',
+      // 数据目录下的任何条目都不能出现在子进程 PATH 里（成员可写 → 可劫持命令）
+      forbiddenRoots: this.config.forbiddenRoots ?? [],
       signal,
       prompt: withPersona(this.config.persona, prompt),
       timeoutMs,
@@ -286,6 +288,7 @@ export class ClaudeAdapter extends AgentAdapter {
       args: ['-p', '--output-format', 'json', ...tierArgs(this.config.tier)],
       cwd,
       backend: 'claude',
+      forbiddenRoots: this.config.forbiddenRoots ?? [],
       prompt: 'Reply with exactly: OK',
       timeoutMs,
     });

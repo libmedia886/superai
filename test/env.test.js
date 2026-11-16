@@ -113,3 +113,61 @@ test('每个后端都有明确的认证变量清单（新增后端时必须补�
     assert.ok(AUTH_VARS_BY_BACKEND[backend].length > 0);
   }
 });
+
+/* ---------------- PATH 提权面（管理方 22:55） ---------------- */
+
+test('★ 数据目录下的条目必须从子进程 PATH 里剔除', async () => {
+  /**
+   * 成员的 cwd 在数据目录内，且它可写。如果 PATH 里有数据目录下的条目，
+   * 成员放一个同名可执行文件（`curl`、`git`…），子进程就会执行它 ——
+   * 而本项目的全部约束（档位、命令白名单、netget）都建立在"执行的是真命令"上。
+   *
+   * 这是覆盖**所有后端**的唯一一层：适配器各自重设 PATH 做不到，因为
+   * 成员直接跑自定义命令时根本没有包装器。
+   */
+  const { childEnv } = await import('../src/core/runner.js');
+  const saved = process.env.PATH;
+  try {
+    process.env.PATH = '/tmp/room/agents/a:/usr/bin:/tmp/room/bin:/bin';
+    const env = childEnv({}, { backend: 'claude', forbiddenRoots: ['/tmp/room'] });
+    assert.equal(env.PATH, '/usr/bin:/bin', '数据目录下的条目全部剔除，系统目录保留');
+  } finally {
+    process.env.PATH = saved;
+  }
+});
+
+test('没传 forbiddenRoots 时 PATH 原样保留（不误伤）', async () => {
+  const { childEnv } = await import('../src/core/runner.js');
+  const saved = process.env.PATH;
+  try {
+    process.env.PATH = '/tmp/room/agents/a:/usr/bin';
+    const env = childEnv({}, { backend: 'claude' });
+    assert.equal(env.PATH, '/tmp/room/agents/a:/usr/bin');
+  } finally {
+    process.env.PATH = saved;
+  }
+});
+
+test('★ 我们依赖 childEnv 白名单挡住 BASH_ENV / LD_PRELOAD', async () => {
+  /**
+   * 管理方 22:55 实测：`BASH_ENV=/tmp/evil.sh` 在手工调用时能执行，
+   * 但 `runner.js` 的白名单不放行它，所以在真实 spawn 路径下不可达。
+   *
+   * ⚠️ 这条测试锁的是一个**依赖**：如果哪天为了兼容性放开 BASH_ENV / LD_PRELOAD，
+   * netget 与所有命令约束都会被绕过。放开之前必须先处理这条。
+   */
+  const { childEnv } = await import('../src/core/runner.js');
+  const saved = { BASH_ENV: process.env.BASH_ENV, LD_PRELOAD: process.env.LD_PRELOAD };
+  try {
+    process.env.BASH_ENV = '/tmp/evil.sh';
+    process.env.LD_PRELOAD = '/tmp/evil.so';
+    const env = childEnv({}, { backend: 'claude' });
+    assert.equal('BASH_ENV' in env, false, 'BASH_ENV 不能透传（否则 netget 约束被绕过）');
+    assert.equal('LD_PRELOAD' in env, false, 'LD_PRELOAD 不能透传');
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+});

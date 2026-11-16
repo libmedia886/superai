@@ -35,6 +35,7 @@ export function adapterSignature(config = {}) {
     config.allowedCommands ?? [],
     config.sharedDir ?? null,
     config.netgetPath ?? null,
+    (config.forbiddenRoots ?? []).join('|'),
   ]);
 }
 
@@ -59,6 +60,7 @@ export function getCachedAdapter(cache, agent) {
     allowedCommands: agent.allowedCommands ?? [],
     sharedDir: agent.sharedDir ?? null,
     netgetPath: agent.netgetPath ?? null,
+    forbiddenRoots: agent.forbiddenRoots ?? [],
   });
   cache.set(agent.id, { sig, adapter });
   return adapter;

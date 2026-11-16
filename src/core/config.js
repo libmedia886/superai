@@ -140,7 +140,13 @@ export async function buildRoom({ cfg, dataDir = DEFAULT_DATA_DIR, onEvent, shar
     }
 
     members.push({
-      ...m, tier, cwd, sessionId, sessionResetReason, aliases: [m.name.toLowerCase()],
+      ...m, tier, cwd, sessionId, sessionResetReason,
+      /**
+       * 数据目录：子进程 PATH 里不许出现它下面的任何条目。
+       * 成员的 cwd 就在里面，它可写 —— 能写 + 能出现在 PATH = 能劫持命令。
+       */
+      forbiddenRoots: [dataDir],
+      aliases: [m.name.toLowerCase()],
     });
   }
 

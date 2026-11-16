@@ -152,6 +152,8 @@ export class OpencodeAdapter extends AgentAdapter {
       args: this.#args(cwd, sessionId),
       cwd,
       backend: 'opencode',
+      // 数据目录下的任何条目都不能出现在子进程 PATH 里（成员可写 → 可劫持命令）
+      forbiddenRoots: this.config.forbiddenRoots ?? [],
       signal,
       prompt: fullPrompt,
       timeoutMs,
@@ -235,6 +237,7 @@ export class OpencodeAdapter extends AgentAdapter {
       args: ['run', '--format', 'json', '--dir', cwd],
       cwd,
       backend: 'opencode',
+      forbiddenRoots: this.config.forbiddenRoots ?? [],
       prompt: 'Reply with exactly: OK',
       timeoutMs,
     });
