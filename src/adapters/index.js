@@ -33,6 +33,7 @@ export function adapterSignature(config = {}) {
     config.bin ?? null,
     // 命令白名单变了也必须重建适配器，否则改完不生效（同一个"界面撒谎"）
     config.allowedCommands ?? [],
+    config.sharedDir ?? null,
   ]);
 }
 
@@ -55,6 +56,7 @@ export function getCachedAdapter(cache, agent) {
     bin: agent.bin,
     extraArgs: agent.extraArgs ?? [],
     allowedCommands: agent.allowedCommands ?? [],
+    sharedDir: agent.sharedDir ?? null,
   });
   cache.set(agent.id, { sig, adapter });
   return adapter;

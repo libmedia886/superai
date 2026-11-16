@@ -125,6 +125,21 @@ export class ClaudeAdapter extends AgentAdapter {
       ...effortArgs('claude', this.config.effort),
     ];
     if (sessionId) args.push('--resume', sessionId);
+
+    /**
+     * 房间共享目录。
+     *
+     * 实测 `--add-dir` 同时给**读和写**——claude 没有"这个目录只读"的表达方式。
+     * 所以不要声称成员在共享目录里是只读的：规则由 prompt 约束，
+     * 所有写入都会进工具日志（可追责）。这一点在界面与 prompt 里都要如实说。
+     * 只读档（readonly/read）不给这个参数：它们本来就没有写工具。
+     */
+    const tier = this.config.tier;
+    const canUseFiles = tier && tier !== 'readonly';
+    if (this.config.sharedDir && canUseFiles) {
+      args.push('--add-dir', this.config.sharedDir);
+    }
+
     args.push(...(this.config.extraArgs ?? []));
     return args;
   }

@@ -93,10 +93,23 @@ export class OpencodeAdapter extends AgentAdapter {
   /** text 整段出现，没有 delta */
   get supportsStreaming() { return false; }
 
-  /** 把权限写成 cwd 里的 opencode.json */
+  /**
+   * 把权限写成 cwd 里的 opencode.json。
+   *
+   * 共享目录：opencode 靠 `external_directory` 这一项控制，而它只有
+   * deny/allow 两档——**没有"只读"**。所以共享目录一旦给出去就是可读写，
+   * 和 claude 的 `--add-dir` 一样。只读档不给。
+   */
   async prepare(cwd) {
     await mkdir(cwd, { recursive: true });
-    const cfg = { permission: permissionConfig(this.config.tier ?? 'readonly') };
+    const tier = this.config.tier ?? 'readonly';
+    const permission = permissionConfig(tier);
+    const shared = this.config.sharedDir;
+    const writable = tier === 'write' || tier === 'writeExec' || tier === 'write-exec';
+    if (shared && writable) {
+      permission.external_directory = 'allow';
+    }
+    const cfg = { permission };
     await writeFile(join(cwd, 'opencode.json'), JSON.stringify(cfg, null, 2));
     return cfg;
   }
@@ -105,6 +118,8 @@ export class OpencodeAdapter extends AgentAdapter {
     const args = ['run', '--format', 'json', '--dir', cwd];
     if (sessionId) args.push('-s', sessionId);
     if (this.config.agent) args.push('--agent', this.config.agent);
+    // 共享目录：opencode 用 --dir 只能有一个，共享区靠 opencode.json 的
+    // external_directory 放行（见 prepare）
     args.push(...modelArgs('opencode', this.config.model));
     args.push(...effortArgs('opencode', this.config.effort));
     // 附加参数放最后：让用户能盖过上面的默认值

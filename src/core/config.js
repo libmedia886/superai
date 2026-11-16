@@ -58,7 +58,7 @@ export async function saveConfig(cfg, dataDir = DEFAULT_DATA_DIR) {
  * 装配房间。返回 room / store / members / warnings。
  * warnings 要在界面上显示——档位不被支持这种事不能静默。
  */
-export async function buildRoom({ cfg, dataDir = DEFAULT_DATA_DIR, onEvent }) {
+export async function buildRoom({ cfg, dataDir = DEFAULT_DATA_DIR, onEvent, sharedDir = null }) {
   const store = new Store(join(dataDir, 'room.jsonl'));
   await store.load();
 
@@ -107,6 +107,8 @@ export async function buildRoom({ cfg, dataDir = DEFAULT_DATA_DIR, onEvent }) {
     worktreesRoot: join(dataDir, 'worktrees'),
     /** 房间级权限天花板：AI 能创建的成员最高档位（人设定，默认只读） */
     aiCabTier: cfg.aiCabTier ?? TIER.READONLY,
+    /** 房间共享目录：成员能读，头头能写。协作不用再把整张表贴进群 */
+    sharedDir,
     /** 成员不 @ 发言时是否叫醒头头（房间级开关，默认开） */
     headPassiveWake: cfg.headPassiveWake !== false,
     // agent 造人时的落地钩子：建目录 + 写配置，返回带 cwd 的成员

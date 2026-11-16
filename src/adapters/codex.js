@@ -60,6 +60,9 @@ export class CodexAdapter extends AgentAdapter {
     return [
       'exec', '--json', '--skip-git-repo-check',
       '-s', this.#sandboxMode(this.config.tier), '-C', cwd,
+      // 共享目录：只读档不加（read-only 沙箱下加了也写不了，只会误导）
+      ...(this.config.sharedDir && this.config.tier === 'write-exec'
+        ? ['--add-dir', this.config.sharedDir] : []),
       ...this.#modelEffortArgs(),
       ...(this.config.extraArgs ?? []),
     ];

@@ -98,3 +98,34 @@ test('字段校验', () => {
   assert.match(validateAction({ action: 'task.update', id: 'T-1' }), /没有任何要改的字段/);
   assert.equal(validateAction({ action: 'task.update', id: 'T-1', status: '完成' }), null);
 });
+
+/* ---------- 状态同义词归一化 ---------- */
+
+test('★ 「已完成 / done / 做完」都可以，不必逼模型记五个中文词', async () => {
+  const { normalizeStatus } = await import('../src/core/actions.js');
+  for (const s of ['已完成', 'done', 'DONE', 'completed', '做完', '结束', '已完成！', '进行中', ' 完成 ']) {
+    assert.ok(normalizeStatus(s), `「${s}」应能识别`);
+  }
+  assert.equal(normalizeStatus('已完成'), '完成');
+  assert.equal(normalizeStatus('done'), '完成');
+  assert.equal(normalizeStatus('进行中'), '进行中');
+  assert.equal(normalizeStatus('待确认'), '待确认');
+  assert.equal(normalizeStatus('blocked'), '阻塞');
+  assert.equal(normalizeStatus('进行中'), '进行中');
+});
+
+test('完全无法识别的状态仍然拒绝，但理由里给出合法值列表', async () => {
+  const { validateAction } = await import('../src/core/actions.js');
+  const r = validateAction({ action: 'task.update', id: 'T-001', status: '量子态' });
+  assert.ok(r);
+  assert.match(r, /合法值/);
+  assert.match(r, /待办/);
+  assert.match(r, /完成/);
+});
+
+test('★ validateAction 会把同义词就地归一化（下游拿到的就是合法值）', async () => {
+  const { validateAction } = await import('../src/core/actions.js');
+  const a = { action: 'task.update', id: 'T-001', status: '已完成' };
+  assert.equal(validateAction(a), null);
+  assert.equal(a.status, '完成', '必须写回，否则下游还是拿到「已完成」');
+});

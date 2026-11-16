@@ -308,3 +308,23 @@ test('★ 切换时旧房间有 turn 在跑：切换后旧 store 写入被拒，
   const bLog = await readFile(join(dir, 'rooms', 'r-b', 'room.jsonl'), 'utf8');
   assert.ok(bLog.includes('w-r-b'), 'B 的对话落在 B 自己的文件里');
 });
+
+test('★ 每个房间有共享目录，成员都能看到（协作不用把内容贴进群）', async () => {
+  const dir = await makeMultiRoom();
+  const mgr = await new RoomManager({ dataDir: dir, onEvent: () => {} }).init();
+  const shared = mgr.session.room.sharedDir;
+  assert.ok(shared, '房间要暴露 sharedDir');
+  assert.ok(await exists(shared), '共享目录要真的建出来');
+  assert.ok(shared.endsWith(join('r-0', 'shared')), `路径在房间目录下：${shared}`);
+  assert.ok(mgr.session.members.every((m) => m.sharedDir === shared), '每个成员都拿到同一个路径');
+});
+
+test('★ 换房间后共享目录跟着换（不能还指着上一个房间的）', async () => {
+  const dir = await makeMultiRoom();
+  const mgr = await new RoomManager({ dataDir: dir, onEvent: () => {} }).init();
+  const a = mgr.session.room.sharedDir;
+  await mgr.switchTo('r-1');
+  const b = mgr.session.room.sharedDir;
+  assert.notEqual(a, b);
+  assert.ok(b.includes('r-1'));
+});

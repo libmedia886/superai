@@ -126,7 +126,42 @@ function parseBody(body) {
   return { items, errors };
 }
 
-const TASK_STATUSES = new Set(['待办', '进行中', '待确认', '完成', '阻塞']);
+export const TASK_STATUSES = new Set(['待办', '进行中', '待确认', '完成', '阻塞']);
+
+/**
+ * 状态同义词归一化。
+ *
+ * 模型写「已完成」「done」「已完成✅」是必然发生的——它不是在犯错，
+ * 是在用自然语言表达同一个意思。之前直接判非法，整个动作被拒，
+ * 于是一轮白烧（实测管理员就撞过一次，下一轮只能回来解释"本房间合法值是完成"）。
+ *
+ * 归一化失败时**仍然拒绝**，但把合法值列在理由里——
+ * 只给错误码等于让模型去猜。
+ */
+const STATUS_SYNONYMS = new Map(Object.entries({
+  待办: '待办', 待做: '待办', 未开始: '待办', todo: '待办', pending: '待办', backlog: '待办',
+  进行中: '进行中', 开始: '进行中', 进行: '进行中', 处理中: '进行中', doing: '进行中',
+  in_progress: '进行中', inprogress: '进行中', working: '进行中',
+  待确认: '待确认', 待验收: '待确认', 待复核: '待确认', review: '待确认', in_review: '待确认',
+  to_verify: '待确认',
+  完成: '完成', 已完成: '完成', 做完: '完成', 好了: '完成', 结束: '完成',
+  done: '完成', completed: '完成', complete: '完成', resolved: '完成', finished: '完成',
+  阻塞: '阻塞', 卡住: '阻塞', 受阻: '阻塞', 待定: '阻塞', blocked: '阻塞', blocked_by: '阻塞',
+}));
+
+/** @returns {string|null} 归一化后的合法状态；无法识别返回 null */
+export function normalizeStatus(raw) {
+  if (raw == null) return null;
+  const t = String(raw).trim().toLowerCase().replace(/[\s_-]+/g, '_');
+  if (TASK_STATUSES.has(String(raw).trim())) return String(raw).trim();
+  // 去掉尾部标点/表情，再查一次（"已完成！" / "done."）
+  const stripped = String(raw).trim().replace(/[。.!！,，;；~\s]+$/g, '');
+  if (TASK_STATUSES.has(stripped)) return stripped;
+  return STATUS_SYNONYMS.get(String(raw).trim())
+    ?? STATUS_SYNONYMS.get(stripped)
+    ?? STATUS_SYNONYMS.get(t)
+    ?? null;
+}
 
 /** 校验单个动作的字段，返回 null 表示合法 */
 export function validateAction(a) {
@@ -147,8 +182,14 @@ export function validateAction(a) {
   }
   if (type === 'task.update') {
     if (!a.id || typeof a.id !== 'string') return 'task.update 缺少任务 id';
-    if (a.status != null && !TASK_STATUSES.has(a.status)) {
-      return `非法状态「${a.status}」，允许：${[...TASK_STATUSES].join('/')}`;
+    if (a.status != null) {
+      const normalized = normalizeStatus(a.status);
+      if (!normalized) {
+        // 拒绝理由必须直接给出合法值——只说"非法"等于让模型去猜
+        return `非法状态「${a.status}」。合法值只有这五个：${[...TASK_STATUSES].join(' / ')}`
+          + '（"已完成/done/finished"这类同义词会自动归一化，不用你自己翻译）';
+      }
+      a.status = normalized;
     }
     if (a.assignee != null && typeof a.assignee !== 'string') return 'assignee 必须是成员标识';
     if (a.status == null && a.assignee == null && a.note == null) return 'task.update 没有任何要改的字段';

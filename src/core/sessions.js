@@ -17,6 +17,9 @@
  * 复用实例才是 bug 的源头，所以这里绝不复用。
  */
 
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
+
 import { loadConfig, saveConfig, buildRoom } from './config.js';
 import {
   ensureRoomsLayout, listRooms, createRoom, renameRoom, deleteRoom, setActiveRoom,
@@ -80,8 +83,17 @@ export class RoomManager {
     // 否则切换瞬间会把上一个房间的消息画进新房间。
     const onEvent = (ev) => this.onEvent({ ...ev, roomId: id });
 
+    /**
+     * 房间共享目录。
+     *
+     * 成员之间读不到彼此的文件，协作就退化成"把整张表贴进群"——实测一轮 123k token
+     * 里有相当部分是正文搬运。私有目录的隔离保留（防乱写），只开一个共享区。
+     */
+    const sharedDir = join(dir, 'shared');
+    await mkdir(sharedDir, { recursive: true });
+
     const { room, store, members, warnings } = await buildRoom({
-      cfg, dataDir: dir, onEvent,
+      cfg, dataDir: dir, onEvent, sharedDir,
     });
     for (const w of warnings) this.notices.push(w);
 

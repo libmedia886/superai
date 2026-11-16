@@ -84,7 +84,7 @@ export class Room {
   constructor({
     id, name, goal = '', members, store, resolveAdapter, onEvent,
     registry = [], worktreesRoot = null, onMemberCreate = null,
-    aiCabTier = DEFAULT_AI_CAB_TIER, headPassiveWake = true,
+    aiCabTier = DEFAULT_AI_CAB_TIER, headPassiveWake = true, sharedDir = null,
   }) {
     /** 造人落地钩子（由 config 注入，负责建目录 + 写配置） */
     this.onMemberCreate = onMemberCreate;
@@ -104,6 +104,13 @@ export class Room {
     this.members = members;
     /** 人登记的可用仓库（头头只能在里面选） */
     this.registry = registry;
+    /** 房间共享目录（成员交换文件用；不靠 prompt 里贴全文） */
+    this.sharedDir = sharedDir;
+    /**
+     * 共享目录挂在房间上，同时镜像到每个成员：适配器按 agent 配置构建，
+     * 拿不到 room。两处都设，防止"prompt 说有、适配器不知道"这种半生效状态。
+     */
+    if (sharedDir) for (const m of this.members) m.sharedDir = sharedDir;
     /** worktree 集中放在这里，路径只用任务 id */
     this.worktreesRoot = worktreesRoot;
     this.store = store;

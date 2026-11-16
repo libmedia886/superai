@@ -83,6 +83,24 @@ export function buildPrompt({
     lines.push('', '本房间没有登记仓库，所以任务不能指定 repo（只能纯讨论）。');
   }
 
+  /**
+   * 3.6 房间共享目录。
+   *
+   * 必须写进 prompt：光有目录，模型不知道它存在，还是会继续把整张表贴进群。
+   * 权限差异也要写清——成员只读、头头可写，否则成员会反复尝试写入然后被拒。
+   */
+  const shared = room.sharedDir;
+  if (shared) {
+    lines.push('', '--- 房间共享目录 ---');
+    lines.push(`路径：${shared}（房间内所有人共用，用来交换文件和表格，别再把这些内容贴进群）`);
+    if (agent.role === 'leader') {
+      lines.push('你可以往这个目录里写交接材料。');
+    }
+    // 不撒谎：claude 的 --add-dir 给的是读写，没有"只读目录"这回事
+    lines.push('约定：需要长期交接的文件由头头落到这个目录，其他人以读为主。'
+      + '你在里面的任何写入都会被记进操作日志。');
+  }
+
   // 4. 上下文投递
   lines.push('', '--- 最近讨论 ---');
   if (mode === DELIVERY.MENTION_ONLY) {
