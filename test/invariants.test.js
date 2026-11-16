@@ -297,3 +297,23 @@ test('清单：第五类不变量——界面上那句话必须做得到', async
   const server = await read('server.js');
   assert.match(server, /resumeTarget: room\.resumeTarget/, 'resumeTarget 也要进 room.init（刷新后仍在）');
 });
+
+test('清单：测试不得往 cwd 写文件（交付物会带上它们）', async () => {
+  /**
+   * 管理方 19:31：`v21` 目录里留着 `tfalsefalse.jsonl` 之类的残留，
+   * 是某个测试直接往 cwd 写的 —— 上一版 `npm pack` 真的把它们带进去了。
+   *
+   * 这条断言扫所有测试的 Store 构造与 writeFile，确认路径都经过 mkdtemp/join。
+   */
+  const { readdir } = await import('node:fs/promises');
+  const dir = new URL('../test/', import.meta.url);
+  const files = (await readdir(dir)).filter((f) => f.endsWith('.test.js'));
+
+  for (const f of files) {
+    const src = await readFile(new URL(f, dir), 'utf8');
+    const bareJsonl = /new Store\(\s*['"][^/\\]+\.jsonl['"]\s*\)/.exec(src);
+    const bareWrite = /writeFile\(\s*['"][^/\\]+\.(jsonl|txt|json)['"]/.exec(src);
+    assert.equal(bareJsonl, null, `${f} 用裸文件名构造 Store（会写进 cwd）：${bareJsonl?.[0]}`);
+    assert.equal(bareWrite, null, `${f} 往 cwd 写文件：${bareWrite?.[0]}`);
+  }
+});
