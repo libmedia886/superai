@@ -27,6 +27,19 @@ const exec = promisify(execFile);
 const SCRIPT = fileURLToPath(new URL('../scripts/verify-deploy.sh', import.meta.url));
 const REPO = fileURLToPath(new URL('..', import.meta.url));
 
+/**
+ * 这个测试依赖 git 仓库（用 `git archive HEAD` 导出基线）。
+ * **npm 包解包后没有 .git** —— 那不是"产品坏了"，是环境不适用。
+ * 报失败会让人误以为交付物有问题，所以显式跳过并说清原因。
+ */
+const hasGit = async () => {
+  try {
+    await exec('git', ['-C', REPO, 'rev-parse', '--git-dir'], { timeout: 10_000 });
+    return true;
+  } catch { return false; }
+};
+const SKIP = (await hasGit()) ? false : '无 .git（解包产物里跳过：本测试测的是仓库内的核对脚本）';
+
 const runScript = async (target) => {
   try {
     const r = await exec('bash', [SCRIPT, target], { timeout: 60_000 });
@@ -36,7 +49,7 @@ const runScript = async (target) => {
   }
 };
 
-test('★ 部署目录内容不同 → 必须报"内容不同"（不能漏报）', async () => {
+test('★ 部署目录内容不同 → 必须报"内容不同"（不能漏报）', { skip: SKIP }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vd-'));
   // 用 git archive 铺一份，然后改掉一个文件
   await exec('bash', ['-c', `git -C ${REPO} archive HEAD | tar -x -C ${dir}`], { timeout: 60_000 });
@@ -48,7 +61,7 @@ test('★ 部署目录内容不同 → 必须报"内容不同"（不能漏报）
   assert.match(r.stdout, /bin\/netget/, '要点名哪个文件');
 });
 
-test('★ 部署目录少文件 → 报"缺少"', async () => {
+test('★ 部署目录少文件 → 报"缺少"', { skip: SKIP }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vd2-'));
   await exec('bash', ['-c', `git -C ${REPO} archive HEAD | tar -x -C ${dir}`], { timeout: 60_000 });
   const { rm } = await import('node:fs/promises');
@@ -60,7 +73,7 @@ test('★ 部署目录少文件 → 报"缺少"', async () => {
   assert.match(r.stdout, /bin\/netget/);
 });
 
-test('★ 完全一致 → 退出 0', async () => {
+test('★ 完全一致 → 退出 0', { skip: SKIP }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vd3-'));
   await exec('bash', ['-c', `git -C ${REPO} archive HEAD | tar -x -C ${dir}`], { timeout: 60_000 });
   const r = await runScript(dir);
