@@ -92,7 +92,10 @@ test('★ 脚本必须锁住 locale（否则中文环境下所有差异被静默
 test('清单：部署流程文档存在，且写明「核对是硬门槛」', async () => {
   const doc = await readFile(new URL('../docs/DEPLOY.md', import.meta.url), 'utf8');
   assert.match(doc, /verify-deploy\.sh/, '必须点名核对脚本');
-  assert.match(doc, /必须 exit=0|不是 0 就不要继续/, '必须说明"不是 0 就停"');
+  // 管理方 07:54 纠正：exit=1 不是判决，要"先看差的是什么"
+  assert.match(doc, /exit=1 不等于必须重启/, '必须说明 exit=1 不等于必须重启');
+  assert.match(doc, /先看差的是什么/, '必须说明要先看差异文件类型');
+  assert.match(doc, /运行时/, '必须区分运行时文件与文档/工具');
   assert.match(doc, /部署前/, '要有部署前核对');
   assert.match(doc, /部署后/, '要有部署后核对（核对进程 cwd）');
   assert.match(doc, /PIPESTATUS|管道会吃掉退出码/, '要提醒管道会吃掉退出码（管理方踩过）');
@@ -105,4 +108,34 @@ test('清单：文档必须解释 skipped 3（否则读者以为被绕过）', a
   assert.match(doc, /不是被绕过|不是.*掩盖/, '要说明它不是绕过');
   assert.match(doc, /没有 \.git|无 \.git|解包产物没有/, '要说清为什么跳过');
   assert.match(doc, /仓库内跑|仓库里单独/, '要给出补跑的方法');
+});
+
+test('★ 差异只在文档/测试时，要点明"运行时一致、是否重启由人判断"', async () => {
+  /**
+   * 管理方 2026-11-17 07:54 的判断：线上 v37 只差 docs/ 和 test/，
+   * 他**没有重启**——因为当天已因重启打断过一次正在跑的轮次。
+   * **核对脚本的正确用法不是"不一致就重启"，而是"先看差的是什么"。**
+   *
+   * 所以脚本必须替人把判据摆清楚，但**不替人决定**。
+   */
+  const dir = await mkdtemp(join(tmpdir(), 'vd4-'));
+  await exec('bash', ['-c', `git -C ${REPO} archive HEAD | tar -x -C ${dir}`], { timeout: 60_000 });
+  await writeFile(join(dir, 'docs/DEPLOY.md'), '# 改过的文档\n');
+
+  const r = await runScript(dir);
+  assert.equal(r.code, 1, '仍要报不一致（不能因为"只差文档"就悄悄放过）');
+  assert.match(r.stdout, /只在文档\/测试\/工具|只在文档/, '要指出差异只有非运行时文件');
+  assert.match(r.stdout, /运行时文件全一致/, '要明确说运行时没变');
+  assert.match(r.stdout, /由人判断|是否重启由人/, '**不能替人决定是否重启**');
+});
+
+test('★ 差异涉及 src/ 时必须警告"应当重新部署"', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'vd5-'));
+  await exec('bash', ['-c', `git -C ${REPO} archive HEAD | tar -x -C ${dir}`], { timeout: 60_000 });
+  await writeFile(join(dir, 'src/core/room.js'), '// tampered\n');
+
+  const r = await runScript(dir);
+  assert.equal(r.code, 1);
+  assert.match(r.stdout, /涉及运行时文件|应当重新部署/, '运行时文件变了就得重新部署');
+  assert.doesNotMatch(r.stdout, /可以继续运行当前版本/, '不能说"可以继续"——行为可能已经不同');
 });

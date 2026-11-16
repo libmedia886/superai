@@ -32,7 +32,8 @@ tar xzf /tmp/verify2/multiagent-chat-0.1.0.tgz \
 
 # 3. ★ 部署前核对：新目录必须与 HEAD 逐文件一致
 bash scripts/verify-deploy.sh /home/hope/multiagent-chat-app/<hash>
-#    必须 exit=0。不是 0 就不要继续。
+#    exit=0 → 继续。
+#    exit=1 → **先看差的是什么文件**（见下面「exit=1 不等于必须重启」）。
 
 # 4. 确认房间空闲再切换（有人正在发言时不要重启）
 curl -s http://127.0.0.1:4340/api/health
@@ -44,7 +45,8 @@ curl -s http://127.0.0.1:4340/api/health
 # 6. ★ 部署后再核对一次：线上进程的 cwd 必须就是那份
 readlink /proc/<pid>/cwd
 bash scripts/verify-deploy.sh "$(readlink /proc/<pid>/cwd)"
-#    仍然必须 exit=0
+#    exit=0 → 部署确认完成
+#    exit=1 → 看差异清单，判断要不要重来
 
 # 7. 冒烟：确认服务真的活着、令牌没变、数据还在
 curl -s http://127.0.0.1:4340/api/health
@@ -100,6 +102,25 @@ node --test test/verify-deploy.test.js    # 5/5 全过
 
 判断标准很简单：**只要 `fail 0`，跳过就是环境不适用，不是掩盖失败**。
 但报告里要把 `skipped` 的条数和原因写出来 —— 否则下一个人看到这个数字会怀疑被绕过了。
+
+## `exit=1` 不等于必须重启
+
+`verify-deploy.sh` 报退出码 1 时，**第一件事是看它点名的文件**，而不是立刻重启。
+
+判断分界：
+
+| 差的文件 | 要不要重启 |
+|---|---|
+| `src/` `public/` `bin/` 任何一个 | **要**——这些是运行时行为 |
+| 只有 `docs/` `test/` `scripts/`（工具类） | **不必**——不影响正在跑的房间 |
+| `package.json` 里的 scripts/bin | 看具体改了什么 |
+
+管理方 2026-11-17 07:54 的实际判断：线上 `v37` 只差 `docs/DEPLOY.md` 和
+`test/verify-deploy.test.js` 两个非运行时文件，他**没有重启**——因为
+当天已经因重启打断过一次正在跑的轮次（04:07）。
+
+**核对脚本的正确用法不是"不一致就重启"，而是"先看差的是什么"。**
+`exit=1` 是提示，不是判决。但**必须是人在看**，不能默认跳过。
 
 ## 常见陷阱
 

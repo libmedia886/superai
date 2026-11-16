@@ -96,7 +96,20 @@ fi
 
 echo
 if [ "$FAIL" = "1" ]; then
-  echo "结论：部署目录 **不是** HEAD —— 不要以它为准做验收。"
+  # 按文件类型分流：运行时文件 vs 工具/文档
+  # **不要替人做"要不要重启"的决定**，只把事实摆清楚。
+  RUNTIME_CHANGED=$(
+    { echo "$MISSING"; echo "$DIFFER"; } \
+      | grep -E '/(src|public|bin)/' || true
+  )
+  echo "结论：部署目录 **不是** HEAD。"
+  if [ -n "$RUNTIME_CHANGED" ]; then
+    echo "⚠️  差异**涉及运行时文件**（src/ public/ bin/）→ 线上行为可能与 HEAD 不同，应当重新部署："
+    echo "$RUNTIME_CHANGED" | sed 's/^/     /'
+  else
+    echo "ℹ️  差异**只在文档/测试/工具**，运行时文件全一致 → 可以继续运行当前版本，"
+    echo "    是否重启由人判断（重启会打断正在跑的轮次）。"
+  fi
   exit 1
 fi
 
