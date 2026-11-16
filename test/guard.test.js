@@ -161,13 +161,13 @@ test('★ 循环警告必须写进事件流，不能只发界面', async () => {
 
 /* ---------- 空转判据：连续几轮"没有任何推进"（INBOX §2 第 3 条） ---------- */
 
-test('★ 连续 3 轮没有任何推进 → 报"原地打转"，并说明比轮数更可信', async () => {
+test('★ 连续 3 轮没有任何推进 → 报"原地打转"', async () => {
   const { LoopGuard } = await import('../src/core/guard.js');
   const g = new LoopGuard();
 
-  assert.equal(g.noteProgress({ actions: 0, toolCalls: 0, newConclusion: false }).reason, null);
-  assert.equal(g.noteProgress({ actions: 0, toolCalls: 0, newConclusion: false }).reason, null);
-  const third = g.noteProgress({ actions: 0, toolCalls: 0, newConclusion: false });
+  assert.equal(g.noteProgress({ actions: 0, toolCalls: 0 }).reason, null);
+  assert.equal(g.noteProgress({ actions: 0, toolCalls: 0 }).reason, null);
+  const third = g.noteProgress({ actions: 0, toolCalls: 0 });
 
   assert.ok(third.reason, '第 3 轮应当报');
   assert.equal(third.reason.kind, 'no-progress');
@@ -175,16 +175,28 @@ test('★ 连续 3 轮没有任何推进 → 报"原地打转"，并说明比轮
   assert.equal(third.streak, 3);
 });
 
+test('★ 传了已移除的 newConclusion 也不影响判定（长文复述不算推进）', async () => {
+  // 管理方 22:29：原判据 `正文 > 40 字` 让它防的场景永远不响——
+  // 真实卡住的样子正是"几百字长文反复说同一件事"。
+  const { LoopGuard } = await import('../src/core/guard.js');
+  const g = new LoopGuard();
+  let last = null;
+  for (let i = 0; i < 3; i += 1) {
+    last = g.noteProgress({ actions: 0, toolCalls: 0, newConclusion: true });
+  }
+  assert.ok(last.reason, '即使传 newConclusion:true，连续 3 轮无结构化推进也要报');
+  assert.equal(last.streak, 3);
+});
+
 test('★ 有推进就清零（建了任务 / 跑了工具 / 写了新结论都算）', async () => {
   const { LoopGuard } = await import('../src/core/guard.js');
   for (const progressed of [
-    { actions: 1, toolCalls: 0, newConclusion: false },
-    { actions: 0, toolCalls: 2, newConclusion: false },
-    { actions: 0, toolCalls: 0, newConclusion: true },
+    { actions: 1, toolCalls: 0 },
+    { actions: 0, toolCalls: 2 },
   ]) {
     const g = new LoopGuard();
-    g.noteProgress({ actions: 0, toolCalls: 0, newConclusion: false });
-    g.noteProgress({ actions: 0, toolCalls: 0, newConclusion: false });
+    g.noteProgress({ actions: 0, toolCalls: 0 });
+    g.noteProgress({ actions: 0, toolCalls: 0 });
     assert.equal(g.noteProgress(progressed).streak, 0,
       `${JSON.stringify(progressed)} 应当算推进并清零`);
   }
@@ -195,7 +207,7 @@ test('★ 只报一次（同一原因不刷屏）', async () => {
   const g = new LoopGuard();
   const hits = [];
   for (let i = 0; i < 8; i += 1) {
-    const r = g.noteProgress({ actions: 0, toolCalls: 0, newConclusion: false });
+    const r = g.noteProgress({ actions: 0, toolCalls: 0 });
     if (r.reason) hits.push(i + 1);
   }
   assert.deepEqual(hits, [3], '只在第 3 轮报一次');
@@ -204,8 +216,8 @@ test('★ 只报一次（同一原因不刷屏）', async () => {
 test('★ 重新开局（人说话）会清掉空转计数', async () => {
   const { LoopGuard } = await import('../src/core/guard.js');
   const g = new LoopGuard();
-  g.noteProgress({ actions: 0, toolCalls: 0, newConclusion: false });
-  g.noteProgress({ actions: 0, toolCalls: 0, newConclusion: false });
+  g.noteProgress({ actions: 0, toolCalls: 0 });
+  g.noteProgress({ actions: 0, toolCalls: 0 });
   g.reset();
   assert.equal(g.noProgressStreak, 0);
 });

@@ -55,11 +55,25 @@ export class LoopGuard {
    * @param {object} o
    * @param {number} [o.actions]     本轮成功执行的动作数（建任务/改状态/改职责…）
    * @param {number} [o.toolCalls]   本轮工具调用数
-   * @param {boolean} [o.newConclusion] 本轮是否产出新结论（非重复正文）
+   *
+   * ★ 判据**只有结构化事实**。曾经还有一个 `newConclusion`（按正文字数判断），
+   *   已被实测否决：它要防的恰恰是"几百字长文反复说同一件事"，
+   *   而"有长文就算推进"正好把这个场景清零——**功能存在、被调用、永远不响**。
+   *
+   *   换成文本相似度也不行。实测三种真实形态：
+   *     · 原文 + 新增一行      → 0.886
+   *     · 同一件事换个说法复述 → 0.648   ← 真实卡住的样子
+   *     · 真正的新发现         → 0.068
+   *   **改写复述比"加一行"还低**，任何单一阈值都必然要么漏掉复述、要么误杀小增量。
+   *   文本不是可靠信号。
+   *
+   * 传了已移除的 `newConclusion` 也不影响判定（见测试）。
+   * 文字重复由 `_detectLoop` 里独立的 `similar` 分支提示，两者互不替代。
+   *
    * @returns {{reason:object|null, streak:number}}
    */
-  noteProgress({ actions = 0, toolCalls = 0, newConclusion = false } = {}) {
-    const progressed = actions > 0 || toolCalls > 0 || newConclusion;
+  noteProgress({ actions = 0, toolCalls = 0 } = {}) {
+    const progressed = actions > 0 || toolCalls > 0;
     this.noProgressStreak = progressed ? 0 : this.noProgressStreak + 1;
 
     if (this.noProgressStreak >= this.t.noProgressTurns && !this._reported.has('no-progress')) {

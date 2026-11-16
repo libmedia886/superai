@@ -358,3 +358,15 @@ test('清单：netget 绝不走 PATH 找 curl（成员能写自己 cwd）', asyn
   assert.doesNotMatch(src.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n'),
     /\bexec\s+curl\b/, '不能 exec 裸 curl');
 });
+
+test('清单：空转判据只用结构化事实（文本不是可靠信号）', async () => {
+  await mustMention('core/guard.js', 'noteProgress', '空转判据');
+  const src = await readFile(new URL('../src/core/guard.js', import.meta.url), 'utf8');
+  const body = src.slice(src.indexOf('noteProgress({ actions'), src.indexOf('\n  }', src.indexOf('noteProgress({ actions')));
+  assert.doesNotMatch(body, /newConclusion/, 'newConclusion 已移除——按字数判推进会让真实卡住场景永远不响');
+  const { LoopGuard } = await import('../src/core/guard.js');
+  const g = new LoopGuard();
+  let last = null;
+  for (let i = 0; i < 3; i += 1) last = g.noteProgress({ actions: 0, toolCalls: 0 });
+  assert.ok(last.reason, '连续 3 轮无结构化推进必须报');
+});
