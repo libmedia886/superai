@@ -156,6 +156,8 @@ export class OpencodeAdapter extends AgentAdapter {
       prompt: fullPrompt,
       timeoutMs,
       onLine: (ev) => {
+        // 任何一行输出都算活着（工具执行期间可能很久没有正文）
+        onEvent?.({ type: 'activity' });
         if (ev.sessionID) {
           if (!newSessionId) {
             newSessionId = ev.sessionID;

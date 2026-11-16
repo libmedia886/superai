@@ -19,8 +19,23 @@
 export const STATE = { CLOSED: 'closed', OPEN: 'open', HALF_OPEN: 'half-open' };
 
 /** 静默多久算卡死。取单轮超时的 1/3，但不能低于 20 秒 */
+/**
+ * 卡死阈值：多久没有任何输出就判定"死了"。
+ *
+ * ★ 和硬上限**解耦**。以前它是 `timeoutMs / 3`，于是把硬上限从 180 秒
+ * 放宽到 20 分钟时，卡死判定会跟着变成 400 秒——那等于把看门狗也关了一半：
+ * 一个真的挂住的进程要烧 400 秒才被杀。
+ *
+ * 现在的规则：硬上限只防"无限跑"；"死没死"由这个固定窗口判断。
+ * 默认 90 秒无任何输出（含 thinking/tool 事件）即判死。
+ * 保留 timeoutMs 参数是为了兼容按成员配置的短上限（不会超过上限的一半）。
+ */
+export const STALL_MS = 90_000;
+
 export function stallThreshold(timeoutMs) {
-  return Math.max(20_000, Math.floor(timeoutMs / 3));
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return STALL_MS;
+  // 上限很短时（比如测试里 30 秒），窗口不能比上限还长，否则永远等不到判定
+  return Math.max(20_000, Math.min(STALL_MS, Math.floor(timeoutMs / 2)));
 }
 
 export class HealthTracker {

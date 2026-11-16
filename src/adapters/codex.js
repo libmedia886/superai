@@ -101,6 +101,8 @@ export class CodexAdapter extends AgentAdapter {
       prompt: withPersona(this.config.persona, prompt),
       timeoutMs,
       onLine: (ev) => {
+        // 任何一行输出都算活着（工具执行期间可能很久没有正文）
+        onEvent?.({ type: 'activity' });
         switch (ev.type) {
           case 'thread.started':
             newSessionId = ev.thread_id ?? newSessionId;

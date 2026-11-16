@@ -191,6 +191,28 @@ export function planMemberUpdate({ member, patch = {}, members = [], confirmOver
     }
   }
 
+  /**
+   * 单轮硬上限（分钟）。留空 = 用房间默认（20 分钟）。
+   *
+   * 不让人填秒：这个值的量级是分钟，填 180 会被误当成 180 秒。
+   * 上下限也要夹住——0 会让每一轮立刻被杀，5000 分钟等于没有上限。
+   */
+  if (patch.timeoutMinutes !== undefined) {
+    const raw = String(patch.timeoutMinutes ?? '').trim();
+    if (!raw) {
+      if (next.timeoutMinutes != null) { next.timeoutMinutes = null; changed.push('timeoutMinutes'); }
+    } else {
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 1 || n > 120) {
+        return { ok: false, reason: '单轮上限必须在 1~120 分钟之间（留空 = 用房间默认）' };
+      }
+      if (n !== next.timeoutMinutes) {
+        next.timeoutMinutes = n;
+        changed.push('timeoutMinutes');
+      }
+    }
+  }
+
   // ---- 角色 / persona ----
   if (patch.role !== undefined) {
     const role = patch.role === 'leader' ? 'leader' : 'member';

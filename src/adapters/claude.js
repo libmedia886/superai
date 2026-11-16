@@ -162,6 +162,15 @@ export class ClaudeAdapter extends AgentAdapter {
       prompt: withPersona(this.config.persona, prompt),
       timeoutMs,
       onLine: (ev) => {
+        /**
+         * 任何一行输出都算"还活着"。
+         *
+         * 否则 runJsonCli 收到但业务层不认识的类型（比如 user/tool_result）
+         * 会被当成静默——而 claude 在工具执行期间**一条流事件都不发**，
+         * 一次 45 秒的 curl 在应用看来就是 45 秒静默，看门狗直接判死。
+         */
+        onEvent?.({ type: 'activity' });
+
         if (ev.type === 'system' && ev.subtype === 'init' && ev.session_id) {
           newSessionId = ev.session_id;
           onEvent?.({ type: 'meta', sessionId: newSessionId });
@@ -184,6 +193,13 @@ export class ClaudeAdapter extends AgentAdapter {
           return;
         }
         // 工具调用：写操作日志靠它。没有这个，可写档出问题时只能靠猜。
+        // 工具调用开始/结束：in-flight 期间静默窗口要放宽（工具可能跑很久）
+        if (ev.type === 'user' && Array.isArray(ev.message?.content)) {
+          if (ev.message.content.some((b) => b.type === 'tool_result')) {
+            onEvent?.({ type: 'tool.result' });
+          }
+          return;
+        }
         if (ev.type === 'assistant' && Array.isArray(ev.message?.content)) {
           for (const block of ev.message.content) {
             if (block.type !== 'tool_use') continue;
@@ -200,6 +216,7 @@ export class ClaudeAdapter extends AgentAdapter {
           return;
         }
         if (ev.type === 'result') {
+          onEvent?.({ type: 'tool.result' });
           sawResult = true;
           resultOk = ev.subtype === 'success' && ev.is_error !== true;
           if (ev.usage) {

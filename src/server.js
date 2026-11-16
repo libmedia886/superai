@@ -18,6 +18,7 @@ import { randomUUID } from 'node:crypto';
 import { DEFAULT_DATA_DIR } from './core/config.js';
 import { RoomManager } from './core/sessions.js';
 import { availableTiers, TIER, TIER_DESC, normalizeTier } from './core/probe.js';
+import { DEFAULT_TURN_TIMEOUT_MS } from './core/room.js';
 import { planMemberUpdate } from './core/memberSettings.js';
 import { detectTierOverride, EFFORT_HINTS } from './core/extraargs.js';
 import { exportMarkdown } from './core/export.js';
@@ -102,12 +103,16 @@ export async function startServer({
     effort: m.effort ?? '',
     extraArgs: m.extraArgsText ?? '',
     allowedCommands: (m.allowedCommands ?? []).join(' '),
+    timeoutMinutes: m.timeoutMinutes ?? null,
     overridesTier: detectTierOverride(m.backend, m.extraArgs ?? []),
     colors: m.color ?? null,
     tiers: availableTiers(m.backend),
     effortHints: EFFORT_HINTS[m.backend] ?? [],
     createdBy: m.createdBy ?? null,
     createdReason: m.createdReason ?? null,
+    // 会话为什么没接上：界面必须说清「上下文已重置」，不能让它静默失忆
+    hasSession: Boolean(m.sessionId),
+    sessionResetReason: m.sessionResetReason ?? null,
   });
 
   // 注意：初始化信息**不能只广播一次**——页面通常在服务启动之后才连上来，
@@ -123,7 +128,7 @@ export async function startServer({
         singleFallback: rooms.singleFallback,
         members: [], history: [], tasks: [], roster: [], registry: [], toolLog: [],
         aiCabTier: 'readonly', maxMembers: 8, overridden: false, stopped: false,
-        headPassiveWake: true, paused: null,
+        headPassiveWake: true, paused: null, turnTimeoutMinutes: 20,
       };
     }
     return {
@@ -146,6 +151,7 @@ export async function startServer({
       // 停止状态同理：刷新一下就把红色常驻提示弄丢，用户会以为房间还能用
       stopped: Boolean(room.stopped),
       headPassiveWake: room.headPassiveWake !== false,
+      turnTimeoutMinutes: Math.round((room.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS) / 60_000),
       // 停顿原因必须随状态一起下发：刷新后"为什么停着"不能变成一个谜
       paused: room.pauseReason ? { ...room.pauseReason } : null,
     };
@@ -303,7 +309,24 @@ export async function startServer({
       if (url.pathname === '/api/room-settings' && req.method === 'POST') {
         if (!requireRoom(res)) return;
         const body = await readJson(req);
-        if (body.headPassiveWake !== undefined) {
+          if (body.turnTimeoutMinutes !== undefined) {
+          const raw = String(body.turnTimeoutMinutes ?? '').trim();
+          if (!raw) {
+            room.turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS;
+            cfg.turnTimeoutMinutes = null;
+          } else {
+            const n = Number(raw);
+            if (!Number.isFinite(n) || n < 1 || n > 120) {
+              return json(res, 400, { error: '单轮上限必须在 1~120 分钟之间（留空 = 默认 20 分钟）' });
+            }
+            room.turnTimeoutMs = Math.round(n * 60_000);   // 立即生效
+            cfg.turnTimeoutMinutes = n;
+          }
+          await manager.persist();
+          broadcast({ type: 'room.settings', turnTimeoutMinutes: cfg.turnTimeoutMinutes ?? null });
+        }
+
+      if (body.headPassiveWake !== undefined) {
           room.headPassiveWake = Boolean(body.headPassiveWake);
           cfg.headPassiveWake = room.headPassiveWake;
           await manager.persist();
@@ -489,6 +512,7 @@ export async function startServer({
             extraArgs: target.extraArgs ?? [],
             extraArgsText: target.extraArgsText ?? '',
             allowedCommands: target.allowedCommands ?? [],
+            timeoutMinutes: target.timeoutMinutes ?? null,
           },
           patch: body.patch ?? body,
           members: room.members,
@@ -523,6 +547,7 @@ export async function startServer({
             extraArgsText: next.extraArgsText ?? '',
             allowedCommands: next.allowedCommands ?? [],
             allowedCommandsText: next.allowedCommandsText ?? '',
+            timeoutMinutes: next.timeoutMinutes ?? null,
           });
         }
         Object.assign(target, {
@@ -537,6 +562,7 @@ export async function startServer({
           extraArgsText: next.extraArgsText ?? '',
           allowedCommands: next.allowedCommands ?? [],
           allowedCommandsText: next.allowedCommandsText ?? '',
+          timeoutMinutes: next.timeoutMinutes ?? null,
           aliases: [next.name.toLowerCase()],
         });
 

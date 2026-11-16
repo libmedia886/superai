@@ -2,7 +2,7 @@
  * 房间配置与装配（bin 与 server 共用）。
  */
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -58,6 +58,20 @@ export async function saveConfig(cfg, dataDir = DEFAULT_DATA_DIR) {
  * 装配房间。返回 room / store / members / warnings。
  * warnings 要在界面上显示——档位不被支持这种事不能静默。
  */
+/**
+ * 两个路径是否指向同一个真实目录。
+ * 任何一边不存在/解析失败都返回 false——宁可不接，也不要拿错 cwd 去 resume。
+ */
+async function sameRealPath(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  try {
+    return (await realpath(a)) === (await realpath(b));
+  } catch {
+    return false;
+  }
+}
+
 export async function buildRoom({ cfg, dataDir = DEFAULT_DATA_DIR, onEvent, sharedDir = null }) {
   const store = new Store(join(dataDir, 'room.jsonl'));
   await store.load();
@@ -91,9 +105,31 @@ export async function buildRoom({ cfg, dataDir = DEFAULT_DATA_DIR, onEvent, shar
      * （实测 60 秒超时才被杀），所以宁可开新会话也不要冒险接。
      */
     const savedSession = store.sessions.get(m.id);
-    const sessionId = savedSession && savedSession.cwd === cwd ? savedSession.sessionId : null;
+    let sessionId = null;
+    let sessionResetReason = null;
 
-    members.push({ ...m, tier, cwd, sessionId, aliases: [m.name.toLowerCase()] });
+    if (savedSession?.sessionId) {
+      /**
+       * 路径比较用 **realpath**，不是字符串相等。
+       *
+       * 字符串相等会把"同一个目录的两个名字"判成不同：`<data>/agents/<id>`
+       * vs `<data>/rooms/r-legacy/agents/<id>`——多房间迁移之后正是这种情况。
+       * 结果是所有成员的会话都被判"接不上"，上下文归零，而界面毫无提示。
+       *
+       * 也不能改成"放宽校验直接接"：claude/codex 用错 cwd resume 会挂住不报错。
+       * 所以判据是"**真实路径**是否相同"。
+       */
+      const same = await sameRealPath(savedSession.cwd, cwd);
+      if (same) {
+        sessionId = savedSession.sessionId;
+      } else if (savedSession.cwd) {
+        sessionResetReason = `工作目录已变（${savedSession.cwd} → ${cwd}）`;
+      }
+    }
+
+    members.push({
+      ...m, tier, cwd, sessionId, sessionResetReason, aliases: [m.name.toLowerCase()],
+    });
   }
 
   const adapters = new Map();
@@ -111,6 +147,11 @@ export async function buildRoom({ cfg, dataDir = DEFAULT_DATA_DIR, onEvent, shar
     sharedDir,
     /** 成员不 @ 发言时是否叫醒头头（房间级开关，默认开） */
     headPassiveWake: cfg.headPassiveWake !== false,
+    /**
+     * 房间级单轮上限（分钟）。改完经 /api/room-settings 直接改 Room 实例，
+     * 下一轮就生效——不能在磁盘上改了却要重启（CR-027 同一条教训）。
+     */
+    turnTimeoutMs: cfg.turnTimeoutMinutes ? cfg.turnTimeoutMinutes * 60_000 : undefined,
     // agent 造人时的落地钩子：建目录 + 写配置，返回带 cwd 的成员
     onMemberCreate: async (member, { createdBy = null, reason = '' } = {}) => {
       const cwd = join(dataDir, 'agents', member.id);

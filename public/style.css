@@ -209,6 +209,9 @@ html, body {
   font-size: 13.5px; line-height: 1.65;
   color: var(--text);
 }
+/* 超时/崩溃的一轮可能一个字都没有：头 + 下面的系统行已经说清楚了，
+   别再留一个空气泡占位 */
+.msg-body:empty { display: none; }
 .msg-body code, .msg-body pre {
   font-family: var(--mono); font-size: 12.5px;
   background: var(--bg-raised); border: 1px solid var(--line-soft);
@@ -909,3 +912,13 @@ a.btn { text-decoration: none; display: flex; align-items: center; }
 .member:hover { border-color: var(--accent); }
 
 .danger-hint { color: var(--warn); }
+
+/* 会话没接上：和"档位被参数覆盖"一样属于界面必须说出来的事实 */
+.session-reset {
+  font-size: 10px; color: var(--warn);
+  border: 1px dashed var(--warn); border-radius: 999px;
+  padding: 0 7px; margin-top: 4px; display: inline-block;
+}
+
+.approval-note.cmd { color: var(--text-dim); }
+.approval-note .cmd-risk { color: var(--warn); font-size: 10px; }

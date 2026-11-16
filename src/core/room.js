@@ -46,8 +46,21 @@ function classifyTool(name) {
  * 「好」「收到」是正常回复，把它们记成"未回应"会让老板以为它没理人。
  */
 /** 停顿原因 → 人话。状态栏直接显示这个，不要让人猜。 */
+/** 默认单轮硬上限：20 分钟。看门狗负责"死了"，这里只防"无限跑" */
+export const DEFAULT_TURN_TIMEOUT_MS = 20 * 60_000;
+
+/**
+ * 工具执行期间的静默窗口。
+ *
+ * 一次 `curl -m 60`、一次大仓库的 grep 都可能几分钟没有任何流事件，
+ * 这期间进程是活的。窗口给到 10 分钟，超了仍然判死——
+ * 而且真正的兜底是本轮硬上限，不会变成"永不杀"。
+ */
+export const TOOL_FLIGHT_SILENCE_MS = 10 * 60_000;
+
 export const PAUSE_LABEL = {
   no_target: '说完了，没点名下一位',
+  timeout: '超时被中止（不是说完）',
   overreach: '@ 了没权限叫的人',
   only_human: '把话交回给老板',
   continue_cap: '自动接力次数到上限',
@@ -68,7 +81,9 @@ export function isPassReply(text) {
 function isStall(result, durationMs) {
   if (result?.reason !== EXIT.TIMEOUT) return false;
   const text = result?.text ?? '';
-  return text.trim().length === 0 || durationMs >= stallThreshold(180_000);
+  // 只看"有没有产出"。判据里不能再夹"跑了多久"——跑了很久但一直在干活
+  // 是**正常**的（实测审校员 6 次 curl 就超过 180 秒），那由看门狗另行判定。
+  return text.trim().length === 0;
 }
 
 export class Room {
@@ -85,6 +100,7 @@ export class Room {
     id, name, goal = '', members, store, resolveAdapter, onEvent,
     registry = [], worktreesRoot = null, onMemberCreate = null,
     aiCabTier = DEFAULT_AI_CAB_TIER, headPassiveWake = true, sharedDir = null,
+    turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS,
   }) {
     /** 造人落地钩子（由 config 注入，负责建目录 + 写配置） */
     this.onMemberCreate = onMemberCreate;
@@ -123,8 +139,17 @@ export class Room {
     /** @deprecated 兼容旧调用；新代码用 leaderIds */
     this.leaderId = this.leaderIds[0] ?? null;
     this.compactThreshold = 0.7;
-    /** 单轮超时：进程级保护，不是对话轮数限制（§7） */
-    this.turnTimeoutMs = 180_000;
+    /**
+     * 单轮硬上限。
+     *
+     * ★ 这是"防无限跑"的闸，**不是卡死判定**。卡死由看门狗负责
+     * （90 秒无任何输出即判死），两者职责不同，别混。
+     *
+     * 曾经是 180 秒扁平常量，结果把正在干活的轮次全杀了：
+     * 实测审校员跑 6 次 `curl -m 25` 就超过 180 秒，抓到的网页还在磁盘上、
+     * 正文一个字没产出。越认真干活越容易被杀——这是设计错误，不是参数没调好。
+     */
+    this.turnTimeoutMs = turnTimeoutMs;
     /** 只读档的自动重试次数。可写及以上永不自动重试（可能已产生副作用） */
     this.maxRetries = 2;
     this.summaries = new Map(); // agentId -> 最新摘要
@@ -480,6 +505,35 @@ export class Room {
     this.onEvent({ type: 'room.resumed', reason: 'cleared' });
   }
 
+  /**
+   * 把任务交给某个人：走正常入队（护栏、去重键都照旧）。
+   *
+   * @returns {boolean} 是否真的排进去了（被接管/停止/熔断时为 false）
+   */
+  _dispatchTo(agentId, { taskId = null, by = null } = {}) {
+    const target = this.members.find((m) => m.id === agentId);
+    if (!target) return false;
+    if (this.stopped) return false;
+    if (this.overridden && target.role === 'leader') return false;
+
+    const ok = this._enqueue(agentId, {
+      triggerMsg: { id: `dispatch-${taskId ?? Date.now()}-${agentId}`, senderId: by ?? 'human', body: `任务 ${taskId ?? ''} 指派给你` },
+      taskId,
+      source: 'agent',
+      dispatched: true,
+    });
+    if (ok) {
+      this.onEvent({
+        type: 'task.dispatched',
+        taskId,
+        agentId,
+        by,
+        text: `已把 ${taskId ?? '任务'} 交给 @${target.name}（真正入队，不只是改字段）`,
+      });
+    }
+    return ok;
+  }
+
   /** 给某个 agent 留一条"下一轮必须看到"的说明（越权、被拒等） */
   _note(agentId, text) {
     if (!agentId || !text) return;
@@ -608,7 +662,10 @@ export class Room {
     let acc = '';
     let adapterResult = null;
 
-    const timeoutMs = agent.timeoutMs ?? this.turnTimeoutMs;
+    // 成员可单独配单轮上限（分钟）；留空用房间默认
+    const timeoutMs = agent.timeoutMinutes
+      ? Math.round(agent.timeoutMinutes * 60_000)
+      : (agent.timeoutMs ?? this.turnTimeoutMs);
 
     /**
      * 会话与工作目录按 **(agent, 任务)** 绑定，不是按 agent。
@@ -656,7 +713,25 @@ export class Room {
           this.onEvent({ type: 'tool', ...entry });
         }
         // 有输出就说明没卡死：刷新健康计时
-        if (ev.type === 'text' || ev.type === 'thinking' || ev.type === 'tool') {
+        if (ev.type === 'text' || ev.type === 'thinking' || ev.type === 'tool' || ev.type === 'activity') {
+          this.health.touch(agent.id);
+        }
+        /**
+         * 工具执行中：静默窗口必须放宽。
+         *
+         * claude 在 curl 跑着的 45 秒里一条流事件都不发（tool_use 已发、
+         * tool_result 要等命令结束）。90 秒窗口一到就会把一个正在干活的轮次判死，
+         * 实测线上出现过 11 次工具调用的轮次被 "stalled" 杀掉。
+         *
+         * 放宽不等于永不杀：硬上限（本轮 timeoutMs）仍然兜底。
+         */
+        if (ev.type === 'tool') {
+          this._toolFlight = this._toolFlight ?? new Map();
+          const cur = this._toolFlight.get(agent.id) ?? { count: 0, since: Date.now() };
+          this._toolFlight.set(agent.id, { count: cur.count + 1, since: Date.now() });
+        }
+        if (ev.type === 'tool.result') {
+          this._toolFlight?.delete(agent.id);
           this.health.touch(agent.id);
         }
         if (ev.type === 'text' || ev.type === 'usage' || ev.type === 'thinking') {
@@ -665,6 +740,7 @@ export class Room {
       },
     };
 
+    this._toolFlight?.delete(agent.id);
     // 用 AbortController：中断必须**真的杀死子进程**。
     // 只 reject Promise 的话进程会变孤儿继续跑、继续占额度。
     const ac = new AbortController();
@@ -678,7 +754,10 @@ export class Room {
     let stalledOut = false;   // 本次是否被看门狗判死（要和"人为打断"区分开）
 
     const stallTimer = setInterval(() => {
-      if (!this.health.isStalled(agent.id, { timeoutMs })) return;
+      // 工具正在跑 → 用更长的静默窗口（但仍受本轮硬上限约束）
+      const inFlight = this._toolFlight?.get(agent.id);
+      const effTimeout = inFlight ? Math.max(timeoutMs, TOOL_FLIGHT_SILENCE_MS) : timeoutMs;
+      if (!this.health.isStalled(agent.id, { timeoutMs: effTimeout })) return;
       if (ac.signal.aborted) return;
       stalledOut = true;
       this.onEvent({
@@ -876,6 +955,31 @@ export class Room {
       }
     }
 
+    /**
+     * 超时（含被看门狗判死）必须：
+     *  1. 落一条 failure 事件（jsonl 里只有 message.status=timeout 时，
+     *     重启后无法回答"那次为什么没动静"）
+     *  2. 给出 `timeout` 的暂停原因——不能显示成"说完了"
+     */
+    const timedOut = adapterResult?.reason === EXIT.TIMEOUT && !aborted;
+    if (timedOut) {
+      this.store.append({
+        kind: 'failure',
+        agentId: agent.id,
+        taskId: job.taskId ?? null,
+        reason: EXIT.TIMEOUT,
+        stalled: stalledOut,
+        durationMs,
+        timeoutMs,
+        toolCalls: (this.toolLog ?? []).filter((t) => t.agentId === agent.id && t.at >= startedAt).length,
+        at: Date.now(),
+      }).catch(() => {});
+      this._pause('timeout',
+        `${agent.name} 跑满 ${Math.round(timeoutMs / 1000)} 秒被中止`
+        + `（本轮有 ${(this.toolLog ?? []).filter((t) => t.agentId === agent.id && t.at >= startedAt).length} 次工具调用）`
+        + '。它可能正在干活——看门狗没有判它卡死，是硬上限到了。');
+    }
+
     // 5) 接力：解析它 @ 了谁
     if (!aborted) {
       const { targets, unknown } = parseMentions(displayBody, { members: this.members }, agent.id);
@@ -974,7 +1078,18 @@ export class Room {
       //      所以下面每一种停法都带一个明确原因。
       let woken = false;
       const hasAgentTarget = agentTargets.length > 0;
-      if (!hasAgentTarget && !continued && !job.isSummary) {
+
+      /**
+       * 派出去的活也算"有人接手"。
+       *
+       * 如果这一轮创建/改派了任务并且真的入队了，房间就不该停——
+       * 否则会出现"任务已经派给人了，房间却显示停住"，用户看到的是
+       * 一个待办任务和一个静止的房间，不知道到底有没有人在做。
+       */
+      const dispatchedAny = results.some((r) => r?.dispatchedTo);
+
+      // 超时的轮次已经有明确原因了，不能再被覆盖成"说完了"（那正是界面撒谎）
+      if (!hasAgentTarget && !continued && !job.isSummary && !timedOut && !dispatchedAny) {
         if (toHuman) {
           // 只 @ 了老板：等人类，不需要叫任何人
           this._pause('only_human', `${agent.name} 把话交回给老板，等你的回复`);
@@ -990,14 +1105,16 @@ export class Room {
           this._pause('no_target', `${agent.name} 说完了，没有点名下一位`);
         }
       }
-      if (woken) {
+      if (woken || dispatchedAny) {
         this.waitingForHuman = false;
         this._clearPause();
       }
 
       // 注意：不在这里发 idle 事件。队列可能还有别人在等（比如人同时 @ 了两位），
       // 真正的「等待人类」由 drain() 在队列跑空时统一发出，避免重复提示。
-      if (!hasAgentTarget && !continued && !woken && !this.pauseReason) this.waitingForHuman = true;
+      if (!hasAgentTarget && !continued && !woken && !dispatchedAny && !this.pauseReason) {
+        this.waitingForHuman = true;
+      }
     }
   }
 
@@ -1034,10 +1151,17 @@ export class Room {
      * 所以循环检测也不会响——等于给自己造了一个不受监控的死循环。
      * 头头刚派完活，成员那句回复它上下文里本来就有，没必要再被叫一次。
      */
+    /**
+     * ★ 例外：这一轮是「派给他的活」。
+     *
+     * 头头把任务交给他，他干完当然要回话——这时把他排除掉就等于
+     * "活干完了没人知道"。所以 dispatched 的轮次允许回叫头头，
+     * 但仍然受下面 autoAdvance 的 3 次上限约束，不会变成乒乓。
+     */
     const triggerSender = job?.triggerMsg?.senderId ?? null;
-    const leaders = this.members.filter(
-      (m) => m.role === 'leader' && m.id !== agent.id && m.id !== triggerSender,
-    );
+    const leaders = this.members.filter((m) => m.role === 'leader'
+      && m.id !== agent.id
+      && (job?.dispatched || m.id !== triggerSender));
     if (!leaders.length) {
       this._passiveWakeBlocked = {
         reason: 'no_target',
@@ -1319,7 +1443,33 @@ export class Room {
       await this.store.createTask(task);
       this.onEvent({ type: 'task.created', task });
       const where = task.worktree ? `（worktree: ${task.worktree}）` : '';
-      return { ok: true, label, detail: `${id} ${a.title} → ${assignee ?? '未指派'}${where}` };
+
+      /**
+       * ★ 指派 = 交给它做，不只是改一个字段。
+       *
+       * 实测事故：管理员写 `task.create{assignee:"资料搜集员"}` 且没 @ 任何人，
+       * 系统回了 ok 和一句「→ 资料搜集员」，看起来像派出去了 ——
+       * 但队列里没有任何人，房间就这么空了 7 分钟，界面上也没有原因。
+       *
+       * 所以任务创建成功后自动入队被指派人，走正常 enqueue（计入护栏、
+       * 去重键用触发消息 id）。这不是"顺手优化"，是让「说派了活」和
+       * 「活真的在跑」成为同一件事。
+       */
+      const dispatched = assignee ? this._dispatchTo(assignee, { taskId: id, by: agent.id }) : null;
+      const dispatchNote = dispatched
+        ? ''
+        : (assignee ? '（但该成员当前不可发言，没派成）' : '');
+      if (assignee && !dispatched) {
+        this._note(agent.id, `${id} 指派给了 ${assignee}，但对方当前不可发言（被接管/熔断/已停止），任务没有开始。`
+          + '请改派或让老板处理。');
+      }
+
+      return {
+        ok: true,
+        label,
+        detail: `${id} ${a.title} → ${assignee ?? '未指派'}${where}${dispatchNote}`,
+        dispatchedTo: dispatched ? assignee : null,
+      };
     }
 
     if (a.action === 'task.update') {
@@ -1332,9 +1482,22 @@ export class Room {
         patch.assignee = assignee;
       }
       if (a.note != null) patch.note = a.note;
+      // ★ 先记下原指派人：updateTask 会就地修改同一个对象，
+      // 之后再比较就等于"新值 vs 新值"，永远相等 —— 改派永远不会触发。
+      const previousAssignee = targetTask.assignee ?? null;
       await this.store.updateTask(a.id, patch);
       this.onEvent({ type: 'task.updated', id: a.id, patch });
-      return { ok: true, label, detail: `${a.id} ${JSON.stringify(patch)}` };
+
+      // 改派给另一个人 = 这次真的叫他开工；改成「完成」不需要
+      let dispatchedTo = null;
+      if (patch.assignee && patch.assignee !== previousAssignee && patch.status !== '完成') {
+        if (this._dispatchTo(patch.assignee, { taskId: a.id, by: agent.id })) {
+          dispatchedTo = patch.assignee;
+        } else {
+          this._note(agent.id, `${a.id} 改派给了 ${patch.assignee}，但对方当前不可发言，任务没有开始。`);
+        }
+      }
+      return { ok: true, label, detail: `${a.id} ${JSON.stringify(patch)}`, dispatchedTo };
     }
 
     if (a.action === 'roster.update') {

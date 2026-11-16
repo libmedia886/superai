@@ -19,7 +19,7 @@
  *  4. **目录名不可改**。成员会话按 cwd 索引，改目录名等于毁掉所有会话上下文。
  */
 
-import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export const LEGACY_ROOM_ID = 'r-legacy';
@@ -113,6 +113,20 @@ export async function backupBeforeMigration(dataDir, { now = Date.now() } = {}) 
 /** 从备份恢复（迁移中途失败时用） */
 export async function restoreFromBackup(dataDir, backupDir) {
   const restored = [];
+
+  /**
+   * ★ 先拆掉迁移留下的 `agents` 兼容链接，**再**恢复。
+   *
+   * 顺序反了会丢数据：链接指向 `rooms/<id>/agents`，备份复制会顺着链接写进
+   * `rooms/` 里面，紧接着我们又 rm -rf rooms/ —— 恢复出来的成员目录就这么没了。
+   * 这条是回滚演练测试抓到的（test/session-restore.test.js）。
+   */
+  const link = join(dataDir, 'agents');
+  try {
+    const st = await stat(link);
+    if (st.isSymbolicLink()) await rm(link, { force: true });
+  } catch { /* 没有链接，正常 */ }
+
   for (const name of MOVABLE) {
     const src = join(backupDir, name);
     if (!(await exists(src))) continue;
@@ -205,6 +219,26 @@ export async function migrateSingleRoom(dataDir, { log = () => {}, now = Date.no
         ? await readdir(join(roomDir, 'agents')) : [];
       const missing = before.filter((d) => !after.includes(d));
       if (missing.length) throw new Error(`迁移后缺少 agent 目录：${missing.join('、')}`);
+    }
+
+    /**
+     * ★ 根目录留一个 `agents -> rooms/r-legacy/agents` 符号链接。
+     *
+     * 原因：旧 `session` 事件里记的 cwd 是 `<data>/agents/<id>`。迁移把目录搬走了，
+     * 如果不留链接，重启时按 cwd 匹配不上 → 所有成员的会话被判"接不上" →
+     * 上下文归零，而且界面上看不出异常（它只是忘了以前所有的事）。
+     *
+     * 留链接之后老路径仍然指得到同一批目录；同时读取侧改用 realpath 比较，
+     * 两条路都能接上（见 config.js）。
+     */
+    try {
+      const legacyAgents = join(roomDir, 'agents');
+      if (await exists(legacyAgents) && !(await exists(join(dataDir, 'agents')))) {
+        await symlink(join(ROOMS_DIR, LEGACY_ROOM_ID, 'agents'), join(dataDir, 'agents'), 'dir');
+      }
+    } catch (err) {
+      // 做不成也不能让迁移失败：读取侧还有 realpath 兜底
+      log(`提示：无法建立 agents 兼容链接（${err.message}），将依赖路径归一化恢复会话`);
     }
 
     log(`迁移完成：${oldLines} 条事件 → rooms/${LEGACY_ROOM_ID}/`);

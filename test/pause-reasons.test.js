@@ -166,3 +166,118 @@ test('★ 交回头头受 autoAdvance 上限约束：第 4 次停住并说明', 
   assert.ok(paused, '应该停住');
   assert.equal(paused.reason, 'continue_cap');
 });
+
+/* ---------------- 指派 = 真的交给它做 ---------------- */
+
+const ACTION_ADAPTER = (action, onlyFor = 'lead') => ({
+  run: async ({ onEvent }) => {
+    const who = ACTION_ADAPTER.current;
+    onEvent?.({ type: 'meta', sessionId: `s-${who}` });
+    const text = who === onlyFor
+      ? `好。\n\`\`\`action\n${JSON.stringify(action)}\n\`\`\``
+      : '收到。';
+    onEvent?.({ type: 'text', text, done: false });
+    return { sessionId: `s-${who}`, text, reason: 'completed', usage: null };
+  },
+});
+
+async function makeActionRoom(action, { onlyFor = 'lead' } = {}) {
+  const dir = await mkdtemp(join(tmpdir(), 'dispatch-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+  const events = [];
+  const room = new Room({
+    id: 'r', name: '测试',
+    members: [
+      { id: 'lead', name: 'lead', role: 'leader', backend: 'claude', tier: 'readonly', cwd: dir, aliases: ['lead'] },
+      { id: 'data', name: '资料搜集员', role: 'member', backend: 'claude', tier: 'readonly', cwd: dir, aliases: ['资料搜集员'] },
+    ],
+    store,
+    resolveAdapter: (agent) => {
+      ACTION_ADAPTER.current = agent.id;
+      return ACTION_ADAPTER(action, onlyFor);
+    },
+    onEvent: (e) => events.push(e),
+  });
+  return { room, store, events };
+}
+
+test('★ task.create 带 assignee → 被指派人真的收到一轮（不只是改字段）', async () => {
+  const { room, events } = await makeActionRoom({
+    action: 'task.create', title: '取 AQ-120 参数', assignee: '资料搜集员',
+  });
+
+  await room.humanSay('@lead 安排一下');
+  await room.drain();
+
+  const dispatched = events.find((e) => e.type === 'task.dispatched');
+  assert.ok(dispatched, '要有 task.dispatched 事件');
+  assert.equal(dispatched.agentId, 'data');
+  assert.ok(room.store.tasks.size >= 1, '任务落库');
+  // 被指派人的那一轮真的跑了（用请求数判断：它没有动作，回「收到。」）
+  assert.ok(events.some((e) => e.type === 'message' && e.message.senderId === 'data'),
+    '资料搜集员必须真的发言一轮，而不是只被写进 assignee 字段');
+});
+
+test('★ 派活之后有人真的接手：头头不会在"没人接手"上停住', async () => {
+  const { room, events } = await makeActionRoom({
+    action: 'task.create', title: '查资料', assignee: '资料搜集员',
+  });
+  await room.humanSay('@lead 派个活');
+  await room.drain();
+
+  // 关键：被派活的人干完后要能回话给头头（否则"干完了没人知道"）
+  assert.ok(events.some((e) => e.type === 'task.dispatched'));
+  assert.ok(
+    events.some((e) => e.type === 'message' && e.message.senderId === 'data'),
+    '被指派人真的跑了一轮',
+  );
+  assert.ok(
+    events.some((e) => e.type === 'head.passive_wake'),
+    '他干完要能交回头头，而不是停在"没人接手"',
+  );
+  // 停也可以（头头汇报完就该停），但不能停在"刚派活的头头不需要再被叫一次"上
+  const detail = room.pauseReason?.detail ?? '';
+  assert.doesNotMatch(detail, /不需要再被叫一次/);
+});
+
+test('★ assignee 是空 → 不进队列（不能凭空叫人）', async () => {
+  const { room, events } = await makeActionRoom({ action: 'task.create', title: '无主任务' });
+  await room.humanSay('@lead 建个任务');
+  await room.drain();
+  assert.ok(!events.some((e) => e.type === 'task.dispatched'));
+  assert.equal(room.store.tasks.size, 1, '任务本身还是要建');
+});
+
+test('★ assignee 找不到 → 拒绝并回注', async () => {
+  const { room, events } = await makeActionRoom({
+    action: 'task.create', title: '给不存在的人', assignee: '幽灵',
+  });
+  await room.humanSay('@lead 派给幽灵');
+  await room.drain();
+  const results = events.find((e) => e.type === 'action.results')?.results ?? [];
+  assert.ok(results.some((r) => !r.ok && /找不到成员/.test(r.reason ?? '')));
+});
+
+test('★ task.update 改派给别人 → 新人被叫起来；改成完成 → 不叫', async () => {
+  const { room, store, events } = await makeActionRoom({
+    action: 'task.update', id: 'T-001', assignee: '资料搜集员',
+  });
+  await store.createTask({
+    id: 'T-001', title: '已有任务', assignee: null, status: '待办', createdBy: 'lead',
+  });
+
+  await room.humanSay('@lead 改派 T-001');
+  await room.drain();
+  assert.ok(events.some((e) => e.type === 'task.dispatched' && e.taskId === 'T-001'));
+
+  // 状态改成完成时不派活
+  const { room: r2, store: s2, events: e2 } = await makeActionRoom({
+    action: 'task.update', id: 'T-002', status: '已完成', assignee: '资料搜集员',
+  });
+  await s2.createTask({ id: 'T-002', title: 'x', assignee: null, status: '待办', createdBy: 'lead' });
+  await r2.humanSay('@lead 关掉 T-002');
+  await r2.drain();
+  assert.ok(!e2.some((e) => e.type === 'task.dispatched'), '完成的任务不该再叫人');
+  assert.equal(s2.tasks.get('T-002').status, '完成', '同义词归一化后落库');
+});

@@ -19,9 +19,13 @@ test('静默超阈值判定为卡死', () => {
   const timeoutMs = 180_000;
 
   assert.equal(h.isStalled('a', { timeoutMs, now: t0 + 10_000 }), false, '刚有输出，不算卡死');
-  // 阈值 = max(20s, timeout/3) = 60s
-  assert.equal(stallThreshold(timeoutMs), 60_000);
-  assert.equal(h.isStalled('a', { timeoutMs, now: t0 + 61_000 }), true, '超过 60s 无输出应判卡死');
+  // ★ 卡死窗口与硬上限**解耦**：固定 90 秒，不再随 timeoutMs 变化。
+  // 解耦的理由：放宽硬上限（180s → 20min）时，旧公式会把卡死判定也放宽到 400 秒，
+  // 等于把看门狗关了一半——真挂住的进程要烧 400 秒才被杀。
+  assert.equal(stallThreshold(timeoutMs), 90_000);
+  assert.equal(stallThreshold(20 * 60_000), 90_000, '硬上限放宽不影响卡死判定');
+  assert.equal(h.isStalled('a', { timeoutMs, now: t0 + 61_000 }), false, '61 秒内还算正常');
+  assert.equal(h.isStalled('a', { timeoutMs, now: t0 + 91_000 }), true, '超过 90s 无输出应判卡死');
 });
 
 test('短超时的下限保护：不低于 20 秒', () => {

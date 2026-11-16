@@ -58,6 +58,12 @@
     </div>
 
     <div class="cabtier-box">
+      <label for="room-timeout">单轮最长运行（分钟）</label>
+      <input id="room-timeout" class="cabtier-select" type="number" min="1" max="120" placeholder="默认 20">
+      <div class="cabtier-hint">这是「防无限跑」的上限。卡死另由看门狗判断（90 秒无输出）。<br>改完下一轮立即生效。</div>
+    </div>
+
+    <div class="cabtier-box">
       <label class="switch-row" for="passive-wake">
         <input type="checkbox" id="passive-wake" checked>
         <span>成员不 @ 发言时叫醒头头</span>
@@ -205,6 +211,12 @@
         <span class="field-label">附加启动参数</span>
         <input id="mm-extra" placeholder="例：--add-dir /home/hope/notes" autocomplete="off" spellcheck="false">
         <span class="field-hint" id="mm-extra-hint">破坏通信协议的参数会被拒绝；覆盖档位的需要你确认。</span>
+      </label>
+
+      <label class="field">
+        <span class="field-label">单轮上限（分钟）</span>
+        <input id="mm-timeout" type="number" min="1" max="120" placeholder="留空 = 房间默认 20 分钟" autocomplete="off">
+        <span class="field-hint">这是"防无限跑"的上限，不是卡死判定——卡死由看门狗判（90 秒无输出）。</span>
       </label>
 
       <div class="cmd-preview">

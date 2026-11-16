@@ -119,7 +119,8 @@ function renderMemberList() {
         ${modelInfo ? `<span class="member-model">${escapeHtml(modelInfo)}</span>` : ''}
         ${m.overridesTier ? '<span class="member-flag" title="启动参数里有覆盖档位的项">档位被参数覆盖</span>' : ''}
       </div>
-      ${approvalNote(m.tier)}`;
+      ${m.sessionResetReason && m.role === 'leader' ? `<div class="session-reset" title="${escapeHtml(m.sessionResetReason)}">上下文已重置</div>` : ''}
+      ${approvalNote(m)}`;
     li.querySelector('.member-top').prepend(avatarEl(m.name));
     li.onclick = () => openMemberSettings(m.id);
     ul.appendChild(li);
@@ -145,11 +146,26 @@ function tierLabel(tier) {
  * 说清"问不问人"，而不是只说"能不能写"。
  * 默认档是**从来不问**，用户经常误以为"每次都会问我"。
  */
-function approvalNote(tier) {
-  if (tier === 'readonly') return '';
-  if (tier === 'read') return '';
+/**
+ * 说清这个档位**实际**能干什么。
+ *
+ * "自动批准"这种话不够：write-exec 在没有命令白名单时**一条命令都跑不了**，
+ * 有白名单时能跑的那几条又不受目录限制。界面必须把这两种情况分开写，
+ * 否则就会重演"界面说有、实际没有"，或者反过来"界面没说、实际能连外网"。
+ */
+function approvalNote(member) {
+  const tier = member.tier;
+  if (tier === 'readonly' || tier === 'read') return '';
   if (tier === 'write-ask') return '<div class="approval-note">文件写入：每次询问</div>';
-  return '<div class="approval-note auto">文件写入：自动批准，不会询问</div>';
+  const base = '<div class="approval-note auto">文件写入：自动批准，不会询问</div>';
+  if (tier !== 'write-exec') return base;
+
+  const cmds = String(member.allowedCommands ?? '').trim();
+  if (!cmds) {
+    return '<div class="approval-note">命令：<b>一条都不许</b>（需要的话在设置里填）</div>';
+  }
+  return `<div class="approval-note cmd">命令：仅 ${escapeHtml(cmds)} <br>`
+    + '<span class="cmd-risk">这些命令不受目录限制</span></div>';
 }
 
 function renderRoster() {
@@ -635,10 +651,41 @@ function appendHumanMessage(m) {
   scrollToBottom();
 }
 
+/**
+ * 一轮没有正常结束 → 一句人话；正常轮返回 null。
+ *
+ * 硬上限杀掉的那一轮最常见的形态是**一个字都没有**：AI 还在联网取资料，
+ * 进程到点被杀，body 为空。以前历史里 `if (!m.body) return` 整条跳过，
+ * 实时分支渲染成空气泡后照常收尾——用户只看到房间停了，一句解释都没有。
+ *
+ * `status` 是 room.js 落的原值：completed / timeout / crashed / failed /
+ * interrupted / 已中断。只有非正常值才显示，正常轮不加噪音。
+ */
+function turnFailureText(m) {
+  const secs = m?.durationMs ? `${Math.round(m.durationMs / 1000)}s` : null;
+  const hasBody = Boolean(String(m?.body ?? '').trim());
+  const partial = hasBody ? '输出不完整' : '无输出';
+  switch (m?.status) {
+    case 'timeout':
+      return secs ? `本轮超时（${secs}，${partial}）` : `本轮超时（${partial}）`;
+    case 'crashed':
+      return `本轮崩溃（${partial}）`;
+    case 'failed':
+      return `本轮失败（${partial}）`;
+    case 'interrupted':
+    case '已中断':
+      return `本轮已中断（${partial}）`;
+    default:
+      return null;
+  }
+}
+
 /** 历史里的 agent 消息（重开应用时补渲染，不带流式状态） */
 function appendHistoryAgentMessage(m) {
   if (m.passed) return appendPassedNote(m.senderId);
-  if (!m.body) return;
+  const failText = turnFailureText(m);
+  // 正文为空、也不是异常结束（旧数据里的空轮）：没有可说的，保持不显示
+  if (!m.body && !failText) return;
   const wrap = document.createElement('div');
   wrap.className = 'msg agent';
   const av = avatarEl(nameOf(m.senderId));
@@ -654,6 +701,8 @@ function appendHistoryAgentMessage(m) {
   if (m.isSummary) wrap.classList.add('summary');
   wrap.append(av, content);
   $('stream').appendChild(wrap);
+  // 失败/超时单独一行，不混进正常发言；空 body 的那一轮也靠它才算"看得见"
+  if (failText) appendSystemNote(`${nameOf(m.senderId)} ${failText}`, 'warn');
 }
 
 /** 把刚说完的那条标记成总结：事后翻记录要能一眼分清结论和过程 */
@@ -795,6 +844,7 @@ function handle(ev) {
       state.paused = ev.paused ?? null;
       state.headPassiveWake = ev.headPassiveWake !== false;
       $('passive-wake').checked = state.headPassiveWake;
+      if (ev.turnTimeoutMinutes != null) $('room-timeout').value = ev.turnTimeoutMinutes;
       $('room-name').textContent = ev.room.name;
       document.title = `${ev.room.name} · 多 AI 协作房间`;
       for (const t of ev.tasks) state.tasks.set(t.id, t);
@@ -803,6 +853,12 @@ function handle(ev) {
       renderRoster();
       renderRepos();
       renderBoard();
+      // 有成员的会话没接上 → 必须在聊天流里说一次，不能只挂在卡片上
+      for (const m of state.members) {
+        if (m.sessionResetReason) {
+          appendSystemNote(`@${m.name} 的上下文已重置（${m.sessionResetReason}），它会忘记之前的对话`, 'warn');
+        }
+      }
       // 计数与用量从历史恢复，否则刷新后看起来像没跑过
       state.turnCount = ev.history.filter((m) => m.senderId !== 'human').length;
       state.usage = ev.history.reduce((sum, m) => sum + (m.usageTokens ?? 0), 0);
@@ -872,6 +928,7 @@ function handle(ev) {
     case 'room.settings':
       state.headPassiveWake = ev.headPassiveWake !== false;
       $('passive-wake').checked = state.headPassiveWake;
+      if (ev.turnTimeoutMinutes != null) $('room-timeout').value = ev.turnTimeoutMinutes;
       appendSystemNote(ev.headPassiveWake
         ? '成员不 @ 发言会叫醒头头'
         : '已关闭：成员不 @ 发言不再叫醒头头');
@@ -960,6 +1017,9 @@ function handle(ev) {
       }
       finishTurn(m.durationMs);
       if (m.isSummary) markAsSummary();
+      // 超时/崩溃/中断必须留一条可见记录：空 body 的空气泡等于什么都没说
+      const failText = turnFailureText(m);
+      if (failText) appendSystemNote(`${nameOf(m.senderId)} ${failText}`, 'warn');
       state.currentSpeakerLast = m.senderId;
       // 队列里还有人就不能显示"等待人类"
       state.pending = ev.pending ?? 0;
@@ -1441,6 +1501,20 @@ $('cabtier').onchange = async (e) => {
   }
 };
 
+$('room-timeout').onchange = async (e) => {
+  const v = e.target.value;
+  const res = await fetch('/api/room-settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ turnTimeoutMinutes: v }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    appendSystemNote(`设置失败：${data.error ?? res.status}`, 'warn');
+    e.target.value = '';
+  }
+};
+
 $('passive-wake').onchange = async (e) => {
   const on = e.target.checked;
   const res = await fetch('/api/room-settings', {
@@ -1580,6 +1654,7 @@ function openMemberSettings(id) {
   $('mm-effort').value = m.effort ?? '';
   $('mm-extra').value = m.extraArgs ?? '';
   $('mm-commands').value = m.allowedCommands ?? '';
+  $('mm-timeout').value = m.timeoutMinutes ?? '';
   $('mm-role').value = m.role;
   $('mm-persona').value = m.persona ?? '';
   $('mm-remove').classList.remove('hidden');
@@ -1606,6 +1681,7 @@ function openNewMember() {
   $('mm-effort').value = '';
   $('mm-extra').value = '';
   $('mm-commands').value = '';
+  $('mm-timeout').value = '';
   $('mm-role').value = isFirst ? 'leader' : 'member';
   $('mm-role').disabled = isFirst;   // 第一个成员固定头头，不再多问一次
   $('mm-persona').value = '';
@@ -1744,6 +1820,7 @@ async function saveMemberSettings() {
     effort: $('mm-effort').value.trim(),
     extraArgs: extraText,
     allowedCommands: $('mm-commands').value,
+    timeoutMinutes: $('mm-timeout').value,
     role: $('mm-role').value,
     persona: $('mm-persona').value,
   };
@@ -1777,6 +1854,7 @@ async function saveMemberSettings() {
   if (data.changed?.includes('effort')) bits.push('思考等级');
   if (data.changed?.includes('extraArgs')) bits.push('启动参数');
   if (data.changed?.includes('allowedCommands')) bits.push('允许的命令');
+  if (data.changed?.includes('timeoutMinutes')) bits.push('单轮上限');
   if (data.changed?.includes('name')) bits.push('名字');
   if (data.sessionReset) bits.push('会话已重置');
   appendSystemNote(bits.length ? `已更新 ${name}：${bits.join('、')}（立即生效，不用重启）` : '没有改动');

@@ -328,3 +328,48 @@ test('★ 换房间后共享目录跟着换（不能还指着上一个房间的�
   assert.notEqual(a, b);
   assert.ok(b.includes('r-1'));
 });
+
+test('★ 房间级单轮上限：设为 N 分钟后，Room 立即用新值（不等重启）', async () => {
+  const dir = await makeMultiRoom();
+  const mgr = await new RoomManager({ dataDir: dir, onEvent: () => {} }).init();
+
+  const { DEFAULT_TURN_TIMEOUT_MS } = await import('../src/core/room.js');
+  assert.equal(mgr.session.room.turnTimeoutMs, DEFAULT_TURN_TIMEOUT_MS);
+
+  // 模拟 /api/room-settings 的行为：直接改实例字段
+  mgr.session.room.turnTimeoutMs = 45 * 60_000;
+  mgr.session.cfg.turnTimeoutMinutes = 45;
+  await mgr.persist();
+
+  const saved = JSON.parse(await readFile(join(dir, 'rooms', 'r-0', 'room.json'), 'utf8'));
+  assert.equal(saved.turnTimeoutMinutes, 45, '房间配置要落盘');
+
+  // 下一轮拿到的就是新值
+  const seen = [];
+  mgr.session.room.resolveAdapter = () => ({
+    async run({ timeoutMs }) {
+      seen.push(timeoutMs);
+      return { text: '好', reason: 'completed', usage: null };
+    },
+  });
+  await mgr.session.room.humanSay('@lead 干活');
+  await mgr.session.room.drain();
+  assert.deepEqual(seen, [45 * 60_000], '下一轮 adapter.run 收到的 timeoutMs 必须是新值');
+});
+
+test('★ 成员级单轮上限优先于房间默认', async () => {
+  const dir = await makeMultiRoom();
+  const mgr = await new RoomManager({ dataDir: dir, onEvent: () => {} }).init();
+  mgr.session.room.members[0].timeoutMinutes = 5;
+
+  const seen = [];
+  mgr.session.room.resolveAdapter = () => ({
+    async run({ timeoutMs }) {
+      seen.push(timeoutMs);
+      return { text: '好', reason: 'completed', usage: null };
+    },
+  });
+  await mgr.session.room.humanSay('@lead 干活');
+  await mgr.session.room.drain();
+  assert.deepEqual(seen, [5 * 60_000]);
+});
