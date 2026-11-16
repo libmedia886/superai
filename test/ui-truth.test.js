@@ -20,7 +20,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -325,4 +325,63 @@ test('★ room.paused 的实时事件必须带 resumeTarget（不能只靠 room.
   } finally {
     closeServer(server);
   }
+});
+
+/* ---------------- 第 6 类：按钮指向的对象必须是"这一次"暂停的 ---------------- */
+
+test('★ resumeTarget 与 pauseReason 同生共死（不能指向上一件事）', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'couple-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+  const room = new Room({
+    id: 'r', name: 't', members: [], store, resolveAdapter: () => ({}), onEvent: () => {},
+  });
+
+  room.resumeTarget = { agentId: 'a', taskId: 'T-A', partialChars: 9, reason: 'timeout' };
+  room._pause('timeout', '某轮超时');
+  assert.ok(room.resumeTarget, '暂停期间按钮应当可用');
+
+  room._clearPause();
+  assert.equal(room.pauseReason, null);
+  assert.equal(room.resumeTarget, null,
+    '暂停原因消失时按钮必须同时失效，否则它指向的是上一次那件事（而且跑得很正常，只是内容不对）');
+});
+
+test('★ 零产出的一轮不会覆盖 resumeTarget —— 但 turn.start 清暂停时它必须一起没', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'couple2-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+  const room = new Room({
+    id: 'r', name: 't',
+    members: [{ id: 'a', name: 'a', role: 'leader', backend: 'claude', tier: 'readonly', cwd: dir, aliases: ['a'] }],
+    store,
+    resolveAdapter: () => ({
+      // 零产出：0 工具 0 正文
+      async run({ onEvent }) {
+        onEvent?.({ type: 'meta', sessionId: 's' });
+        return { text: '', sessionId: 's', reason: 'completed' };
+      },
+    }),
+    onEvent: () => {},
+  });
+
+  // 旧待续（任务 A）
+  room.resumeTarget = { agentId: 'a', taskId: 'T-A', partialChars: 9, reason: 'timeout' };
+  room._pause('timeout', '旧的一轮超时');
+
+  // 系统自己又跑了一轮（零产出，不会覆盖 resumeTarget）
+  await room.humanSay('@a 说点什么');
+  await room.drain();
+
+  assert.equal(room.pauseReason?.reason !== 'timeout', true, '旧暂停原因已被新一轮作废');
+  assert.equal(room.resumeTarget, null, '旧的待续也必须一起失效，否则按钮指向任务 A');
+});
+
+test('清单：resumeTarget 必须在 _clearPause 里一起清（唯一来源）', async () => {
+  const src = await readFile(new URL('../src/core/room.js', import.meta.url), 'utf8');
+  const start = src.indexOf('  _clearPause() {');
+  assert.ok(start > 0, '找不到 _clearPause');
+  // 取函数体（到下一个同级方法定义为止）
+  const body = src.slice(start, src.indexOf('\n  }\n', start) + 4);
+  assert.match(body, /this\.resumeTarget = null/, '_clearPause 必须同时清 resumeTarget');
 });

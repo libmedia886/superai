@@ -712,6 +712,18 @@ export class Room {
 
   /** 恢复发言时清掉暂停原因（否则状态栏会一直挂着一个过期理由） */
   _clearPause() {
+    /**
+     * ★ `resumeTarget` 与 `pauseReason` 是**同一次暂停的两个面向**，必须同生共死。
+     *
+     * 管理方 20:11 补的这条比"被覆盖"更准：零产出的一轮不会覆盖 resumeTarget，
+     * 所以只要人不说新话、系统自己空转一轮，界面上那个「接着做完」
+     * 仍然指向**上一件事**——而且点下去跑得很正常，只是内容不是他要的。
+     * 那比文案说错更隐蔽：用户能看出文案不对，看不出按钮指错了对象。
+     *
+     * 放进 `_clearPause()` 之后，"按钮存在 ⟺ 状态栏正显示着那次暂停"永远成立，
+     * 不需要额外记时间戳，也不需要第二处清空点。
+     */
+    this.resumeTarget = null;
     if (!this.pauseReason) return;
     this.pauseReason = null;
     this.store?.append?.({ kind: 'room.resume' }).catch?.(() => {});
