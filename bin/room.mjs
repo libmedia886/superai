@@ -11,6 +11,7 @@
 import { createInterface } from 'node:readline';
 
 import { loadConfig, buildRoom, DEFAULT_DATA_DIR } from '../src/core/config.js';
+import { ensureRoomsLayout, roomDataDir } from '../src/core/rooms.js';
 import { availableTiers } from '../src/core/probe.js';
 
 const C = {
@@ -19,7 +20,11 @@ const C = {
   blue: '\x1b[34m', magenta: '\x1b[35m', cyan: '\x1b[36m', grey: '\x1b[90m',
 };
 
-const DATA_DIR = DEFAULT_DATA_DIR;
+// 多房间布局下房间数据在 <data>/rooms/<id>/；这里沿用 rooms.json 里的活动房间，
+// 否则会去根目录找一个已经不存在的 room.json（会重新生成一个默认房间，看着像数据丢了）。
+const { meta } = await ensureRoomsLayout(DEFAULT_DATA_DIR);
+const ACTIVE_ID = meta.activeRoomId ?? meta.rooms[0]?.id ?? null;
+const DATA_DIR = ACTIVE_ID ? roomDataDir(DEFAULT_DATA_DIR, meta, ACTIVE_ID) : DEFAULT_DATA_DIR;
 
 function colorFor(name) {
   const palette = [C.cyan, C.magenta, C.green, C.yellow, C.blue];

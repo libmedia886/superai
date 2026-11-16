@@ -39,6 +39,32 @@ function classifyTool(name) {
   }
 }
 
+/**
+ * 头头对"没有 @ 我的消息"的免回应标记。
+ *
+ * 判据刻意收紧：只认空内容或明确的标记词。不能按"短"来判断——
+ * 「好」「收到」是正常回复，把它们记成"未回应"会让老板以为它没理人。
+ */
+/** 停顿原因 → 人话。状态栏直接显示这个，不要让人猜。 */
+export const PAUSE_LABEL = {
+  no_target: '说完了，没点名下一位',
+  overreach: '@ 了没权限叫的人',
+  only_human: '把话交回给老板',
+  continue_cap: '自动接力次数到上限',
+  breaker: '连续失败，暂时停用',
+  stopped: '你点了「停止」',
+  summary: '总结完毕',
+  error: '出错停住',
+};
+
+const PASS_MARKERS = /^\[?\s*(pass|no_reply|no-reply|skip|无需回应|不用回复|不需要回应)\s*\]?[。.!！]?$/i;
+
+export function isPassReply(text) {
+  const t = String(text ?? '').trim();
+  if (!t) return true;
+  return PASS_MARKERS.test(t);
+}
+
 function isStall(result, durationMs) {
   if (result?.reason !== EXIT.TIMEOUT) return false;
   const text = result?.text ?? '';
@@ -58,12 +84,20 @@ export class Room {
   constructor({
     id, name, goal = '', members, store, resolveAdapter, onEvent,
     registry = [], worktreesRoot = null, onMemberCreate = null,
-    aiCabTier = DEFAULT_AI_CAB_TIER,
+    aiCabTier = DEFAULT_AI_CAB_TIER, headPassiveWake = true,
   }) {
     /** 造人落地钩子（由 config 注入，负责建目录 + 写配置） */
     this.onMemberCreate = onMemberCreate;
     /** AI 能创建的成员的最高档位（人设定，默认只读） */
     this.aiCabTier = aiCabTier;
+    /**
+     * 头头被动唤醒：成员**不 @** 任何人的发言也会叫醒头头。
+     * 老板的要求原话："任何人在群里评论，即使不 at，头头都能收到。"
+     * 头头可以回，也可以不回。默认开（房间级开关）。
+     */
+    this.headPassiveWake = headPassiveWake !== false;
+    /** 累积中的被动唤醒批次：几条不 @ 的消息合并成头头的一轮，而不是排队跑 N 轮 */
+    this._passiveBatch = null;
     this.id = id;
     this.name = name;
     this.goal = goal;
@@ -120,6 +154,25 @@ export class Room {
     this.autoAdvance.reset();
     this._pendingContinue = null;
 
+    /**
+     * ★ 房间被"停止"过，人一说话就自动恢复。
+     *
+     * 「停止」的用途是掐断当前失控的连锁，不是让人从此叫不动它。
+     * 之前这里是死锁：停止后 drain 立刻退出（`!this.stopped`），
+     * 人发的消息 200 OK 落进 jsonl 却永远没人处理，界面还说一切正常。
+     * 人主动说话本身就是一次新的指令——拒绝处理才是错的。
+     */
+    const wasStopped = this.stopped;
+    this._clearPause();
+    if (wasStopped) {
+      this.stopped = false;
+      this.onEvent({
+        type: 'resumed',
+        reason: 'human_say',
+        text: '房间已恢复（你说了一句话，等于给出新的指令）',
+      });
+    }
+
     const { targets, unknown, selfTargets } = parseMentions(body, { members: this.members }, 'human');
     const msg = await this.store.addMessage({
       senderId: 'human',
@@ -150,7 +203,7 @@ export class Room {
       this.onEvent({ type: 'broadcast', recipients, messageId: msg.message.id });
     }
 
-    return { messageId: msg.message.id, targets: recipients, unknown, broadcast };
+    return { messageId: msg.message.id, targets: recipients, unknown, broadcast, resumed: wasStopped };
   }
 
   /** 广播顺序：头头优先，其余按加入顺序（§6.4.1） */
@@ -161,7 +214,21 @@ export class Room {
   }
 
   _enqueue(agentId, entry) {
-    const dup = this.queue.find((q) => q.agentId === agentId && q.taskId === entry.taskId);
+    /**
+     * 去重键用**触发消息 id**，不用 (agentId, taskId)。
+     *
+     * 原来的键在 taskId 为 null 时退化成"这个 agent 只能排一条"，于是
+     * 人连着 @ 同一个 agent 两次，第二次会被无提示地丢掉——用户看到自己发了
+     * 两条消息，agent 只回了一次，也不知道为什么。
+     */
+    const key = entry.triggerMsg?.id ?? null;
+    const dup = key
+      ? this.queue.find((q) => q.agentId === agentId && (q.triggerMsg?.id ?? null) === key)
+      : this.queue.find((q) => q.agentId === agentId
+        && (q.triggerMsg?.id ?? null) === null
+        && (q.taskId ?? null) === (entry.taskId ?? null)
+        && q.source === entry.source
+        && Boolean(q.passive) === Boolean(entry.passive));
     if (dup) {
       this.onEvent({ type: 'queued', agentId, alreadyQueued: true });
       return false;
@@ -173,21 +240,35 @@ export class Room {
 
   // ---------- 运行 ----------
 
-  /** 把队列跑空。串行：一次一个。 */
+  /**
+   * 把队列跑空。串行：一次一个。
+   *
+   * ★ `_drainAgain` 是必需的：调用方在已经 `running` 时再调 drain 会被直接忽略。
+   * 而「停止」之后人一说话就恢复，这条路径恰恰会撞上——stop 打断当前轮时
+   * drain 还在栈上，humanSay 紧接着调用 drain 被 `if (this.running) return` 吞掉，
+   * 消息就永远留在队列里。表现就是"发了消息 200 OK，但没人理"。
+   */
   async drain() {
-    if (this.running) return;
+    if (this.running) {
+      this._drainAgain = true;
+      return;
+    }
     this.running = true;
     try {
-      while (this.queue.length > 0 && !this.stopped) {
-        const job = this.queue.shift();
-        await this._runTurn(job);
-      }
+      do {
+        this._drainAgain = false;
+        while (this.queue.length > 0 && !this.stopped) {
+          const job = this.queue.shift();
+          await this._runTurn(job);
+        }
+      } while (this._drainAgain && !this.stopped);
       if (this.queue.length === 0 && !this.stopped) {
         this.waitingForHuman = true;
         this.onEvent({ type: 'idle', waitingForHuman: true });
       }
     } finally {
       this.running = false;
+      this._drainAgain = false;
     }
   }
 
@@ -221,17 +302,119 @@ export class Room {
     return { ok: true };
   }
 
-  /** 一键停止整个房间（唯一的硬闸） */
+  /**
+   * 一键停止整个房间（唯一的硬闸）。
+   *
+   * 语义（和人点「打断」区分开，别混）：
+   *   - 打断(interrupt)：只掐当前这一轮，队列继续
+   *   - 停止(stop)：整间房停手，清空队列，人不说话就不动
+   *
+   * 这是个"刹车"：必须有反馈（事件里说清楚丢了什么）、必须可松开
+   * （resumeRoom / 人说一句话自动恢复），否则界面会显示一切正常但什么也不干。
+   */
   stop() {
     this.stopped = true;
+    const dropped = this.queue.length;
+    const wasRunning = Boolean(this.current);
     this.queue = [];
+    this._pendingContinue = null;
     if (this.current) this.current.abort?.();
-    this.onEvent({ type: 'stopped' });
+    this._pause('stopped', '房间已停止');
+    this.onEvent({
+      type: 'stopped',
+      dropped,
+      interrupted: wasRunning,
+      text: `房间已停止${wasRunning ? '，当前发言被打断' : ''}`
+        + `${dropped ? `，丢弃 ${dropped} 条排队发言` : ''}。`
+        + '再发一句话或点「继续」即可恢复。',
+    });
+    return { dropped, interrupted: wasRunning };
   }
 
-  resumeRoom() {
+  /**
+   * 切换房间前把这一轮**真正停下来**。
+   *
+   * `stop()` 只是把 abort 信号发出去——本项目历史上出过「interrupt 只 reject promise、
+   * 子进程还在烧 token」的事故。所以这里额外等 `current` 被清空（_runTurn 的 finally
+   * 里做的），超时了就如实说没停干净，而不是假装停好了。
+   *
+   * @param {{timeoutMs?:number}} [o]
+   * @returns {Promise<{killed:boolean, dropped:number, waitMs:number}>}
+   */
+  async halt({ timeoutMs = 15_000 } = {}) {
+    this.stopped = true;
+    const dropped = this.queue.length;
+    this.queue = [];
+    this._pendingContinue = null;
+
+    if (!this.current) {
+      this.onEvent({ type: 'halted', dropped, killed: true, waitMs: 0 });
+      return { killed: true, dropped, waitMs: 0 };
+    }
+
+    this.current.abort?.();
+    const startedAt = Date.now();
+    // 等 _runTurn 的 finally 把 this.current 置空——那才代表子进程的收尾逻辑跑完
+    while (this.current && Date.now() - startedAt < timeoutMs) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    const waitMs = Date.now() - startedAt;
+    const killed = !this.current;
+    this.onEvent({ type: 'halted', dropped, killed, waitMs });
+    return { killed, dropped, waitMs };
+  }
+
+  resumeRoom({ reason = 'human' } = {}) {
+    this._clearPause();
+    if (!this.stopped) return { ok: true, changed: false };
     this.stopped = false;
-    this.onEvent({ type: 'resumed' });
+    this.onEvent({
+      type: 'resumed',
+      reason,
+      text: reason === 'human' ? '房间已恢复，成员可以继续发言' : '房间已恢复',
+    });
+    return { ok: true, changed: true };
+  }
+
+  /** 是否处于"停止"状态（界面要把这个状态常驻显示，刷新后也得在） */
+  get isStopped() {
+    return Boolean(this.stopped);
+  }
+
+  /**
+   * 人点「继续」：清掉暂停原因，并把话交回给头头。
+   *
+   * 和"说一句话"的区别：说话是给新指令，继续是"接着刚才那条往下走"。
+   * 只清状态不叫人是不够的——房间会停在原地，用户还是得自己想该 @ 谁。
+   * 这里同时重置 autoAdvance 计数：人介入了，就重新给 3 次机会。
+   */
+  continueAfterPause() {
+    const had = Boolean(this.pauseReason);
+    const reason = this.pauseReason?.reason ?? null;
+    this._clearPause();
+    this.autoAdvance.reset();
+
+    const leaders = this.members.filter((m) => m.role === 'leader');
+    const target = leaders[0] ?? this.members[0] ?? null;
+    if (!target) return { ok: false, reason: '房间里还没有成员' };
+
+    if (this.overridden && target.role === 'leader') {
+      return { ok: false, reason: '房间处于人工接管状态，头头不会自动发言；直接 @ 某个成员即可' };
+    }
+
+    this._enqueue(target.id, {
+      triggerMsg: { id: `continue-${Date.now()}`, senderId: 'human', body: '继续。' },
+      taskId: null,
+      source: 'human',
+      kick: true,
+    });
+    this.onEvent({
+      type: 'continue.kicked',
+      agentId: target.id,
+      pausedReason: reason,
+      text: `已让 ${target.name} 接着推进（之前的停顿原因：${PAUSE_LABEL[reason] ?? reason ?? '无'}）`,
+    });
+    return { ok: true, agentId: target.id, hadPause: had, pausedReason: reason };
   }
 
   /**
@@ -265,6 +448,46 @@ export class Room {
   handBack() {
     this.overridden = false;
     this.onEvent({ type: 'handback', at: new Date().toISOString() });
+  }
+
+  /**
+   * 停下要说原因。
+   *
+   * 「停下」「正在思考」「坏了」三种状态在界面上长得一样时，用户没法判断
+   * 该做什么——他只能反复问"怎么又停了"。所以每次停都发一条 room.paused，
+   * 并把原因留在 `this.pauseReason` 上（刷新后 room.init 也要能带上）。
+   *
+   * @param {'no_target'|'overreach'|'only_human'|'continue_cap'|'breaker'|'stopped'|'summary'|'error'} reason
+   */
+  _pause(reason, detail = '') {
+    this.waitingForHuman = true;
+    this.pauseReason = { reason, detail: String(detail ?? ''), at: new Date().toISOString() };
+    this.onEvent({ type: 'room.paused', reason, detail: this.pauseReason.detail });
+    return this.pauseReason;
+  }
+
+  /** 恢复发言时清掉暂停原因（否则状态栏会一直挂着一个过期理由） */
+  _clearPause() {
+    if (!this.pauseReason) return;
+    this.pauseReason = null;
+    this.onEvent({ type: 'room.resumed', reason: 'cleared' });
+  }
+
+  /** 给某个 agent 留一条"下一轮必须看到"的说明（越权、被拒等） */
+  _note(agentId, text) {
+    if (!agentId || !text) return;
+    if (!this._notes) this._notes = new Map();
+    const list = this._notes.get(agentId) ?? [];
+    list.push({ text, at: new Date().toISOString() });
+    this._notes.set(agentId, list);
+  }
+
+  /** 取走该 agent 的待读说明（取走即清空，不会重复提示） */
+  _takeNotes(agentId) {
+    if (!this._notes?.has(agentId)) return [];
+    const list = this._notes.get(agentId);
+    this._notes.delete(agentId);
+    return list;
   }
 
   // ---------- 单轮 ----------
@@ -307,11 +530,19 @@ export class Room {
       rebootstrap = await this._compact(agent, adapter);
     }
 
+    // 上一轮被拒的越权 @ 等说明：必须在它开口之前告诉它，否则它会继续按错误的理解做
+    const pendingNotes = this._takeNotes(agent.id);
+
     let prompt = rebootstrap ?? buildPrompt({
       agent, room: this, store: this.store,
       trigger: job.triggerMsg, mode: delivery,
       taskId: job.taskId, actionResults,
+      notes: pendingNotes,
     });
+    if (rebootstrap && pendingNotes.length) {
+      prompt += '\n\n--- 系统上次拦下了你的一个动作 ---\n'
+        + pendingNotes.map((n) => `- ${n.text}`).join('\n');
+    }
 
     // 总结模式：明确告诉它这是收尾，不是继续讨论
     if (job.isSummary) {
@@ -329,6 +560,39 @@ export class Room {
     // 还在等交接：把 ASK 段附在正常 prompt 末尾（不影响它正常干活）
     if (!rebootstrap && this.handoff.needsAsk(agent.id) && !this.handoff.canFire(agent.id)) {
       prompt += ASK_INSTRUCTION;
+    }
+
+    // 人点了「继续」：明确告诉它这是接着往下走，不是新任务
+    if (job.kick) {
+      prompt += '\n\n--- 老板点了「继续」 ---\n'
+        + '上一轮之后房间停住了。请接着把这件事往下推：该派活的派活，'
+        + '该收尾的收尾，该向老板汇报的直接说结论。';
+    }
+
+    // 被动唤醒/交回头头：说明这一轮为什么会轮到你
+    if (job.relay) {
+      prompt += `\n\n--- 交回给你 ---\n${job.relay.fromName} 说完了，没有点名下一位。`
+        + '需要你决定下一步：收尾、派活，或者向老板汇报。不需要继续就停住。';
+    }
+
+    // 被动唤醒：把合并批次明确列出来，并说明"可以不回"。
+    // 不写清楚的话，头头会以为每条都得回应，无 @ 的闲聊就会变成噪音源。
+    if (job.passive) {
+      const batch = this._passiveBatch;
+      this._passiveBatch = null;   // 这一轮消费掉；之后的新消息开新批次
+      const lines = ['', '--- 以下消息没有 @ 你 ---'];
+      for (const m of batch?.messages ?? []) {
+        const who = this.members.find((x) => x.id === m.senderId)?.name ?? m.senderId;
+        lines.push(`@${who}：${m.body}`);
+      }
+      lines.push(
+        '',
+        '它们是在群里直接说的，没有点名你。**你可以回复，也可以不回复。**',
+        '如果不需要回应（只是闲聊 / 别人之间的对话 / 你已经知道），',
+        '只输出 [PASS] 这一行，不要写别的——系统会记成「已读，未回应」，不是失败。',
+        '如果需要回应，就正常回答，需要谁接着说就 @ 谁。',
+      );
+      prompt += lines.join('\n');
     }
 
     this.onEvent({ type: 'turn.start', agentId: agent.id, pending: this.queue.length });
@@ -452,7 +716,16 @@ export class Room {
     const handoffInfo = this.handoff.needsAsk(agent.id)
       ? this.handoff.observe(agent.id, body)
       : { gotHandoff: false, handoff: null, text: body, malformed: false };
-    const displayBody = handoffInfo.text ?? body;
+    let displayBody = handoffInfo.text ?? body;
+
+    /**
+     * 被动唤醒的"已读未回应"。
+     *
+     * 必须和失败区分开：失败要报警、要进熔断；"我看过了，不需要说话"是正常结果。
+     * 界面上显示成一条灰色「已读，未回应」，不是错误提示。
+     */
+    const passivePass = Boolean(job.passive) && isPassReply(displayBody);
+    if (passivePass) displayBody = '';
 
     if (handoffInfo.gotHandoff) {
       this.onEvent({ type: 'handoff.received', agentId: agent.id, chars: handoffInfo.handoff.length });
@@ -474,6 +747,8 @@ export class Room {
       usageTokens,
       // 总结要显式标记：否则事后翻记录分不清哪条是结论、哪条是过程
       isSummary: Boolean(job.isSummary),
+      // 被动唤醒却没回应：既不是失败也不是发言，界面要能分开显示
+      passed: passivePass || undefined,
     });
     // 带上队列剩余数：界面据此区分"还要继续说"和"真的在等人"。
     // 不带的话，一轮说完就显示"等待人类"，而队列里可能还排着两三个人。
@@ -529,6 +804,7 @@ export class Room {
       const stalled = stalledOut || isStall(adapterResult, durationMs);
 
       const tripped = this.health.failure(agent.id, { stall: stalled });
+      if (tripped.tripped) this._pause('breaker', `${agent.name} 连续失败，已暂停`);
       this.onEvent({
         type: 'failure',
         agentId: agent.id,
@@ -562,7 +838,9 @@ export class Room {
 
     // 4) 循环护栏（CR-008，只提示不拦截）
     //    人类触发的轮次视为新任务起点，三个维度全部归零。
-    this._detectLoop(agent, body, { reset: job.source !== 'agent' });
+    // 被动唤醒不计入护栏：一个话多的成员天天无 @ 发言，不能让头头那边
+    // 一直刷"检测到循环迹象"——警告一旦不稀缺就没人信了。
+    if (!job.passive) this._detectLoop(agent, body, { reset: job.source !== 'agent' });
 
     // 4.5) 上下文水位：达阈值就标记，下一轮开头压缩 + 轮换 session
     if (adapterResult?.usage) {
@@ -602,13 +880,26 @@ export class Room {
         humanId: 'human',
       });
       if (unknown.length || overreach.length) {
-        this.onEvent({
-          type: 'notice', level: 'warn', agentId: agent.id,
-          text: [
-            unknown.length ? `未找到 ${unknown.map((u) => `@${u}`).join(' ')}` : '',
-            overreach.length ? `越权 @ ${overreach.join(' ')}，未生效` : '',
-          ].filter(Boolean).join('；'),
-        });
+        const text = [
+          unknown.length ? `未找到 ${unknown.map((u) => `@${u}`).join(' ')}` : '',
+          overreach.length ? `越权 @ ${overreach.join(' ')}，未生效` : '',
+        ].filter(Boolean).join('；');
+        this.onEvent({ type: 'notice', level: 'warn', agentId: agent.id, text });
+
+        /**
+         * ★ 越权必须**回注给发言者**。
+         *
+         * 只弹给界面的后果实测过：dave 写了「@carol 等你的交付」，
+         * 系统拦住了，但 dave 自己不知道 —— 它以为交出去了，于是不再叫任何人，
+         * 房间停在那里。用户看到的是"AI 突然不说话"，而 AI 以为自己在等。
+         * 下一轮 prompt 里明确告诉它，它才有机会改走合法路径（@头头 / continue）。
+         */
+        if (overreach.length) {
+          const names = overreach.map((id) => this.members.find((m) => m.id === id)?.name ?? id);
+          this._note(agent.id, `你上一条消息里 @${names.join(' @')} **没有生效**：成员不能直接 @ 其他成员。`
+            + `如果你需要交接，请改 @ 头头（${this.members.filter((m) => m.role === 'leader').map((m) => `@${m.name}`).join(' / ') || '（无）'}），`
+            + '或在动作块里写 continue。');
+        }
       }
       // 总结不进入接力：它 @ 了谁也不继续，说完就停。
       if (job.isSummary) {
@@ -618,7 +909,12 @@ export class Room {
         return;
       }
 
-      for (const t of allowed) {
+      // 'human' 不是 agent：@老板 只是"向人汇报"，不能被当成一个可跑的成员排队。
+      // 之前这里会把 'human' 塞进队列，_runTurn 找不到人静默返回——看起来就是"没人理"。
+      const agentTargets = allowed.filter((t) => t !== 'human');
+      const toHuman = allowed.length !== agentTargets.length;
+
+      for (const t of agentTargets) {
         this._enqueue(t, { triggerMsg: msg.message, taskId: job.taskId, source: 'agent' });
       }
 
@@ -662,10 +958,136 @@ export class Room {
         }
       }
 
+      // 5.5) 没人可接：交给头头（被动唤醒），交不出去就**说清楚为什么停**。
+      //
+      //      成员无 @ → 叫醒头头（它可以回，也可以不回；多条合并成一轮）。
+      //      头头无 @ → 谁都不叫（它该向人汇报，不是继续聊）。
+      //
+      //      「说了话但没人接」和「正在思考」在界面上必须长得不一样，
+      //      所以下面每一种停法都带一个明确原因。
+      let woken = false;
+      const hasAgentTarget = agentTargets.length > 0;
+      if (!hasAgentTarget && !continued && !job.isSummary) {
+        if (toHuman) {
+          // 只 @ 了老板：等人类，不需要叫任何人
+          this._pause('only_human', `${agent.name} 把话交回给老板，等你的回复`);
+        } else if (agent.role === 'member') {
+          woken = this._passiveWake(agent, msg.message, job);
+          if (!woken) {
+            // 叫不醒（被上限拦下 / 没有头头 / 接管中）
+            this._pause(this._passiveWakeBlocked?.reason ?? 'no_target',
+              this._passiveWakeBlocked?.detail ?? `${agent.name} 说完了，没有下一位`);
+          }
+        } else {
+          // 头头无 @ 且无 continue：这是"向你汇报完，停住"，属于正常收尾
+          this._pause('no_target', `${agent.name} 说完了，没有点名下一位`);
+        }
+      }
+      if (woken) {
+        this.waitingForHuman = false;
+        this._clearPause();
+      }
+
       // 注意：不在这里发 idle 事件。队列可能还有别人在等（比如人同时 @ 了两位），
       // 真正的「等待人类」由 drain() 在队列跑空时统一发出，避免重复提示。
-      if (allowed.length === 0 && !continued) this.waitingForHuman = true;
+      if (!hasAgentTarget && !continued && !woken && !this.pauseReason) this.waitingForHuman = true;
     }
+  }
+
+  /**
+   * 成员无 @ 发言 → 只叫头头，且把多条合并成一轮。
+   *
+   * 为什么只叫头头：如果叫所有人，两个成员互相无 @ 就会无限接龙；
+   * 只叫头头则链条最多一跳，天然有界（头头无 @ 不再唤醒任何人）。
+   *
+   * 为什么合并：一轮正在跑的时候连着来了三条消息，逐条排队会让头头跑三轮、
+   * 三轮都带完整上下文——这是 token 爆炸和噪音的主要来源。这里用一个批次对象，
+   * 头头那一轮看到的是"这几条"，一次说完。
+   *
+   * @returns {boolean} 是否叫醒了人
+   */
+  _passiveWake(agent, message, job) {
+    this._passiveWakeBlocked = null;
+    if (!this.headPassiveWake) {
+      this._passiveWakeBlocked = { reason: 'no_target', detail: '头头被动唤醒已关闭（房间设置）' };
+      return false;
+    }
+    if (agent.role === 'leader') return false;   // 头头无 @ → 谁都不叫
+    if (this.overridden) {
+      this._passiveWakeBlocked = { reason: 'no_target', detail: '已被人工接管，头头不自动发言' };
+      return false;
+    }
+    if (job.isSummary) return false;
+
+    /**
+     * ★ 不叫醒"刚刚对我说话的那个头头"。
+     *
+     * 少了这一条就是无限循环：头头 @ 了成员 → 成员不回 @ 地答一句 → 成员的无 @
+     * 又把它叫醒 → 它再 @ 成员…… 而且这条路径按设计不计入 LoopGuard，
+     * 所以循环检测也不会响——等于给自己造了一个不受监控的死循环。
+     * 头头刚派完活，成员那句回复它上下文里本来就有，没必要再被叫一次。
+     */
+    const triggerSender = job?.triggerMsg?.senderId ?? null;
+    const leaders = this.members.filter(
+      (m) => m.role === 'leader' && m.id !== agent.id && m.id !== triggerSender,
+    );
+    if (!leaders.length) {
+      this._passiveWakeBlocked = {
+        reason: 'no_target',
+        detail: triggerSender
+          ? '刚派活的头头不需要再被叫一次，其他成员也不能接手'
+          : '房间里没有可被唤醒的头头',
+      };
+      return false;
+    }
+
+    /**
+     * 交回头头也要有上限。
+     *
+     * 用 autoAdvance 计数（它不是 LoopGuard，因此不会污染"循环迹象"警告）：
+     * 连续 3 次「成员说完 → 头头接」而没有人类介入，就该停下来问人。
+     * 没有上限的话，一个爱说话的头头 + 一个爱回应的成员能自己聊到天亮。
+     */
+    const check = this.autoAdvance.note(agent.id, `无 @ 交回头头（${agent.name}）`);
+    if (!check.ok) {
+      this._passiveWakeBlocked = { reason: 'continue_cap', detail: check.reason };
+      this.onEvent({ type: 'notice', level: 'warn', text: check.reason });
+      return false;
+    }
+
+    // 批次：同一批消息合并到头头的一轮里
+    if (!this._passiveBatch) this._passiveBatch = { messages: [], by: [], taskId: null };
+    const batch = this._passiveBatch;
+    if (!batch.messages.some((m) => m.id === message.id)) batch.messages.push(message);
+    if (!batch.by.includes(agent.id)) batch.by.push(agent.id);
+    if (job.taskId) batch.taskId = job.taskId;
+
+    let woke = false;
+    for (const leader of leaders) {
+      // 已经有一个被动唤醒的轮次排着 → 不再排新的，它开始时会看到最新批次
+      const already = this.queue.find((q) => q.agentId === leader.id && q.passive);
+      if (already) { woke = true; continue; }
+      this._enqueue(leader.id, {
+        triggerMsg: message,
+        taskId: job.taskId,
+        source: 'agent',
+        passive: true,
+        relay: { from: agent.id, fromName: agent.name },
+      });
+      woke = true;
+    }
+
+    if (woke) {
+      this.onEvent({
+        type: 'head.passive_wake',
+        by: batch.by.slice(),
+        count: batch.messages.length,
+        leaders: leaders.map((l) => l.id),
+        relayCount: this.autoAdvance.count,
+        text: `${batch.by.map((id) => `@${this.members.find((m) => m.id === id)?.name ?? id}`).join('、')} 没有 @ 任何人，已交回头头（合并 ${batch.messages.length} 条，第 ${this.autoAdvance.count}/${this.autoAdvance.maxContinuous} 次）`,
+      });
+    }
+    return woke;
   }
 
   /**

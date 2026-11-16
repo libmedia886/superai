@@ -238,9 +238,16 @@ test('重名 / 上限 / 理由太短 都走拒绝分支', async () => {
 
 /** 让某个 agent 执行一句话里的动作（不污染 toolLog） */
 async function roomAction(room, agentId, action) {
-  room.resolveAdapter = () => ({
+  // 只有被测试的那个 agent 产出动作块。
+  //
+  // 其它人说完话后会被"交回头头"（成员无 @ → 叫醒头头），
+  // 如果所有 agent 都吐同一个动作块，头头也会把这个动作做一遍，
+  // 测的就不是"成员能不能造人"了。这里把无关轮次变成一句普通回复。
+  room.resolveAdapter = (agent) => ({
     run: async () => ({
-      text: `好的。\n\`\`\`action\n${JSON.stringify(action)}\n\`\`\``,
+      text: agent.id === agentId
+        ? `好的。\n\`\`\`action\n${JSON.stringify(action)}\n\`\`\``
+        : '收到。',
       reason: 'completed',
     }),
   });

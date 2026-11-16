@@ -15,10 +15,10 @@
 
 import { startServer } from '../src/server.js';
 import { DEFAULT_DATA_DIR } from '../src/core/config.js';
+import { resolveAccessToken } from '../src/core/token.js';
 import { spawn } from 'node:child_process';
 import { networkInterfaces } from 'node:os';
-import { randomBytes } from 'node:crypto';
-import { join, dirname, resolve } from 'node:path';
+import { resolve } from 'node:path';
 
 const args = process.argv.slice(2);
 const portArg = args.indexOf('--port');
@@ -35,34 +35,40 @@ const exposed = host === '0.0.0.0' || host === '::';
  * 绑 0.0.0.0 时连 127.0.0.1 也要令牌——否则认证就是漏的
  * （同一台机器上的任何进程都能绕过）。宁可多输一次，不留半吊子状态。
  *
- * ★ 令牌**持久化到数据目录**：每次重启换一个的话，发出去的链接就失效了，
- * 用户每次都得重新要一次——这不是安全，是麻烦。写进文件后重启复用同一个。
+ * ★ 令牌**持久化到数据目录根目录**：每次重启换一个的话，发出去的链接就失效了，
+ * 用户每次都得重新要一次——这不是安全，是麻烦。
+ *
+ * ★ 令牌是**服务级**的，不跟房间走。读取时如果根目录没有，会先从旧房间目录
+ *   捞回被搬走的那个（历史迁移踩过这个坑），见 src/core/token.js。
  */
 async function resolveToken() {
-  if (noToken || !exposed) return null;
+  if (noToken || !exposed) return { token: null, resolved: null };
 
-  const { mkdir, readFile, writeFile } = await import('node:fs/promises');
-  const tokenPath = join(process.env.MAROOM_DATA || DEFAULT_DATA_DIR, 'access-token');
-
+  const dataDir = process.env.MAROOM_DATA || DEFAULT_DATA_DIR;
   try {
-    const saved = (await readFile(tokenPath, 'utf8')).trim();
-    // 只接受看起来正常的令牌，防止文件被写坏后静默用了一个空串
-    if (/^[a-f0-9]{32}$/.test(saved)) return saved;
-  } catch { /* 文件不存在，下面创建 */ }
-
-  const fresh = randomBytes(16).toString('hex');
-  try {
-    await mkdir(dirname(tokenPath), { recursive: true });
-    await writeFile(tokenPath, fresh, { mode: 0o600 });
+    const resolved = await resolveAccessToken(dataDir);
+    return { token: resolved.token, resolved };
   } catch (err) {
-    console.warn(`⚠️  令牌无法保存到 ${tokenPath}（${err.message}），本次令牌重启后会变。`);
+    console.warn(`⚠️  令牌无法保存到 ${dataDir}/access-token（${err.message}），本次令牌重启后会变。`);
+    return { token: await readOnlyFresh(), resolved: null };
   }
-  return fresh;
 }
 
-const token = await resolveToken();
+/** 兜底：文件写不了时至少本次能用（重启后会变，已在上方警告） */
+async function readOnlyFresh() {
+  const { randomBytes } = await import('node:crypto');
+  return randomBytes(16).toString('hex');
+}
+
+const { token, resolved: tokenInfo } = await resolveToken();
 
 const { url, port: actualPort } = await startServer({ port, host, token });
+
+// 令牌从旧房间目录捞回来时必须说一声：这说明历史迁移搬错过它，
+// 而且这次没换令牌（老板的链接还能用）。
+if (tokenInfo?.recoveredFrom) {
+  console.log(`⚠️  根目录没有 access-token，已从 ${tokenInfo.recoveredFrom} 恢复（令牌未变）。`);
+}
 
 console.log(`房间界面已启动：${url}`);
 if (exposed) {
@@ -78,6 +84,7 @@ if (exposed) {
     }
     console.log('');
     console.log('令牌只打在这里，不会显示在页面上。不带令牌的请求一律 401。');
+    console.log('⚠️  令牌属于这个服务（端口），不属于任何房间；切换房间不会改变它。');
   } else {
     console.log('⚠️  已用 --no-token 关闭访问令牌。');
     for (const [name, addrs] of Object.entries(networkInterfaces())) {

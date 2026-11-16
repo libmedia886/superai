@@ -93,6 +93,8 @@ export async function buildRoom({ cfg, dataDir = DEFAULT_DATA_DIR, onEvent }) {
     worktreesRoot: join(dataDir, 'worktrees'),
     /** 房间级权限天花板：AI 能创建的成员最高档位（人设定，默认只读） */
     aiCabTier: cfg.aiCabTier ?? TIER.READONLY,
+    /** 成员不 @ 发言时是否叫醒头头（房间级开关，默认开） */
+    headPassiveWake: cfg.headPassiveWake !== false,
     // agent 造人时的落地钩子：建目录 + 写配置，返回带 cwd 的成员
     onMemberCreate: async (member, { createdBy = null, reason = '' } = {}) => {
       const cwd = join(dataDir, 'agents', member.id);

@@ -228,11 +228,16 @@ test('空目录不迁移也不报错', async () => {
   assert.match(r.reason, /没有任何数据/);
 });
 
-test('迁移会把 access-token 一起搬走（否则重启令牌变了）', async () => {
+test('★ 迁移不动 access-token（令牌是服务级的，不是房间级的）', async () => {
   const dir = await makeLegacy();
+  const before = await readFile(join(dir, 'access-token'), 'utf8');
   await migrateSingleRoom(dir);
-  assert.ok(
-    await exists(join(dir, 'rooms', LEGACY_ROOM_ID, 'access-token')),
-    '令牌要跟着房间走，否则老板的链接又失效了',
+  assert.equal(
+    await readFile(join(dir, 'access-token'), 'utf8'), before,
+    '令牌必须留在根目录，否则重启会重新生成，老板的链接失效',
+  );
+  assert.equal(
+    await exists(join(dir, 'rooms', LEGACY_ROOM_ID, 'access-token')), false,
+    '不能把令牌搬进房间目录',
   );
 });

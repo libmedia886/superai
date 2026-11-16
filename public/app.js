@@ -17,6 +17,14 @@ const state = {
   leaderId: null,
   toolLog: [],
   overridden: false,
+  stopped: false,
+  headPassiveWake: true,
+  paused: null,      // {reason, detail, at}
+  continueToken: 0,  // "继续"按钮的用途：停止时=解除停止；停顿原因在时=接着往下走
+  // ---- 多房间 ----
+  rooms: [],          // [{id,name,memberCount,lastActivityAt}]
+  activeRoomId: null,
+  singleFallback: false,
 };
 
 const COLORS = ['#5b9dff', '#b76cf0', '#3fb950', '#d29922', '#f85149', '#39c5cf', '#e06c9f'];
@@ -92,6 +100,9 @@ function avatarEl(name) {
 function renderMemberList() {
   const ul = $('member-list');
   ul.innerHTML = '';
+  // 空房间：把"添加第一个成员"放在最显眼的位置。
+  // 老板的用法是"先有头头，再让头头造人"，第一个成员默认就是头头。
+  $('btn-first-member').classList.toggle('hidden', state.members.length > 0);
   for (const m of state.members) {
     const li = document.createElement('li');
     li.className = 'member';
@@ -260,7 +271,294 @@ function renderStatus() {
   $('turn-count').textContent = String(state.turnCount);
   $('usage').textContent = fmtTokens(state.usage);
   $('btn-interrupt').disabled = !state.current;
+  // 停止是一个"刹车"，必须一眼看到，而且要有松开的地方
+  $('stopped-badge').classList.toggle('hidden', !state.stopped);
+
+  // 停顿原因：有就写清楚（"停在：@ 了没权限叫的人"），没有就不显示
+  const pausedEl = $('paused-badge');
+  if (state.paused && !state.stopped && !state.current && !state.busy) {
+    pausedEl.classList.remove('hidden');
+    pausedEl.innerHTML = `停在：<strong>${escapeHtml(PAUSE_LABEL[state.paused.reason] ?? state.paused.reason)}</strong>`
+      + (state.paused.detail ? ` · ${escapeHtml(state.paused.detail.slice(0, 80))}` : '');
+    pausedEl.title = state.paused.detail ?? '';
+  } else {
+    pausedEl.classList.add('hidden');
+  }
+
+  // 「继续」在停止时用来松刹车，在停住时用来接着往下走
+  const canContinue = state.stopped || (Boolean(state.paused) && !state.busy && !state.current);
+  $('btn-resume').classList.toggle('hidden', !canContinue);
+  $('btn-resume').textContent = state.stopped ? '▶ 继续' : '▶ 接着推进';
+  $('btn-stop').classList.toggle('hidden', state.stopped);
 }
+
+/* ---------------- 房间列表 ---------------- */
+
+/** URL 里的房间：`#room=<id>`。刷新要回到原房间，所以必须进 URL。 */
+function hashRoomId() {
+  const m = location.hash.match(/^#room=([^&]+)$/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+function setHashRoom(id) {
+  if (id) history.replaceState(null, '', `#room=${encodeURIComponent(id)}`);
+  else history.replaceState(null, '', location.pathname + location.search);
+}
+
+function showRoomList() {
+  $('rooms-view').classList.remove('hidden');
+  // 有当前房间时给一个"返回"出口；没有房间时列表本身就是唯一界面
+  $('rooms-close').classList.toggle('hidden', !state.activeRoomId);
+  renderRoomList();
+  $('rooms-new-name').focus();
+}
+
+function hideRoomList() {
+  $('rooms-view').classList.add('hidden');
+}
+
+function fmtAgo(iso) {
+  if (!iso) return '还没有对话';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  const min = Math.floor(ms / 60000);
+  if (min < 1) return '刚刚有动静';
+  if (min < 60) return `${min} 分钟前`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h} 小时前`;
+  return `${Math.floor(h / 24)} 天前`;
+}
+
+function renderRoomList() {
+  const list = $('rooms-list');
+  list.innerHTML = '';
+
+  $('rooms-fallback').classList.toggle('hidden', !state.singleFallback);
+  if (state.singleFallback) {
+    $('rooms-fallback').textContent = '多房间迁移未完成，当前只能使用这一个房间（数据未被改动）。';
+  }
+
+  if (!state.rooms.length) {
+    const empty = document.createElement('div');
+    empty.className = 'rooms-empty';
+    empty.textContent = '还没有房间。在下面输入一个名字就能建第一个。';
+    list.appendChild(empty);
+    return;
+  }
+
+  for (const r of state.rooms) {
+    const card = document.createElement('div');
+    card.className = `room-card${r.id === state.activeRoomId ? ' active' : ''}`;
+    card.innerHTML = `
+      <div class="room-card-main">
+        <div class="room-card-name">${escapeHtml(r.name)}</div>
+        <div class="room-card-meta">${r.memberCount} 个成员 · ${fmtAgo(r.lastActivityAt)}</div>
+      </div>
+      ${r.id === state.activeRoomId ? '<span class="room-card-current">当前</span>' : ''}
+      <button class="icon-btn rename" title="只改显示名，不影响对话记录">重命名</button>
+      <button class="icon-btn del" title="删除房间（目录进 .trash，不清空）">删除</button>`;
+
+    card.onclick = (e) => {
+      if (e.target.closest('.rename, .del')) return;
+      enterRoom(r.id);
+    };
+    card.querySelector('.del').onclick = (e) => {
+      e.stopPropagation();
+      deleteRoom(r);
+    };
+    card.querySelector('.rename').onclick = async (e) => {
+      e.stopPropagation();
+      const name = window.prompt('房间的新名字（只改显示名，对话记录不受影响）：', r.name);
+      if (!name || name.trim() === r.name) return;
+      const res = await fetch('/api/rooms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'rename', id: r.id, name: name.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return appendSystemNote(`重命名失败：${data.error ?? res.status}`, 'warn');
+      r.name = data.room?.name ?? name.trim();
+      if (r.id === state.activeRoomId) $('room-name').textContent = r.name;
+      renderRoomList();
+    };
+    list.appendChild(card);
+  }
+}
+
+/** 左栏的房间列表。这里才是日常入口；房间里也能看到别的房间并一键切过去。 */
+function renderSidebarRooms() {
+  const ul = $('room-list');
+  if (!ul) return;
+  ul.innerHTML = '';
+
+  if (!state.rooms.length) {
+    const li = document.createElement('li');
+    li.className = 'room-item empty';
+    li.textContent = '还没有房间';
+    ul.appendChild(li);
+    return;
+  }
+
+  for (const r of state.rooms) {
+    const li = document.createElement('li');
+    li.className = `room-item${r.id === state.activeRoomId ? ' active' : ''}`;
+    li.innerHTML = `
+      <button class="room-item-main" type="button">
+        <span class="room-item-name">${escapeHtml(r.name)}</span>
+        <span class="room-item-meta">${r.memberCount} 人</span>
+      </button>
+      <button class="room-item-del" type="button" title="删除房间">×</button>`;
+    li.querySelector('.room-item-main').onclick = () => enterRoom(r.id);
+    li.querySelector('.room-item-del').onclick = (e) => {
+      e.stopPropagation();
+      deleteRoom(r);
+    };
+    ul.appendChild(li);
+  }
+}
+
+/**
+ * 删除房间。**二次确认在这里**（服务端只管"不能删最后一个"和"先切后删"）。
+ * 文案要说清两件事：数据进了 .trash 而不是被清空；删的是当前房间会先换房间。
+ */
+async function deleteRoom(r) {
+  if (state.rooms.length <= 1) {
+    appendSystemNote('不能删除最后一个房间。先新建一个，再删这个。', 'warn');
+    return;
+  }
+  const isActive = r.id === state.activeRoomId;
+  const lines = [`删除房间「${r.name}」？`, ''];
+  if (isActive) lines.push('这是当前房间：会先切到另一个房间，然后再删除。');
+  lines.push('房间目录会移到 rooms/.trash-*（不会被清空），但界面上不再出现，对话也不会再显示。');
+  lines.push('', '确认删除吗？');
+  if (!window.confirm(lines.join('\n'))) return;
+
+  const res = await fetch('/api/rooms', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'delete', id: r.id }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return appendSystemNote(`删除失败：${data.error ?? res.status}`, 'warn');
+
+  if (data.dropped) appendSystemNote(`切换房间时丢弃了 ${data.dropped} 条过期排队发言`, 'warn');
+  if (data.killed === false) appendSystemNote('旧房间的进程未在超时内退出，已冻结其写入', 'warn');
+  appendSystemNote(`已删除房间「${data.deleted?.name ?? r.name}」`);
+
+  // 通常 rooms.updated / room.init 会先到；这里同步一份，避免列表短暂显示已删房间
+  state.rooms = state.rooms.filter((x) => x.id !== r.id);
+  if (isActive && data.switchedTo) {
+    state.activeRoomId = data.switchedTo;
+    setHashRoom(data.switchedTo);
+  }
+  renderSidebarRooms();
+  renderRoomList();
+}
+
+/** 进入房间：写 hash 并让服务端切过去。状态由随后的 room.init 驱动。 */
+let pendingEnter = null;
+
+async function enterRoom(id) {
+  setHashRoom(id);
+  if (id === state.activeRoomId) {
+    hideRoomList();
+    return;
+  }
+  pendingEnter = id;
+  appendSystemNote('正在切换房间…');
+  const res = await fetch('/api/rooms', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'switch', id }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    appendSystemNote(`切换失败：${data.error ?? res.status}`, 'warn');
+    setHashRoom(state.activeRoomId);
+    return;
+  }
+  if (data.dropped) appendSystemNote(`切换房间，丢弃了 ${data.dropped} 条过期排队发言`, 'warn');
+  if (data.killed === false) appendSystemNote('旧房间的进程未在超时内退出，已冻结其写入', 'warn');
+
+  // 服务端说"本来就是这个房间"（比如刚建完就已经切过去了）→ 不会有新的 room.init 到达，
+  // 必须就地收尾，否则会卡在列表页等一个永远不来的事件。
+  if (data.changed === false) {
+    pendingEnter = null;
+    state.activeRoomId = id;
+    hideRoomList();
+  }
+}
+
+/**
+ * room.init 到达后决定显示列表还是房间内容。规则只有三条：
+ *  1. 刚从列表点进来（pendingEnter 命中）→ 进房间
+ *  2. URL 里的房间就是当前房间（刷新 / 收藏链接）→ 进房间
+ *  3. 其余（首次打开、URL 指向不存在的房间）→ 落地页 = 房间列表
+ */
+function decideView(previousRoomId) {
+  const wanted = hashRoomId();
+
+  if (pendingEnter && pendingEnter === state.activeRoomId) {
+    pendingEnter = null;
+    setHashRoom(state.activeRoomId);
+    hideRoomList();
+    return;
+  }
+  pendingEnter = null;
+
+  if (wanted && wanted === state.activeRoomId) {
+    hideRoomList();
+    return;
+  }
+  if (wanted && wanted !== state.activeRoomId && state.rooms.some((r) => r.id === wanted)) {
+    // 链接指向另一个房间：切过去（enterRoom 会写 hash 并等新的 room.init）
+    enterRoom(wanted);
+    return;
+  }
+  // 首次打开 / 无效链接 → 房间列表。
+  // 注意这里不改 hash：用户从列表点进房间时才写，刷新才能回到原房间。
+  if (!previousRoomId || !wanted) setHashRoom(null);
+  showRoomList();
+}
+
+/** 把界面清成"刚打开这个房间"的状态（切换房间时用，不能沿用上一个房间的任何东西） */
+function resetRoomView() {
+  state.members = [];
+  state.messages = [];
+  state.tasks = new Map();
+  state.roster = new Map();
+  state.registry = [];
+  state.toolLog = [];
+  state.current = null;
+  state.turnCount = 0;
+  state.usage = 0;
+  state.busy = false;
+  state.pending = 0;
+  state.currentSpeakerLast = null;
+  // 停止/停顿状态属于房间私有：换房间时必须清掉，
+  // 否则新房间会顶着上一个房间的红色「已停止」——和"刷新后徽章撒谎"同一类 bug。
+  state.stopped = false;
+  state.paused = null;
+  $('stream').innerHTML = '';
+  $('loop-warn').classList.add('hidden');
+  $('btn-stop').classList.remove('urgent');
+  $('mention-hint').textContent = '';
+  closeMentionMenu();
+  setOverridden(false);
+}
+
+/** 停顿原因 → 人话（和后端 PAUSE_LABEL 保持一致） */
+const PAUSE_LABEL = {
+  no_target: '说完了，没点名下一位',
+  overreach: '@ 了没权限叫的人',
+  only_human: '把话交回给老板',
+  continue_cap: '自动接力次数到上限',
+  breaker: '连续失败，暂时停用',
+  stopped: '你点了「停止」',
+  summary: '总结完毕',
+  error: '出错停住',
+  cleared: '已恢复',
+};
 
 /* ---------------- 消息流 ---------------- */
 
@@ -331,6 +629,7 @@ function appendHumanMessage(m) {
 
 /** 历史里的 agent 消息（重开应用时补渲染，不带流式状态） */
 function appendHistoryAgentMessage(m) {
+  if (m.passed) return appendPassedNote(m.senderId);
   if (!m.body) return;
   const wrap = document.createElement('div');
   wrap.className = 'msg agent';
@@ -410,6 +709,15 @@ function appendUsageNote(text) {
   scrollToBottom();
 }
 
+/** 被动唤醒后头头选择不回应——灰色小条，和失败的红黄提示分开 */
+function appendPassedNote(agentId) {
+  const el = document.createElement('div');
+  el.className = 'passed-note';
+  el.innerHTML = `<span class="passed-icon">✓✓</span><span>${escapeHtml(nameOf(agentId))} 已读，未回应</span>`;
+  $('stream').appendChild(el);
+  scrollToBottom();
+}
+
 function appendSystemNote(text, level = 'info') {
   const el = document.createElement('div');
   el.className = `sys-note ${level === 'warn' ? 'warn' : ''}`;
@@ -444,7 +752,30 @@ function scrollToBottom() {
 
 function handle(ev) {
   switch (ev.type) {
-    case 'room.init':
+    case 'room.init': {
+      const previousRoomId = state.activeRoomId;
+      state.activeRoomId = ev.activeRoomId ?? null;
+      state.rooms = ev.rooms ?? [];
+      state.singleFallback = Boolean(ev.singleFallback);
+
+      // 没有房间：界面上只剩"新建房间"这一条路
+      if (!ev.room) {
+        resetRoomView();
+        $('room-name').textContent = '房间';
+        renderMemberList();
+        renderRoster();
+        renderRepos();
+        renderBoard();
+        renderSidebarRooms();
+        setHashRoom(null);
+        showRoomList();
+        break;
+      }
+
+      // 换了房间必须整屏重建：成员、消息、看板、护栏、接管徽章全部来自上一个房间的
+      // 东西都不能留（"刷新后徽章消失"和"新房间显示已被接管"是同一类界面撒谎）。
+      if (previousRoomId && previousRoomId !== ev.room.id) resetRoomView();
+
       state.members = ev.members;
       state.leaderId = ev.room.leaderId;
       state.registry = ev.registry ?? [];
@@ -452,7 +783,12 @@ function handle(ev) {
       state.aiCabTier = ev.aiCabTier ?? 'readonly';
       $('cabtier').value = state.aiCabTier;
       setOverridden(Boolean(ev.overridden));
+      state.stopped = Boolean(ev.stopped);
+      state.paused = ev.paused ?? null;
+      state.headPassiveWake = ev.headPassiveWake !== false;
+      $('passive-wake').checked = state.headPassiveWake;
       $('room-name').textContent = ev.room.name;
+      document.title = `${ev.room.name} · 多 AI 协作房间`;
       for (const t of ev.tasks) state.tasks.set(t.id, t);
       for (const [k, v] of ev.roster) state.roster.set(k, v);
       renderMemberList();
@@ -462,14 +798,71 @@ function handle(ev) {
       // 计数与用量从历史恢复，否则刷新后看起来像没跑过
       state.turnCount = ev.history.filter((m) => m.senderId !== 'human').length;
       state.usage = ev.history.reduce((sum, m) => sum + (m.usageTokens ?? 0), 0);
+      $('stream').innerHTML = '';
       for (const m of ev.history) {
         if (m.senderId === 'human') appendHumanMessage(m);
         else appendHistoryAgentMessage(m);
       }
       // 刷新后也要能看到历史写操作（否则"日志"只活在当轮，等于没用）
       renderHistoricalTools(ev.toolLog ?? []);
+      renderSidebarRooms();
+      renderRoomList();
       scrollToBottom();
       renderStatus();
+
+      decideView(previousRoomId);
+      break;
+    }
+
+    case 'room.paused':
+      state.paused = { reason: ev.reason, detail: ev.detail ?? '', at: new Date().toISOString() };
+      state.busy = false;
+      state.pending = 0;
+      // 只在真有内容时提示一次；"头头汇报完停住"不该刷成警告色
+      if (ev.reason !== 'no_target') {
+        appendSystemNote(`停在：${PAUSE_LABEL[ev.reason] ?? ev.reason}${ev.detail ? ` · ${ev.detail}` : ''}`, 'warn');
+      }
+      renderStatus();
+      break;
+
+    case 'continue.kicked':
+      state.paused = null;
+      appendSystemNote(ev.text ?? '已让头头接着推进');
+      renderStatus();
+      break;
+
+    case 'rooms.updated':
+      state.rooms = ev.rooms ?? [];
+      renderRoomList();
+      break;
+
+    case 'room.renamed':
+      if (ev.id === state.activeRoomId) {
+        $('room-name').textContent = ev.name;
+        document.title = `${ev.name} · 多 AI 协作房间`;
+      }
+      renderRoomList();
+      break;
+
+    case 'room.settings':
+      state.headPassiveWake = ev.headPassiveWake !== false;
+      $('passive-wake').checked = state.headPassiveWake;
+      appendSystemNote(ev.headPassiveWake
+        ? '成员不 @ 发言会叫醒头头'
+        : '已关闭：成员不 @ 发言不再叫醒头头');
+      break;
+
+    case 'head.passive_wake':
+      // 让老板看得懂头头为什么突然说话
+      appendSystemNote(ev.text ?? `成员无 @ 发言，已叫醒头头（${ev.count} 条）`);
+      break;
+
+    case 'room.switched':
+      appendSystemNote(`已切换到房间「${ev.room.name}」${ev.dropped ? `，丢弃 ${ev.dropped} 条过期发言` : ''}`);
+      break;
+
+    case 'halted':
+      if (ev.dropped) appendSystemNote(`已停止当前发言，丢弃 ${ev.dropped} 条排队发言`, 'warn');
       break;
 
     case 'snapshot':
@@ -483,6 +876,7 @@ function handle(ev) {
 
     case 'turn.start': {
       state.busy = true;
+      state.paused = null;
       state.pending = ev.pending ?? 0;
       ensureTurnEl(ev.agentId);
       renderStatus();
@@ -525,6 +919,16 @@ function handle(ev) {
     case 'message': {
       const m = ev.message;
       if (m.senderId === 'human') break;
+      if (m.passed) {
+        // 「已读，未回应」：不是失败，也不是发言，必须能一眼区分
+        finishTurn(m.durationMs);
+        if (state.current?.agentId === m.senderId) state.current = null;
+        appendPassedNote(m.senderId);
+        state.pending = ev.pending ?? 0;
+        state.busy = state.pending > 0;
+        renderStatus();
+        break;
+      }
       if (state.current?.agentId === m.senderId) {
         state.current.text = m.body;
         state.current.textEl.innerHTML = renderBody(m.body, { live: true });
@@ -671,9 +1075,18 @@ function handle(ev) {
       break;
 
     case 'stopped':
-      appendSystemNote('房间已停止', 'warn');
-      finishTurn();
+      state.stopped = true;
       state.busy = false;
+      state.pending = 0;
+      appendSystemNote(ev.text ?? '房间已停止', 'warn');
+      finishTurn();
+      renderStatus();
+      break;
+
+    case 'resumed':
+      state.stopped = false;
+      if (ev.reason !== 'cleared') state.paused = null;
+      if (ev.text) appendSystemNote(ev.text);
       renderStatus();
       break;
 
@@ -1003,6 +1416,20 @@ $('cabtier').onchange = async (e) => {
   }
 };
 
+$('passive-wake').onchange = async (e) => {
+  const on = e.target.checked;
+  const res = await fetch('/api/room-settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ headPassiveWake: on }),
+  });
+  if (!res.ok) {
+    e.target.checked = !on;
+    return appendSystemNote('设置失败', 'warn');
+  }
+  state.headPassiveWake = on;
+};
+
 $('btn-takeover').onclick = async () => {
   if (!window.confirm('接管后头头会暂停自动发言，你直接 @ 任何成员。继续？')) return;
   const res = await fetch('/api/takeover', { method: 'POST' });
@@ -1053,14 +1480,21 @@ $('btn-add-repo').onclick = async () => {
   appendSystemNote(`已登记仓库：${path.trim()}`);
 };
 
-$('btn-add-member').onclick = async () => {
-  const name = window.prompt('新成员的名字（在群里用 @名字 叫它）：');
-  if (!name) return;
+async function addMemberDialog() {
+  const isFirst = state.members.length === 0;
+  const name = window.prompt(
+    isFirst
+      ? '第一个成员的名字（它会是这个房间的头头，可以再让它自己加人）：'
+      : '新成员的名字（在群里用 @名字 叫它）：',
+  );
+  if (!name || !name.trim()) return;
   const backend = (window.prompt('用哪个后端？claude / codex / opencode', 'claude') ?? '').trim();
   if (!backend) return;
   const tiers = { claude: 'readonly / write-ask / write / write-exec', codex: 'readonly / write-exec', opencode: 'readonly / write / write-exec' }[backend] ?? '';
   const tier = (window.prompt(`权限档位？（${tiers}）`, 'readonly') ?? 'readonly').trim();
-  const role = (window.prompt('角色？输入 leader（头头）或 member（成员）', 'member') ?? 'member').trim();
+  // 第一个成员固定是头头，不再问——多问一次只多一个选错的机会
+  const role = isFirst ? 'leader'
+    : (window.prompt('角色？输入 leader（头头）或 member（成员）', 'member') ?? 'member').trim();
 
   const res = await fetch('/api/member', {
     method: 'POST',
@@ -1069,12 +1503,99 @@ $('btn-add-member').onclick = async () => {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return appendSystemNote(`添加失败：${data.error ?? res.status}`, 'warn');
-  appendSystemNote(`已添加成员 @${name.trim()}（${backend} / ${tier}）`);
+  appendSystemNote(`已添加成员 @${data.member?.name ?? name.trim()}（${backend} / ${tier}${data.role === 'leader' ? ' · 头头' : ''}）`);
+}
+
+$('btn-add-member').onclick = () => addMemberDialog();
+
+/* ---------------- 房间切换 ---------------- */
+
+$('btn-rooms').onclick = async () => {
+  const r = await fetch('/api/rooms').catch(() => null);
+  if (r?.ok) {
+    const d = await r.json();
+    state.rooms = d.rooms ?? [];
+    state.activeRoomId = d.activeRoomId ?? state.activeRoomId;
+    state.singleFallback = Boolean(d.singleFallback);
+  }
+  showRoomList();
 };
 
+$('rooms-close').onclick = () => {
+  setHashRoom(state.activeRoomId);
+  hideRoomList();
+};
+
+/** 左栏「+ 新建房间」：打开列表并直接聚焦到新房间名输入框 */
+$('btn-new-room').onclick = () => {
+  showRoomList();
+  $('rooms-new-name').focus();
+};
+
+$('rooms-create').onsubmit = async (e) => {
+  e.preventDefault();
+  const input = $('rooms-new-name');
+  const name = input.value.trim();
+  if (!name) return;
+  const res = await fetch('/api/rooms', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'create', name }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return appendSystemNote(`新建失败：${data.error ?? res.status}`, 'warn');
+  input.value = '';
+  // 服务端建完会直接切到新房间并广播 room.init。
+  // 但如果那个 init 已经先到了（activeRoomId 已是新房间），就就地收尾。
+  const newId = data.room?.id;
+  if (newId) {
+    setHashRoom(newId);
+    if (state.activeRoomId === newId) {
+      pendingEnter = null;
+      hideRoomList();
+    } else {
+      pendingEnter = newId;
+    }
+  }
+};
+
+// 浏览器前进/后退也要跟着换房间
+window.addEventListener('hashchange', () => {
+  const id = hashRoomId();
+  if (!id) return showRoomList();
+  if (id !== state.activeRoomId) enterRoom(id);
+  else hideRoomList();
+});
+
+$('btn-first-member').onclick = () => addMemberDialog();
+
 $('btn-send').onclick = send;
-$('btn-stop').onclick = async () => { await fetch('/api/stop', { method: 'POST' }); };
-$('btn-interrupt').onclick = async () => { await fetch('/api/interrupt', { method: 'POST' }); };
+$('btn-stop').onclick = async () => {
+  // 停止会清空队列并打断当前发言，问一次（和"打断"不同：打断不用问，它可逆）
+  if (!window.confirm('停止整间房？\n\n会打断当前发言，并清空排队中的发言。\n说一句话或点「继续」就能恢复。')) return;
+  const res = await fetch('/api/stop', { method: 'POST' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return appendSystemNote('停止失败', 'warn');
+  if (data.dropped) appendSystemNote(`已丢弃 ${data.dropped} 条排队发言`, 'warn');
+};
+
+$('btn-resume').onclick = async () => {
+  // 停止中 → 先松刹车（不发消息）；已经停住但有原因 → 让头头接着推进
+  const kick = !state.stopped;
+  const res = await fetch('/api/resume', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kick }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return appendSystemNote(`恢复失败：${data.error ?? res.status}`, 'warn');
+};
+$('btn-interrupt').onclick = async () => {
+  const res = await fetch('/api/interrupt', { method: 'POST' });
+  const data = await res.json().catch(() => ({}));
+  // 没有在跑的一轮时说清楚，别让按钮看起来没反应
+  if (res.ok && !data.ok) appendSystemNote('当前没有正在发言的人', 'warn');
+};
 $('drawer-close').onclick = () => $('drawer').classList.add('hidden');
 $('drawer').onclick = (e) => { if (e.target.id === 'drawer') $('drawer').classList.add('hidden'); };
 

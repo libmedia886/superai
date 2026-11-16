@@ -1,20 +1,22 @@
 /**
- * 多房间：存储布局与迁移。
- *
- * 这一轮**只做迁移**，不碰运行时和界面。理由是迁移是唯一会破坏已有数据的步骤，
- * 它必须先单独做对、单独验过，再让别的改动叠上来。
+ * 多房间：存储布局、迁移、房间增删改查。
  *
  * 布局：
  *   旧（单房间）          新（多房间）
  *   <data>/room.json  →  <data>/rooms/<id>/room.json
  *   <data>/room.jsonl →  <data>/rooms/<id>/room.jsonl
  *   <data>/agents/    →  <data>/rooms/<id>/agents/
- *   （无）             →  <data>/rooms.json   {rooms:[{id,name,createdAt}], migratedFromSingle:true}
+ *   （无）             →  <data>/rooms.json   {rooms:[{id,name,createdAt}], activeRoomId}
  *
- * 三条硬约束（管理方定的）：
+ * ★ 令牌**不跟房间走**：`<data>/access-token` 是服务级的，迁移不动它。
+ *   （曾经把它一起搬进 rooms/r-legacy，结果重启时根目录找不到令牌就重新生成，
+ *    老板手里的链接失效——这是本文件历史上犯过的错，别再犯。）
+ *
+ * 四条硬约束（管理方定的）：
  *  1. **先备份，再迁移**。备份是复制不是移动，失败了原始数据还在。
  *  2. **任何一步失败 → 从备份恢复 → 以旧逻辑继续跑**。不能因为迁移失败让人打不开。
  *  3. **幂等**。rooms.json 里留标记，重启不会重复迁移。
+ *  4. **目录名不可改**。成员会话按 cwd 索引，改目录名等于毁掉所有会话上下文。
  */
 
 import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
@@ -24,9 +26,16 @@ export const LEGACY_ROOM_ID = 'r-legacy';
 export const ROOMS_FILE = 'rooms.json';
 export const ROOMS_DIR = 'rooms';
 export const BACKUP_PREFIX = '.multiagent-chat.bak-';
+/** 删除房间时目录的去处：rooms/.trash-<ts>。不直接用 rm，删错了还能捞回来。 */
+export const TRASH_PREFIX = '.trash-';
 
-/** 迁移时移动的东西。备份也按这个清单来，保证"备份 == 迁移前状态"。 */
-const MOVABLE = ['room.json', 'room.jsonl', 'agents', 'worktrees', 'access-token'];
+/**
+ * 迁移时移动的东西。备份也按这个清单来，保证"备份 == 迁移前状态"。
+ *
+ * ★ 不含 `access-token`：令牌是**服务级**的（绑定端口的那个链接），
+ *   不是房间级的。把它搬走会让根目录丢失权威副本。
+ */
+const MOVABLE = ['room.json', 'room.jsonl', 'agents', 'worktrees'];
 
 async function exists(p) {
   try { await stat(p); return true; } catch { return false; }
@@ -216,4 +225,227 @@ export async function migrateSingleRoom(dataDir, { log = () => {}, now = Date.no
       };
     }
   }
+}
+
+/* ==================== 房间集合（多房间第二步） ==================== */
+
+const MAX_NAME = 40;
+
+/** 房间 id：目录名，**一旦生成永不改名** */
+export function newRoomId(now = Date.now()) {
+  return `r-${now.toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+}
+
+export function validRoomId(id) {
+  return typeof id === 'string' && /^[a-z0-9][a-z0-9-]{1,40}$/.test(id);
+}
+
+export async function loadRoomsMeta(dataDir) {
+  return readJson(join(dataDir, ROOMS_FILE), null);
+}
+
+export async function saveRoomsMeta(dataDir, meta) {
+  await mkdir(dataDir, { recursive: true });
+  await writeFile(join(dataDir, ROOMS_FILE), JSON.stringify(meta, null, 2), 'utf8');
+  return meta;
+}
+
+/**
+ * 某个房间的数据目录。
+ *
+ * 正常情况下是 `<data>/rooms/<id>`。唯一的例外是「迁移失败退回单房间模式」——
+ * 那时房间数据就留在根目录（旧布局），`meta.singleFallback` 为真。
+ */
+export function roomDataDir(dataDir, meta, id) {
+  if (meta?.singleFallback) return dataDir;
+  return join(dataDir, ROOMS_DIR, id);
+}
+
+/**
+ * 启动时保证有一个可用的房间集合。
+ *
+ * - 已是多房间 → 原样返回
+ * - 单房间旧布局 → 迁移；**迁移失败不阻塞启动**，退回单房间模式（数据仍在根目录）
+ * - 空目录 → 空列表（落地页让用户自己建房间，不偷偷预置 lead/bob）
+ *
+ * @returns {Promise<{meta:object, single:boolean, warning:string|null}>}
+ */
+export async function ensureRoomsLayout(dataDir, { log = () => {} } = {}) {
+  const layout = await detectLayout(dataDir);
+
+  if (layout.mode === 'multi') {
+    layout.meta.rooms = layout.meta.rooms ?? [];
+    return { meta: layout.meta, single: false, warning: null };
+  }
+
+  if (layout.mode === 'single') {
+    const r = await migrateSingleRoom(dataDir, { log });
+    if (r.ok) {
+      const meta = await loadRoomsMeta(dataDir);
+      return { meta, single: false, warning: null };
+    }
+
+    // 迁移失败：数据已由 migrateSingleRoom 从备份恢复，继续按旧布局跑
+    const oldCfg = await readJson(join(dataDir, 'room.json'), {});
+    const meta = {
+      version: 1,
+      singleFallback: true,
+      rooms: [{ id: LEGACY_ROOM_ID, name: oldCfg?.name ?? '默认房间', createdAt: new Date().toISOString() }],
+      activeRoomId: LEGACY_ROOM_ID,
+    };
+    return {
+      meta,
+      single: true,
+      warning: `多房间迁移未完成（${r.reason}），已按单房间模式启动；数据未改动，备份在 ${r.backup ?? '（无）'}`,
+    };
+  }
+
+  const meta = { version: 1, rooms: [], activeRoomId: null };
+  await saveRoomsMeta(dataDir, meta);
+  return { meta, single: false, warning: null };
+}
+
+/** 房间列表（带成员数与最后活动时间，供落地页显示） */
+export async function listRooms(dataDir, meta) {
+  const out = [];
+  for (const r of meta?.rooms ?? []) {
+    const dir = roomDataDir(dataDir, meta, r.id);
+    const cfg = await readJson(join(dir, 'room.json'), null);
+    let lastActivityAt = null;
+    let eventCount = 0;
+    try {
+      const st = await stat(join(dir, 'room.jsonl'));
+      lastActivityAt = st.mtime.toISOString();
+      eventCount = await countLines(join(dir, 'room.jsonl'));
+    } catch { /* 新房间还没有对话 */ }
+    out.push({
+      id: r.id,
+      name: r.name,
+      createdAt: r.createdAt ?? null,
+      memberCount: cfg?.members?.length ?? 0,
+      lastActivityAt,
+      eventCount,
+    });
+  }
+  return out;
+}
+
+/**
+ * 新建房间：只写 `rooms/<id>/room.json`，**空成员**。
+ * 第一个成员由界面引导添加，默认角色是头头（见 server 的 /api/member）。
+ */
+export async function createRoom(dataDir, meta, name, { now = Date.now() } = {}) {
+  const clean = String(name ?? '').trim().slice(0, MAX_NAME);
+  if (!clean) return { ok: false, reason: '房间名不能为空' };
+  if (meta?.singleFallback) {
+    return { ok: false, reason: '当前是单房间回退模式（迁移未完成），暂不能新建房间' };
+  }
+  if (meta.rooms.some((r) => r.name === clean)) {
+    return { ok: false, reason: `已存在同名房间「${clean}」` };
+  }
+
+  let id = newRoomId(now);
+  while (meta.rooms.some((r) => r.id === id)) id = newRoomId(now + 1);
+
+  const dir = join(dataDir, ROOMS_DIR, id);
+  await mkdir(join(dir, 'agents'), { recursive: true });
+  await writeFile(
+    join(dir, 'room.json'),
+    JSON.stringify({ name: clean, goal: '', registry: [], members: [] }, null, 2),
+    'utf8',
+  );
+
+  const room = { id, name: clean, createdAt: new Date(now).toISOString() };
+  meta.rooms.push(room);
+  meta.activeRoomId = id;
+  await saveRoomsMeta(dataDir, meta);
+  return { ok: true, room };
+}
+
+/** 重命名：只改 rooms.json 里的显示名，**目录名不动** */
+export async function renameRoom(dataDir, meta, id, name) {
+  const clean = String(name ?? '').trim().slice(0, MAX_NAME);
+  if (!clean) return { ok: false, reason: '房间名不能为空' };
+  const room = meta.rooms.find((r) => r.id === id);
+  if (!room) return { ok: false, reason: '房间不存在' };
+  if (meta.singleFallback) return { ok: false, reason: '单房间回退模式下不能重命名' };
+
+  room.name = clean;
+
+  // 房间自己的 room.json 也带上名字（界面/导出读它；目录名保持不变）
+  const cfgPath = join(roomDataDir(dataDir, meta, id), 'room.json');
+  const cfg = await readJson(cfgPath, null);
+  if (cfg) {
+    cfg.name = clean;
+    await writeFile(cfgPath, JSON.stringify(cfg, null, 2), 'utf8');
+  }
+
+  await saveRoomsMeta(dataDir, meta);
+  return { ok: true, room };
+}
+
+/**
+ * 删除房间。
+ *
+ * 两条硬规矩（管理方）：
+ *  1. **目录 rename 到 `rooms/.trash-<ts>/`，不直接 rm。** 删错了还能从垃圾桶捞回来；
+ *     rm 掉就真没了，而这个应用里房间等于老板几个小时的对话记录。
+ *  2. **不能删最后一个房间。** 删光了界面无处可去，而且很容易被理解成"数据没了"。
+ *
+ * 删的是"当前房间"时，调用方（RoomManager.remove）必须先切到别的房间再调这里——
+ * 直接换 activeRoomId 而不停旧进程，就是 spec 里禁止的"只换指针"。
+ *
+ * @returns {{ok:true, room:object, trashed:string|null} | {ok:false, reason:string}}
+ */
+export async function deleteRoom(dataDir, meta, id, { now = Date.now() } = {}) {
+  if (meta?.singleFallback) {
+    return { ok: false, reason: '单房间回退模式下不能删除房间' };
+  }
+  const idx = meta.rooms.findIndex((r) => r.id === id);
+  if (idx < 0) return { ok: false, reason: '房间不存在' };
+  if (meta.rooms.length <= 1) {
+    return { ok: false, reason: '不能删除最后一个房间' };
+  }
+  if (!validRoomId(id)) {
+    // 防路径穿越：id 直接拼进路径
+    return { ok: false, reason: `非法房间 id：${id}` };
+  }
+
+  const room = meta.rooms[idx];
+  const dir = join(dataDir, ROOMS_DIR, id);
+
+  // 先 rename 到垃圾桶，再改 rooms.json。
+  // 顺序反过来的话，rename 失败会留下"列表里没了、目录还在"的孤儿——
+  // 下次新建同名房间时看不出来，但磁盘上已经有两份。
+  let trashed = null;
+  if (await exists(dir)) {
+    const stamp = new Date(now).toISOString().replace(/[:.]/g, '-');
+    let target = join(dataDir, ROOMS_DIR, `${TRASH_PREFIX}${stamp}`);
+    let n = 1;
+    while (await exists(target)) target = join(dataDir, ROOMS_DIR, `${TRASH_PREFIX}${stamp}-${n++}`);
+    await rename(dir, target);
+    trashed = target;
+  }
+
+  meta.rooms.splice(idx, 1);
+  if (meta.activeRoomId === id) meta.activeRoomId = meta.rooms[0]?.id ?? null;
+  await saveRoomsMeta(dataDir, meta);
+  return { ok: true, room, trashed };
+}
+
+export async function setActiveRoom(dataDir, meta, id) {
+  if (!meta.rooms.some((r) => r.id === id)) return { ok: false, reason: '房间不存在' };
+  if (meta.activeRoomId === id) return { ok: true, changed: false };
+  meta.activeRoomId = id;
+  await saveRoomsMeta(dataDir, meta);
+  return { ok: true, changed: true };
+}
+
+/** 给终端外壳（bin/room.mjs）用：解析当前应该打开哪个数据目录 */
+export async function resolveActiveRoomDir(dataDir) {
+  const { meta } = await ensureRoomsLayout(dataDir);
+  const id = meta.activeRoomId ?? meta.rooms[0]?.id ?? null;
+  if (!id) return { id: null, dir: dataDir, name: meta.rooms[0]?.name ?? '默认房间' };
+  const name = meta.rooms.find((r) => r.id === id)?.name ?? '默认房间';
+  return { id, dir: roomDataDir(dataDir, meta, id), name };
 }

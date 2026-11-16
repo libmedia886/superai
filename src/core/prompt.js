@@ -21,6 +21,7 @@ export function buildPrompt({
   mode = DELIVERY.SINCE_LAST,
   taskId = null,
   actionResults = [],
+  notes = [],
 }) {
   const lines = [];
 
@@ -106,6 +107,12 @@ export function buildPrompt({
       if (r.ok) lines.push(`✅ ${r.label} → 成功${r.detail ? `：${r.detail}` : ''}`);
       else lines.push(`❌ ${r.label} → 失败：${r.reason}`);
     }
+  }
+
+  // 5.5 系统之前的拦截说明（越权 @ 之类）。放在规则之前：先讲发生了什么，再讲规则。
+  if (notes?.length) {
+    lines.push('', '--- 系统上次拦下了你的动作 ---');
+    for (const n of notes) lines.push(`- ${n.text}`);
   }
 
   // 6. 行为约束与输出格式

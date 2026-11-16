@@ -79,10 +79,27 @@ test('广播时人类插话可入队（不打断，排队语义）', async () =>
   const { room } = await makeRoom();
   await room.humanSay('大家看一下');
   const before = room.queue.length;
+
+  /*
+   * 去重键从 (agentId, taskId) 改成了触发消息 id。
+   *
+   * 旧键在 taskId 为 null 时退化成"这个 agent 只能排一条"，于是人连着两次
+   * @ 同一个人，第二条会被无提示地丢掉——用户发了消息、agent 只回一次，
+   * 而且没有任何解释。现在每一条被点名的消息都会排一次。
+   */
   await room.humanSay('@carol 你先别说了，只回一句');
-  assert.equal(room.queue.length, before, 'carol 已在队列，不重复入队');
+  assert.ok(room.queue.some((q) => q.agentId === 'carol'));
+  assert.equal(room.queue.length, before + 1, '新的一条消息对应新的一轮');
+
   await room.humanSay('@lead 追加一句');
   assert.ok(room.queue.some((q) => q.agentId === 'lead'));
+});
+
+test('★ 同一轮里重复点名同一个人不重复入队', async () => {
+  const { room } = await makeRoom();
+  await room.humanSay('@carol @carol 看一下');
+  const carolJobs = room.queue.filter((q) => q.agentId === 'carol');
+  assert.equal(carolJobs.length, 1, '同一条消息里重复 @ 只排一次');
 });
 
 test('广播不会被误判成循环：人类触发的轮次重置链条', async () => {

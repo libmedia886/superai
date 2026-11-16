@@ -15,7 +15,8 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 
-import { loadConfig, saveConfig, buildRoom, DEFAULT_DATA_DIR } from './core/config.js';
+import { DEFAULT_DATA_DIR } from './core/config.js';
+import { RoomManager } from './core/sessions.js';
 import { availableTiers, TIER } from './core/probe.js';
 import { exportMarkdown } from './core/export.js';
 import {
@@ -36,11 +37,16 @@ const MIME = {
  *   否则这个 URL 就是一台能让 AI 改你代码的遥控器。
  */
 export async function startServer({ port = 4321, host = '127.0.0.1', dataDir = DEFAULT_DATA_DIR, token = null } = {}) {
-  const cfg = await loadConfig(dataDir);
   const clients = new Set();
   const replay = [];   // 最近事件，供新连上的页面补齐状态
 
+  /**
+   * 事件出口。带 `roomId` 的事件只在该房间正处于活动状态时转发——
+   * 切换房间后旧房间的残留 turn 还在收尾，它的事件不能画进新房间。
+   */
+  let activeRoomId = null;
   const broadcast = (ev) => {
+    if (ev.roomId && activeRoomId && ev.roomId !== activeRoomId) return;
     const payload = { id: randomUUID(), at: Date.now(), ...ev };
     replay.push(payload);
     if (replay.length > 500) replay.shift();
@@ -50,32 +56,83 @@ export async function startServer({ port = 4321, host = '127.0.0.1', dataDir = D
     }
   };
 
-  const { room, store, members, warnings } = await buildRoom({ cfg, dataDir, onEvent: broadcast });
-  for (const w of warnings) broadcast({ type: 'notice', level: 'warn', text: w });
+  const manager = new RoomManager({ dataDir, onEvent: broadcast });
+  await manager.init();
+
+  // 这些引用随房间切换而更新。全部经由 sync() 刷新，**不要**在别处缓存它们。
+  let room, store, members, cfg, session;
+  function sync() {
+    session = manager.session;
+    room = session?.room ?? null;
+    store = session?.store ?? null;
+    members = session?.members ?? [];
+    cfg = session?.cfg ?? null;
+    activeRoomId = session?.id ?? null;
+  }
+  sync();
+  for (const w of manager.notices) broadcast({ type: 'notice', level: 'warn', text: w });
+  manager.notices.length = 0;
 
   const nameOf = (id) => (id === 'human' ? '老板' : (members.find((m) => m.id === id)?.name ?? id));
 
   // 注意：初始化信息**不能只广播一次**——页面通常在服务启动之后才连上来，
   // 所以每个新连接都要收到一份完整的 init，否则界面是空的。
-  const initPayload = () => ({
-    type: 'room.init',
-    room: { name: cfg.name, leaderId: room.leaderId },
-    members: members.map((m) => ({
-      id: m.id, name: m.name, role: m.role, backend: m.backend,
-      tier: m.tier, persona: m.persona, colors: m.color ?? null,
-      tiers: availableTiers(m.backend),
-    })),
-    history: store.messages.slice(-200),
-    tasks: [...store.tasks.values()],
-    roster: [...store.roster.entries()],
-    registry: cfg.registry ?? [],
-    toolLog: store.toolLog.slice(-200),
-    /** AI 能创建的成员最高档位（人设定） */
-    aiCabTier: room.aiCabTier,
-    maxMembers: 8,
-    // 接管状态必须带上：否则刷新后 badge 消失，用户会忘了自己接管过
-    overridden: Boolean(room.overridden),
-  });
+  const initPayload = async () => {
+    const rooms = await manager.list();
+    if (!session) {
+      return {
+        type: 'room.init',
+        room: null,
+        rooms: rooms.rooms,
+        activeRoomId: null,
+        singleFallback: rooms.singleFallback,
+        members: [], history: [], tasks: [], roster: [], registry: [], toolLog: [],
+        aiCabTier: 'readonly', maxMembers: 8, overridden: false, stopped: false,
+        headPassiveWake: true, paused: null,
+      };
+    }
+    return {
+      type: 'room.init',
+      room: { id: session.id, name: session.name, leaderId: room.leaderId },
+      rooms: rooms.rooms,
+      activeRoomId: session.id,
+      singleFallback: rooms.singleFallback,
+      members: members.map((m) => ({
+        id: m.id, name: m.name, role: m.role, backend: m.backend,
+        tier: m.tier, persona: m.persona, colors: m.color ?? null,
+        tiers: availableTiers(m.backend),
+      })),
+      history: store.messages.slice(-200),
+      tasks: [...store.tasks.values()],
+      roster: [...store.roster.entries()],
+      registry: cfg.registry ?? [],
+      toolLog: store.toolLog.slice(-200),
+      /** AI 能创建的成员最高档位（人设定） */
+      aiCabTier: room.aiCabTier,
+      maxMembers: 8,
+      // 接管状态必须带上：否则刷新后 badge 消失，用户会忘了自己接管过
+      overridden: Boolean(room.overridden),
+      // 停止状态同理：刷新一下就把红色常驻提示弄丢，用户会以为房间还能用
+      stopped: Boolean(room.stopped),
+      headPassiveWake: room.headPassiveWake !== false,
+      // 停顿原因必须随状态一起下发：刷新后"为什么停着"不能变成一个谜
+      paused: room.pauseReason ? { ...room.pauseReason } : null,
+    };
+  };
+
+  /** 切完房间后广播整个房间的状态（顺序：先切引用，再广播） */
+  async function broadcastInit() {
+    sync();
+    broadcast({ ...(await initPayload()), roomId: null });
+  }
+
+  const requireRoom = (res) => {
+    if (!session) {
+      json(res, 409, { error: '还没有打开任何房间。请先在房间列表里新建或进入一个房间。' });
+      return false;
+    }
+    return true;
+  };
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1');
@@ -110,8 +167,8 @@ export async function startServer({ port = 4321, host = '127.0.0.1', dataDir = D
         });
         res.write('retry: 1000\n\n');
         // 每个新连接先收完整初始化状态，刷新后不会空白
-        res.write(`data: ${JSON.stringify({ id: randomUUID(), at: Date.now(), ...initPayload() })}\n\n`);
-        res.write(`data: ${JSON.stringify({ id: randomUUID(), at: Date.now(), type: 'snapshot', busy: Boolean(room.current) })}\n\n`);
+        res.write(`data: ${JSON.stringify({ id: randomUUID(), at: Date.now(), ...(await initPayload()) })}\n\n`);
+        res.write(`data: ${JSON.stringify({ id: randomUUID(), at: Date.now(), type: 'snapshot', busy: Boolean(room?.current) })}\n\n`);
         clients.add(res);
         const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* closed */ } }, 15000);
         req.on('close', () => { clearInterval(ping); clients.delete(res); });
@@ -119,6 +176,7 @@ export async function startServer({ port = 4321, host = '127.0.0.1', dataDir = D
       }
 
       if (url.pathname === '/api/say' && req.method === 'POST') {
+        if (!requireRoom(res)) return;
         const body = await readJson(req);
         const text = String(body.text ?? '').trim();
         if (!text) return json(res, 400, { error: '空消息' });
@@ -133,28 +191,56 @@ export async function startServer({ port = 4321, host = '127.0.0.1', dataDir = D
         }));
         return json(res, 200, {
           ok: true, targets: r.targets, unknown: r.unknown, broadcast: r.broadcast,
+          resumed: Boolean(r.resumed),
         });
       }
 
       if (url.pathname === '/api/stop' && req.method === 'POST') {
-        room.stop();
-        return json(res, 200, { ok: true });
+        if (!requireRoom(res)) return;
+        const r = room.stop();
+        return json(res, 200, { ok: true, ...r });
+      }
+
+      /**
+       * 继续：解除「停止」。
+       * 没有这个接口时，「停止」是一条单行道——只能靠人再发一句话去恢复，
+       * 而用户在界面上找不到任何"松开刹车"的东西。
+       */
+      if (url.pathname === '/api/resume' && req.method === 'POST') {
+        if (!requireRoom(res)) return;
+        const body = await readJson(req).catch(() => ({}));
+        // 两件事分开：
+        //  - 解除「停止」（resumeRoom）
+        //  - 或者「接着刚才那条往下走」（continueAfterPause：清暂停原因 + 叫头头）
+        if (body.kick) {
+          const r = room.continueAfterPause();
+          room.drain().catch((err) => broadcast({
+            type: 'failure', agentId: 'system', reason: 'crashed', detail: String(err),
+          }));
+          if (!r.ok) return json(res, 400, { error: r.reason });
+          return json(res, 200, { ok: true, ...r });
+        }
+        const r = room.resumeRoom({ reason: 'human' });
+        return json(res, 200, { ok: true, ...r });
       }
 
       /** 一键接管：暂停头头，人直接指挥 */
       if (url.pathname === '/api/takeover' && req.method === 'POST') {
+        if (!requireRoom(res)) return;
         room.takeOver();
         return json(res, 200, { ok: true, overridden: true });
       }
 
       /** 交还控制权：把自动发言权还给头头（不重置熔断） */
       if (url.pathname === '/api/handback' && req.method === 'POST') {
+        if (!requireRoom(res)) return;
         room.handBack();
         return json(res, 200, { ok: true, overridden: false });
       }
 
       /** 指定某人做总结（不进入接力，说完房间停住） */
       if (url.pathname === '/api/summarize' && req.method === 'POST') {
+        if (!requireRoom(res)) return;
         const body = await readJson(req);
         const agentId = body.agentId;
         if (!agentId) return json(res, 400, { error: '缺少 agentId' });
@@ -166,6 +252,7 @@ export async function startServer({ port = 4321, host = '127.0.0.1', dataDir = D
 
       /** 设置权限天花板：AI 能创建的成员最高档位（只有人能改） */
       if (url.pathname === '/api/cabtier' && req.method === 'POST') {
+        if (!requireRoom(res)) return;
         const body = await readJson(req);
         const tier = body.tier;
         if (!['readonly', 'write', 'write-exec'].includes(tier)) {
@@ -173,13 +260,30 @@ export async function startServer({ port = 4321, host = '127.0.0.1', dataDir = D
         }
         room.aiCabTier = tier;
         cfg.aiCabTier = tier;
-        await saveConfig(cfg, dataDir);
+        await manager.persist();
         broadcast({ type: 'cabtier.updated', tier });
         return json(res, 200, { ok: true, tier });
       }
 
+      /**
+       * 房间级设置。目前只有一项：成员不 @ 发言是否叫醒头头。
+       * 只有人能改（agent 动作协议里没有这个动作）。
+       */
+      if (url.pathname === '/api/room-settings' && req.method === 'POST') {
+        if (!requireRoom(res)) return;
+        const body = await readJson(req);
+        if (body.headPassiveWake !== undefined) {
+          room.headPassiveWake = Boolean(body.headPassiveWake);
+          cfg.headPassiveWake = room.headPassiveWake;
+          await manager.persist();
+          broadcast({ type: 'room.settings', headPassiveWake: room.headPassiveWake });
+        }
+        return json(res, 200, { ok: true, headPassiveWake: room.headPassiveWake });
+      }
+
       /** 登记可用仓库（只有人能加，头头加不了） */
       if (url.pathname === '/api/registry' && req.method === 'POST') {
+        if (!requireRoom(res)) return;
         const body = await readJson(req);
         const path = String(body.path ?? '').trim();
         if (!path || !path.startsWith('/')) return json(res, 400, { error: '请填写绝对路径' });
@@ -189,13 +293,91 @@ export async function startServer({ port = 4321, host = '127.0.0.1', dataDir = D
         }
         cfg.registry.push({ path });
         room.registry = cfg.registry;
-        await saveConfig(cfg, dataDir);
+        await manager.persist();
         broadcast({ type: 'registry.updated', registry: cfg.registry });
         return json(res, 200, { ok: true, registry: cfg.registry });
       }
 
+      /* ---------- 房间：列表 / 新建 / 重命名 / 切换 ---------- */
+
+      if (url.pathname === '/api/rooms' && req.method === 'GET') {
+        return json(res, 200, await manager.list());
+      }
+
+      if (url.pathname === '/api/rooms' && req.method === 'POST') {
+        const body = await readJson(req);
+        const action = String(body.action ?? 'create');
+
+        if (action === 'create') {
+          // 新建房间只问名字，建完是**空房间**——不偷偷预置 lead/bob
+          const r = await manager.create(body.name);
+          if (!r.ok) return json(res, 400, { error: r.reason });
+          await broadcastInit();
+          return json(res, 200, { ok: true, room: r.room, dropped: r.dropped ?? 0 });
+        }
+
+        if (action === 'switch') {
+          const id = String(body.id ?? '');
+          if (!id) return json(res, 400, { error: '缺少房间 id' });
+          if (manager.session?.id === id) return json(res, 200, { ok: true, changed: false });
+          const r = await manager.switchTo(id);
+          if (!r.ok) return json(res, 400, { error: r.reason });
+          await broadcastInit();
+          return json(res, 200, {
+            ok: true, changed: r.changed, dropped: r.dropped, killed: r.killed,
+            room: { id, name: manager.session.name },
+          });
+        }
+
+        if (action === 'rename') {
+          const id = String(body.id ?? '');
+          const r = await manager.rename(id, body.name);
+          if (!r.ok) return json(res, 400, { error: r.reason });
+          // 改的是当前房间 → 界面上的名字也要跟着变
+          if (manager.session?.id === id) {
+            manager.session.name = r.room.name;
+            broadcast({ type: 'room.renamed', id, name: r.room.name });
+          }
+          broadcast({ type: 'rooms.updated', rooms: (await manager.list()).rooms });
+          return json(res, 200, { ok: true, room: r.room });
+        }
+
+        if (action === 'delete') {
+          const id = String(body.id ?? '');
+          if (!id) return json(res, 400, { error: '缺少房间 id' });
+          // 二次确认由界面做（那是"人确认过"的地方），服务端只负责两条硬规矩：
+          // 不能删最后一个；删当前房间先切到另一个再删。目录进 .trash-*，不 rm。
+          const r = await manager.remove(id);
+          if (!r.ok) return json(res, 400, { error: r.reason });
+          broadcast({
+            type: 'rooms.updated',
+            rooms: (await manager.list()).rooms,
+            deleted: { id, name: r.room.name },
+          });
+          if (r.switchedTo) {
+            // 删的是当前房间：新房间的完整状态必须广播，否则界面还停在旧房间
+            await broadcastInit();
+          }
+          return json(res, 200, {
+            ok: true, deleted: r.room, trashed: r.trashed,
+            switchedTo: r.switchedTo, dropped: r.dropped, killed: r.killed,
+          });
+        }
+
+        // 直接切到某个房间的简写：POST {id} 不带 action
+        if (body.id) {
+          const r = await manager.switchTo(String(body.id));
+          if (!r.ok) return json(res, 400, { error: r.reason });
+          await broadcastInit();
+          return json(res, 200, { ok: true, dropped: r.dropped, killed: r.killed });
+        }
+
+        return json(res, 400, { error: 'action 必须是 create / switch / rename / delete' });
+      }
+
       /** 建房/加成员（改配置并落盘，重启后仍在） */
       if (url.pathname === '/api/member' && req.method === 'POST') {
+        if (!requireRoom(res)) return;
         const body = await readJson(req);
         const name = String(body.name ?? '').trim();
         const backend = String(body.backend ?? '').trim();
@@ -216,45 +398,45 @@ export async function startServer({ port = 4321, host = '127.0.0.1', dataDir = D
             availableTiers: tiers,
           });
         }
+
+        // ★ 空房间第一个成员默认是头头。
+        // 老板的实际用法是"先有头头，再让头头造人"；如果第一个是普通成员，
+        // 他不知道去哪儿点，房间就卡在"没人能分派任务"的状态。
+        const first = room.members.length === 0;
+        const role = body.role ? (body.role === 'leader' ? 'leader' : 'member')
+          : (first ? 'leader' : 'member');
+
         const member = {
           id: `m${Date.now().toString(36)}`,
           name,
           backend,
           tier,
-          role: body.role === 'leader' ? 'leader' : 'member',
+          role,
           persona: body.persona ?? '',
         };
         cfg.members.push(member);
-        await saveConfig(cfg, dataDir);
+        await manager.persist();
 
         // 热添加：不用重启
-        const cwd = join(dataDir, 'agents', member.id);
+        const cwd = join(session.dir, 'agents', member.id);
         await mkdir(cwd, { recursive: true });
         room.members.push({ ...member, cwd, aliases: [name.toLowerCase()] });
-        if (member.role === 'leader') room.leaderIds.push(member.id);
+        if (member.role === 'leader') {
+          room.leaderIds.push(member.id);
+          room.leaderId = room.leaderIds[0];
+        }
 
-        broadcast({
-          type: 'room.init',
-          room: { name: cfg.name, leaderId: room.leaderId },
-          members: room.members.map((m) => ({
-            id: m.id, name: m.name, role: m.role, backend: m.backend,
-            tier: m.tier, persona: m.persona,
-            tiers: availableTiers(m.backend),
-          })),
-          history: store.messages.slice(-200),
-          tasks: [...store.tasks.values()],
-          roster: [...store.roster.entries()],
-          registry: cfg.registry ?? [],
-          toolLog: store.toolLog.slice(-200),
-        });
-        return json(res, 200, { ok: true, member });
+        await broadcastInit();
+        return json(res, 200, { ok: true, member, role });
       }
 
       if (url.pathname === '/api/interrupt' && req.method === 'POST') {
+        if (!requireRoom(res)) return;
         return json(res, 200, { ok: room.interrupt() });
       }
 
       if (url.pathname === '/api/task' && req.method === 'POST') {
+        if (!requireRoom(res)) return;
         const body = await readJson(req);
         if (!body.id || !body.status) return json(res, 400, { error: '缺少 id 或 status' });
         await store.updateTask(body.id, { status: body.status });
@@ -263,6 +445,7 @@ export async function startServer({ port = 4321, host = '127.0.0.1', dataDir = D
       }
 
       if (url.pathname === '/api/diff' && url.searchParams.get('task')) {
+        if (!requireRoom(res)) return;
         const taskId = url.searchParams.get('task');
         const t = store.tasks.get(taskId);
         if (!t?.worktree || !t?.repo) return json(res, 404, { error: '该任务还没有 worktree' });
@@ -275,6 +458,7 @@ export async function startServer({ port = 4321, host = '127.0.0.1', dataDir = D
        * **只有人能触发**，agent 没有这个接口的访问权。
        */
       if (url.pathname === '/api/accept' && req.method === 'POST') {
+        if (!requireRoom(res)) return;
         const body = await readJson(req);
         const taskId = body.id;
         const t = taskId ? store.tasks.get(taskId) : null;
@@ -321,6 +505,7 @@ export async function startServer({ port = 4321, host = '127.0.0.1', dataDir = D
       }
 
       if (url.pathname === '/api/roster' && req.method === 'POST') {
+        if (!requireRoom(res)) return;
         const body = await readJson(req);
         if (!body.agentId) return json(res, 400, { error: '缺少 agentId' });
         await store.updateRoster(body.agentId, { humanDuties: body.duties ?? undefined });
@@ -335,6 +520,7 @@ export async function startServer({ port = 4321, host = '127.0.0.1', dataDir = D
 
       /** 导出 Markdown：干完活要能交出去 */
       if (url.pathname === '/api/export') {
+        if (!requireRoom(res)) return;
         const md = exportMarkdown({
           room: { name: cfg.name, goal: room.goal },
           messages: store.messages,
@@ -355,7 +541,17 @@ export async function startServer({ port = 4321, host = '127.0.0.1', dataDir = D
       }
 
       if (url.pathname === '/api/health') {
-        return json(res, 200, { ok: true, members: members.length, busy: Boolean(room.current) });
+        return json(res, 200, {
+          ok: true,
+          roomId: session?.id ?? null,
+          members: members.length,
+          busy: Boolean(room?.current),
+          stopped: Boolean(room?.stopped),
+          pausedReason: room?.pauseReason ?? null,
+          paused: Boolean(room?.overridden),
+          pending: room?.queue?.length ?? 0,
+          rooms: manager.meta?.rooms?.length ?? 0,
+        });
       }
 
       // 静态文件
@@ -375,7 +571,13 @@ export async function startServer({ port = 4321, host = '127.0.0.1', dataDir = D
   await new Promise((resolve) => server.listen(port, host, resolve));
   const actualPort = server.address().port;
   const shownHost = host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host;
-  return { server, port: actualPort, host, room, store, members, url: `http://${shownHost}:${actualPort}` };
+  // room / store / members 用 getter：切换房间后调用方拿到的永远是当前房间的对象。
+  // 直接返回值会让外部持有旧引用，然后往旧房间写数据——正是要防的那类问题。
+  const out = { server, port: actualPort, host, manager, url: `http://${shownHost}:${actualPort}` };
+  for (const key of ['room', 'store', 'members']) {
+    Object.defineProperty(out, key, { enumerable: true, get: () => manager.session?.[key === 'room' ? 'room' : key === 'store' ? 'store' : 'members'] });
+  }
+  return out;
 }
 
 /** 访问校验：query 参数或 Cookie 任一匹配即可 */

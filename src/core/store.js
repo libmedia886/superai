@@ -27,6 +27,26 @@ export class Store {
     this.loopWarnings = [];     // 循环护栏警告（事后复盘用）
     this._seq = 0;
     this._writeChain = Promise.resolve();
+    /**
+     * 冻结标记：房间被切走之后，任何残留 turn 都不允许再写这个文件。
+     *
+     * 切换房间时旧进程可能还没退干净（超时也杀不掉的情况），它的收尾回调
+     * 仍然会调 append。不拦住的话，两个房间的数据会互相污染——
+     * 而且这种污染没有报错，只会在几天后表现为"记录对不上"。
+     */
+    this.frozen = false;
+    /** 冻结后被拒绝的写入（供诊断；不落盘） */
+    this.rejectedWrites = 0;
+  }
+
+  /** 冻结：此后所有写入静默丢弃（保留内存状态可读） */
+  freeze() {
+    this.frozen = true;
+  }
+
+  /** 等所有排队中的写入落盘 */
+  async flush() {
+    try { await this._writeChain; } catch { /* 写失败已在上游记录 */ }
   }
 
   async load() {
@@ -116,6 +136,11 @@ export class Store {
 
   async append(ev) {
     const record = { v: SCHEMA_VERSION, seq: ++this._seq, at: new Date().toISOString(), ...ev };
+    if (this.frozen) {
+      // 房间已经切走：内存里也不记，避免界面把旧房间的消息画进新房间。
+      this.rejectedWrites += 1;
+      return record;
+    }
     this.apply(record);
     // 串行化写入，避免并发写坏行
     this._writeChain = this._writeChain.then(() =>
