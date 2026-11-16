@@ -130,7 +130,14 @@ html, body {
 .empty-hint { font-size: 12px; color: var(--text-faint); padding: 5px 8px; }
 
 /* ---------- 中栏 ---------- */
-.main { display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
+/*
+ * min-height: 0 不能省。
+ * flex 子项的默认 min-height 是 auto，意思是"至少和内容一样高"——
+ * 于是 .stream 会被消息流撑到几千像素高，overflow-y 永远不生效，
+ * 超出屏幕的部分直接被裁掉，连滚动条都没有。
+ * 这是 flexbox 里最容易漏的一行，漏了的现象就是"看不到下面、也没法滚"。
+ */
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; background: var(--bg); }
 
 .statusbar {
   display: flex; align-items: center; justify-content: space-between;
@@ -156,6 +163,8 @@ html, body {
 
 .stream {
   flex: 1; overflow-y: auto;
+  /* 和 .main 的 min-height:0 配套：自己也要允许被压缩，否则还是会被内容撑开 */
+  min-height: 0;
   padding: 20px 24px 8px;
   display: flex; flex-direction: column; gap: 16px;
   scroll-behavior: smooth;
