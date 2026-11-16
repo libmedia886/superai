@@ -113,8 +113,23 @@ if [ -n "$out" ]; then
     *) echo "netget: 拒绝写到工作目录之外（$real_out 不在 $real_cwd 内）" >&2; exit 3 ;;
   esac
 
+  # 目标父目录不存在时自己建（且必须仍在 cwd 内）。
+  # 实测（CR-046 真机一轮）：模型按提示词写 `-o work/page.html`，
+  # 而 `work/` 不存在 → curl 报 "(23) client returned ERROR on write"，整轮白烧一次。
+  # 那不是模型的错，是我们给了它一个跑不通的示例。
+  parent=$(/usr/bin/dirname -- "$real_out")
+  case "$parent" in
+    "$real_cwd"/*) ;;
+    *) echo "netget: 拒绝创建目录「$parent」（不在工作目录内）" >&2; exit 3 ;;
+  esac
+  /usr/bin/mkdir -p -- "$parent" 2>/dev/null || true
+
   # 注意用 exec 的是**绝对路径**，不是裸 curl
-  exec "$CURL_BIN" "${CURL_ARGS[@]}" -o "$real_out" "$url" 2>&1
+  # 不要把 stderr 并进 stdout：netget 的 stdout 是下载内容，
+  # 混进 curl 的错误行会污染正文。也不用 exec —— 要保留退出码语义。
+  "$CURL_BIN" "${CURL_ARGS[@]}" -o "$real_out" "$url"
+  exit $?
 fi
 
-exec "$CURL_BIN" "${CURL_ARGS[@]}" "$url" 2>&1
+"$CURL_BIN" "${CURL_ARGS[@]}" "$url"
+exit $?

@@ -174,3 +174,33 @@ test('★ 生成的 netget 里 curl 是绝对路径（不是占位符、不是�
   assert.match(body, new RegExp(`CURL_BIN='${r.curl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'`),
     '写死解析出的绝对路径');
 });
+
+test('★ -o 指向不存在的子目录 → 自动建（模型按提示词会这么写）', async () => {
+  /**
+   * CR-046 真机一轮里发现的：模型按提示词写 `-o work/page.html`，
+   * 而 `work/` 不存在 → curl 报 `(23) client returned ERROR on write`，
+   * 整轮白烧一次。**那不是模型的错，是我们给了它一个跑不通的示例。**
+   */
+  const dir = await mkdtemp(join(tmpdir(), 'ng-mk-'));
+  const r = await run(dir, ['-o', 'work/page.html', 'https://example.com']);
+  assert.equal(r.code, 0, `应成功（实际 ${r.code}：${r.stderr.slice(0, 100)}）`);
+  assert.ok(await exists(join(dir, 'work', 'page.html')), '子目录应被创建、文件应落盘');
+});
+
+test('★ 建目录也不能越界（-o /tmp/x/y.html、../x/y.html 都要拒）', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ng-mk2-'));
+  for (const out of [`/tmp/netget-mk-${Date.now()}/x.html`, '../netget-mk/x.html']) {
+    const r = await run(dir, ['-o', out, 'https://example.com']);
+    assert.equal(r.code, 3, `${out} 应被拒（实际 ${r.code}）`);
+  }
+});
+
+test('★ stdout 只含下载内容，curl 的错误走 stderr（不能污染正文）', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ng-stream-'));
+  const r = await run(dir, ['-o', 'a/b.html', 'https://example.com']);
+  assert.equal(r.code, 0);
+  assert.equal(r.stdout, '', '写文件时 stdout 不该有 curl 的进度/错误行');
+  const e = await run(dir, ['file:///etc/hostname']);
+  assert.match(e.stderr, /协议不允许/);
+  assert.equal(e.stdout, '', '错误不能在 stdout 里');
+});
