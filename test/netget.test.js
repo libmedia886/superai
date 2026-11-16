@@ -219,3 +219,32 @@ test('★ stdout 只含下载内容，curl 的错误走 stderr（不能污染正
   assert.match(e.stderr, /协议不允许/);
   assert.equal(e.stdout, '', '错误不能在 stdout 里');
 });
+
+test('★ 下载失败必须 exit 4，不能透传 curl 的码（文档与实现一致）', async () => {
+  /**
+   * 管理方 2026-11-17 实测：文件头写「4 = 下载失败（curl 非 0）」，
+   * 但改成 `exit $?` 后返回的是 **curl 自己的码**（DNS 失败 = 6）。
+   * 危害不在码本身，而在**调用方按文档判断 `=== 4` 会把真实失败当未知错误**。
+   * 这与今天修的「注释/文档比实现更自信」是同一类。
+   */
+  const dir = await mkdtemp(join(tmpdir(), 'ng-exit-'));
+  // 不存在的域名 → DNS 失败
+  const r = await run(dir, ['https://nonexistent-domain-for-test.invalid']);
+  assert.equal(r.code, 4, `下载失败必须 exit 4（实际 ${r.code}）`);
+  assert.notEqual(r.code, 6, '不能透传 curl 的 DNS 错误码');
+});
+
+test('★ 成功仍是 0，参数/协议错误仍是 2/3（归一化不能吃掉它们）', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ng-exit2-'));
+  const okRes = await run(dir, ['-o', 'a.html', 'https://example.com']);
+  assert.equal(okRes.code, 0);
+  assert.equal((await run(dir, ['file:///etc/hostname'])).code, 2);
+  assert.equal((await run(dir, ['-o', '/tmp/x.html', 'https://example.com'])).code, 3);
+  assert.equal((await run(dir, ['-T', '/etc/hostname', 'https://example.com'])).code, 2);
+});
+
+test('★ 源码不得直接透传 exit $?（否则归一化会被绕过）', async () => {
+  const src = await readFile(NETGET, 'utf8');
+  const code = src.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n');
+  assert.doesNotMatch(code, /exit \$\?/, '不能 `exit $?` —— 那会透传 curl 的原始码');
+});

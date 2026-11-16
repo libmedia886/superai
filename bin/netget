@@ -129,10 +129,21 @@ if [ -n "$out" ]; then
 
   # 注意用 exec 的是**绝对路径**，不是裸 curl
   # 不要把 stderr 并进 stdout：netget 的 stdout 是下载内容，
-  # 混进 curl 的错误行会污染正文。也不用 exec —— 要保留退出码语义。
-  "$CURL_BIN" "${CURL_ARGS[@]}" -o "$real_out" "$url"
-  exit $?
+  # 混进 curl 的错误行会污染正文。
+  #
+  # ★ 退出码必须**归一化**（管理方 2026-11-17 实测）。
+  #   文件头写的是「4 = 下载失败（curl 非 0）」，但 `exit $?` 透传的是
+  #   curl 自己的码（实测 DNS 失败 = 6）——**文档与行为不一致**。
+  #   调用方若按文档判断 `=== 4`，会把真实下载失败当成未知错误。
+  if "$CURL_BIN" "${CURL_ARGS[@]}" -o "$real_out" "$url"; then
+    exit 0
+  else
+    exit 4
+  fi
 fi
 
-"$CURL_BIN" "${CURL_ARGS[@]}" "$url"
-exit $?
+if "$CURL_BIN" "${CURL_ARGS[@]}" "$url"; then
+  exit 0
+else
+  exit 4
+fi
