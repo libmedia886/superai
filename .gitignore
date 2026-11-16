@@ -23,3 +23,6 @@ coverage/
 # 临时产物与日志（防止误 git add -f 带进别人的临时路径）
 /tmp/
 *.log
+
+# agent 内部笔记，不进产品包 / 不进仓库
+MEMORY.md
