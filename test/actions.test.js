@@ -141,3 +141,13 @@ test('★ 状态 + 说明的复合写法能识别，说明写进 note（16:27 �
   assert.equal(a.status, '阻塞');
   assert.equal(a.note, '需外部渠道', '后半段是"卡在哪"的唯一线索，必须留下');
 });
+
+test('★ 状态后面带表情也能识别（`已完成✅` 不该让整条动作被拒）', async () => {
+  const { normalizeStatus } = await import('../src/core/actions.js');
+  assert.equal(normalizeStatus('已完成✅'), '完成');
+  assert.equal(normalizeStatus('done ✅'), '完成');
+  assert.equal(normalizeStatus('阻塞🚧'), '阻塞');
+  assert.equal(normalizeStatus('进行中！'), '进行中');
+  // 表情在中间不算（那可能是正文，不是状态）
+  assert.equal(normalizeStatus('量子态✅'), null);
+});

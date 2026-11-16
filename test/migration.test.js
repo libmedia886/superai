@@ -281,3 +281,37 @@ test('★ startServer 默认不迁移（生产重启不会动数据）', async (
     server.close();
   }
 });
+
+test('★ 重启后 seq 接着编号（不能和已有事件撞号）', async () => {
+  const { Store } = await import('../src/core/store.js');
+  const dir = await mkdtemp(join(tmpdir(), 'seq-'));
+  const f = join(dir, 'room.jsonl');
+  const lines = [1, 2, 3].map((n) => JSON.stringify({
+    v: 1, seq: n, kind: 'message', message: { id: `M-${n}`, senderId: 'human', body: `第 ${n} 条` },
+  }));
+  await writeFile(f, lines.join('\n') + '\n');
+
+  const s = new Store(f);
+  await s.load();
+  const r = await s.addMessage({ senderId: 'human', body: '新的' });
+  assert.equal(r.seq, 4, 'seq 是审计对账依据，重启后又从 1 开始会撞号');
+
+  // 再重启一次，仍然接着走
+  const s2 = new Store(f);
+  await s2.load();
+  const r2 = await s2.addMessage({ senderId: 'human', body: '再一条' });
+  assert.equal(r2.seq, 5);
+});
+
+test('seq 有洞时取最大值而不是行数（删过行也不会撞号）', async () => {
+  const { Store } = await import('../src/core/store.js');
+  const dir = await mkdtemp(join(tmpdir(), 'seq2-'));
+  const f = join(dir, 'room.jsonl');
+  await writeFile(f, [
+    JSON.stringify({ v: 1, seq: 1, kind: 'message', message: { id: 'A', senderId: 'human', body: 'a' } }),
+    JSON.stringify({ v: 1, seq: 7, kind: 'message', message: { id: 'B', senderId: 'human', body: 'b' } }),
+  ].join('\n') + '\n');
+  const s = new Store(f);
+  await s.load();
+  assert.equal((await s.addMessage({ senderId: 'human', body: 'c' })).seq, 8);
+});

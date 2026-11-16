@@ -154,8 +154,17 @@ export function normalizeStatus(raw) {
   if (raw == null) return null;
   const t = String(raw).trim().toLowerCase().replace(/[\s_-]+/g, '_');
   if (TASK_STATUSES.has(String(raw).trim())) return String(raw).trim();
-  // 去掉尾部标点/表情，再查一次（"已完成！" / "done."）
-  const stripped = String(raw).trim().replace(/[。.!！,，;；~\s]+$/g, '');
+  /**
+   * 去掉尾部的标点**和表情**再查一次。
+   *
+   * 实测（管理方 17:05）：`normalizeStatus('已完成✅')` → null，整条动作被拒。
+   * 模型在状态后面加个 ✅ 是极常见的表达，不该因此失败。
+   * 用 Unicode 属性类而不是枚举 emoji：后者永远漏。
+   */
+  const stripped = String(raw).trim()
+    .replace(/[\p{Extended_Pictographic}\uFE0F\u200D]+$/gu, '')
+    .replace(/[。.!！,，;；~\s]+$/g, '')
+    .trim();
   if (TASK_STATUSES.has(stripped)) return stripped;
   const hit = STATUS_SYNONYMS.get(String(raw).trim())
     ?? STATUS_SYNONYMS.get(stripped)

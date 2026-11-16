@@ -206,3 +206,23 @@ test('清单：CLI 噪音要从失败原因里清掉（@li 13:25 贴过的那一
 test('清单：stalled 轮次不重复发 failure', async () => {
   await mustMention('core/room.js', 'if (!stalledOut)', '看门狗已经发过那条，别再补一条');
 });
+
+test('清单：档位文案不能声称"命令也限制在工作目录内"（那是假的）', async () => {
+  const { TIER_DESC } = await import('../src/core/probe.js');
+  assert.ok(!/命令.{0,8}都限制在工作目录内/.test(TIER_DESC['write-exec']),
+    '放开的命令没有目录墙（实测 curl 能写 /tmp），这句话两头都不对');
+  assert.match(TIER_DESC['write-exec'], /默认全禁|需单独允许/, '要说清命令默认跑不了');
+
+  const ui = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.ok(!ui.includes('能改文件也能执行命令，都限制在工作目录内'),
+    '前端弹窗文案同样是"界面撒谎"的高发点');
+});
+
+test('清单：状态带表情要能识别（已完成✅）', async () => {
+  const { normalizeStatus } = await import('../src/core/actions.js');
+  assert.equal(normalizeStatus('已完成✅'), '完成');
+});
+
+test('清单：重启后 seq 必须接着编号', async () => {
+  await mustMention('core/store.js', 'maxSeq', 'load 要恢复序号计数');
+});
