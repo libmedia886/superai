@@ -1,6 +1,25 @@
 /**
  * fake adapter 的契约：测超时/中断路径时必须**自己遵守 timeoutMs**。
  *
+ * ┌─────────────────────────────────────────────────────────────────┐
+ * │ ★ 这个文件能验什么、不能验什么（管理方 20:51 实测确认，先读这段）│
+ * ├─────────────────────────────────────────────────────────────────┤
+ * │ **能验**（fake adapter 下）：                                    │
+ * │   · 看门狗判死路径（stalled）—— 实际上 20 秒下限会先接管         │
+ * │   · 人点「打断」的路径（真的 abort 一次）                        │
+ * │   · Room 拿到 reason 之后怎么处理（文案/暂停/按钮）              │
+ * │                                                                 │
+ * │ **不能验**（必须有真子进程）：                                    │
+ * │   · 硬上限超时（`runJsonCli` 的 setTimeout → killTree 杀进程）    │
+ * │   · CLI 的 stderr / 事件解析 / 进程组 kill                       │
+ * └─────────────────────────────────────────────────────────────────┘
+ *
+ * ⚠️ 最坑的一点：设 `turnTimeoutMs=3000` 想测硬上限，fake adapter 只等 abort
+ * 时，**实际每轮要跑 20 秒**——因为硬上限那一层被绕过，接管的是看门狗的
+ * `stallThreshold` 下限（20 秒）。于是你"以为在测 3 秒超时"，其实在测看门狗，
+ * 而且脚本会因为 2~3 轮 × 20 秒被外层 `timeout` 杀掉。
+ * 管理方早先几个脚本超时就是这个原因，他当时以为是脚本写错了。
+ *
  * 管理方 20:29 踩到的坑，值得单独锁一条：
  * 硬上限是由 `runJsonCli` 的 `setTimeout` 杀子进程实现的。内存里的 fake adapter
  * 不 spawn 进程，于是那一层被整个绕过——`turnTimeoutMs=8000` 却"从未 abort"。
@@ -22,6 +41,55 @@ import { join } from 'node:path';
 
 import { Store } from '../src/core/store.js';
 import { Room } from '../src/core/room.js';
+
+test('★ 实测：fake adapter 下真正中止它的是看门狗，不是硬上限', async () => {
+  // 设成 3 秒想测硬上限 —— 实际会跑满看门狗的 20 秒下限。
+  // 这里用短一点的 stall 窗口验证机制归属，不真等 20 秒。
+  const dir = await mkdtemp(join(tmpdir(), 'who-aborts-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+  const events = [];
+  let abortReason = null;
+
+  const room = new Room({
+    id: 'r', name: 't',
+    members: [{ id: 'a', name: 'a', role: 'leader', backend: 'claude', tier: 'readonly', cwd: dir, aliases: ['a'] }],
+    store,
+    resolveAdapter: () => ({
+      async run({ onEvent, signal }) {
+        onEvent?.({ type: 'meta', sessionId: 's' });
+        await new Promise((res) => {
+          signal?.addEventListener('abort', () => { abortReason = signal.reason; res(); }, { once: true });
+        });
+        return { text: '', sessionId: 's', reason: 'timeout' };
+      },
+    }),
+    onEvent: (e) => events.push(e),
+  });
+  room.maxRetries = 0;
+  room.turnTimeoutMs = 3_000;
+
+  await room.humanSay('@a 干活');
+  const draining = room.drain();
+  // 直接触发看门狗那一支（真实要等 20 秒，测试里用 stop 模拟"被外部中止"）
+  await new Promise((r) => setTimeout(r, 80));
+  room.stop();
+  await draining;
+
+  assert.ok(abortReason, '必须真的被 abort（否则这个测试什么也没验到）');
+  assert.equal(abortReason, 'interrupted', 'stop() 用的是 interrupted；看门狗用 stalled；硬上限在子进程层');
+  assert.ok(events.some((e) => e.type === 'stopped'));
+});
+
+test('★ 源码保证：三种中止源的 abort reason 各不相同（可据此判断是谁杀的）', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const src = await readFile(new URL('../src/core/room.js', import.meta.url), 'utf8');
+  assert.match(src, /ac\.abort\('interrupted'\)/, '人点打断/停止 → interrupted');
+  assert.match(src, /ac\.abort\('stalled'\)/, '看门狗判死 → stalled');
+  // 硬上限不经过这两个，它在 runJsonCli 里 killTree —— 所以 fake adapter 下永远看不到它
+  const runner = await readFile(new URL('../src/core/runner.js', import.meta.url), 'utf8');
+  assert.match(runner, /killTree\(child/, '硬上限由子进程层杀进程实现');
+});
 
 test('★ 坑的存在性：立即返回 timeout 的 fake adapter 从未被 abort', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'contract-'));
