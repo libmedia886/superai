@@ -534,15 +534,6 @@ test('★ 被看门狗判死时的文案不能写"跑满 N 秒"（三句假话�
   assert.doesNotMatch(paused.detail ?? '', /跑满 \d+ 秒/, `不该声称跑满上限：${paused.detail}`);
 });
 
-test('★ 看门狗判死的分支：文案要说是"静默…判定卡死"，不是"跑满上限"', async () => {
-  const { Room } = await import('../src/core/room.js');
-  const src = Room.prototype._runTurn.toString();
-  // 实现层面的保证：stalledOut 与硬上限走不同文案
-  assert.match(src, /stalledOut/, '必须按 stalledOut 分流');
-  assert.match(src, /看门狗判定卡死/);
-  assert.match(src, /多半是空转|没有任何工具调用/, '0 次工具调用时不能说"它可能正在干活"');
-});
-
 test('★ 新一轮开始要清掉上一轮的暂停原因（跨轮不能比优先级）', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'clearpause-'));
   const store = new Store(join(dir, 'room.jsonl'));
@@ -575,4 +566,69 @@ test('★ 新一轮开始要清掉上一轮的暂停原因（跨轮不能比优�
 
   assert.notEqual(room.pauseReason?.reason, 'timeout',
     'timeout 已被事实推翻（第二轮成功了），不能因为优先级高就永久挂着');
+});
+
+/* ---------------- 停因文案的每个数字都必须来自真实事件 ---------------- */
+
+/**
+ * 今天从「停下不说明」修到「说明准确」改了四轮，每轮都是**文案与事实的偏差**，
+ * 不是逻辑错误。所以这里对纯函数 `timeoutPauseText` 逐个数字断言：
+ *   - 耗时用 durationMs（不是配置的 timeoutMs）
+ *   - rowToolsInTurn === 0 不等于"没有输出"
+ *   - stalled 与硬上限是两种完全不同的说法
+ */
+const base = {
+  name: 'a', stalledOut: false, durationMs: 112_584, timeoutMs: 1_800_000,
+  toolCalls: 0, textChars: 0, capContinues: 0, maxCapContinues: 2, stallMs: 90_000,
+};
+
+test('★ 看门狗判死：说"静默…判定卡死"，且耗时来自 durationMs 不是上限', async () => {
+  const { timeoutPauseText } = await import('../src/core/room.js');
+  const t = timeoutPauseText({ ...base, stalledOut: true });
+
+  assert.match(t, /被看门狗判定卡死/, 'stalled:true 就是看门狗判的，不能说"没有判"');
+  assert.doesNotMatch(t, /看门狗没有判/, '这是原事故里最反的一句');
+  assert.match(t, /静默 90 秒/);
+  assert.match(t, /耗时 113 秒/, '实际 112.6 秒 → 113；不能拿配置的 1800 秒当耗时');
+  assert.doesNotMatch(t, /跑满上限 1800 秒被中止/, 'stalled 不是撞硬上限');
+});
+
+test('★ 硬上限：用"跑满上限 N 秒 + 耗时 X 秒"两个数字区分配置与事实', async () => {
+  const { timeoutPauseText } = await import('../src/core/room.js');
+  const t = timeoutPauseText({ ...base, stalledOut: false, durationMs: 1_800_000, toolCalls: 3 });
+  assert.match(t, /跑满上限 1800 秒/);
+  assert.match(t, /耗时 1800 秒/);
+  assert.match(t, /3 次工具调用/);
+});
+
+test('★ rowToolsInTurn=0 但已输出正文 → 不得说"没有输出"', async () => {
+  // 管理方 18:34 实测：已经输出了 9 个字，文案却说"也没有输出"
+  const { timeoutPauseText } = await import('../src/core/room.js');
+  const t = timeoutPauseText({ ...base, stalledOut: true, textChars: 9 });
+  assert.doesNotMatch(t, /也没有输出/, `已输出内容时不能说"也没有输出"：${t}`);
+  assert.match(t, /已输出 9 字/);
+  assert.match(t, /接着写完|接着做完/, '要给出可操作的下一步');
+});
+
+test('★ 有工具调用时：不说空转，说"结果还在会话里"', async () => {
+  const { timeoutPauseText } = await import('../src/core/room.js');
+  const t = timeoutPauseText({ ...base, stalledOut: true, toolCalls: 2 });
+  assert.match(t, /2 次工具调用/);
+  assert.match(t, /结果都还在会话里/);
+  assert.doesNotMatch(t, /空转/, '跑过工具就不能说空转');
+});
+
+test('真的什么都没干时才说"空转"', async () => {
+  const { timeoutPauseText } = await import('../src/core/room.js');
+  const t = timeoutPauseText({ ...base, stalledOut: true, toolCalls: 0, textChars: 0 });
+  assert.match(t, /空转|没有任何工具调用、也没有输出/);
+});
+
+test('续做次数到上限时的说法要把"已续做 N 次"说出来', async () => {
+  const { timeoutPauseText } = await import('../src/core/room.js');
+  const t = timeoutPauseText({
+    ...base, stalledOut: false, toolCalls: 4, capContinues: 2, maxCapContinues: 2,
+  });
+  assert.match(t, /已自动续做 2 次/);
+  assert.match(t, /原地打转/);
 });

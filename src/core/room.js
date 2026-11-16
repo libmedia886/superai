@@ -15,7 +15,9 @@ import {
 } from './compact.js';
 import { EXIT } from '../adapters/types.js';
 import { LoopGuard } from './guard.js';
-import { HealthTracker, retryDecision, stallThreshold, slowStartThreshold } from './health.js';
+import {
+  HealthTracker, retryDecision, stallThreshold, slowStartThreshold, STALL_MS,
+} from './health.js';
 import { HandoffState, ASK_INSTRUCTION, buildHandoffRebootstrap, extractHandoff } from './handoff.js';
 import { AutoAdvanceGuard } from './autoadvance.js';
 import { UsageWatcher } from './usage.js';
@@ -155,6 +157,58 @@ function isStall(result, durationMs) {
   // 只看"有没有产出"。判据里不能再夹"跑了多久"——跑了很久但一直在干活
   // 是**正常**的（实测审校员 6 次 curl 就超过 180 秒），那由看门狗另行判定。
   return text.trim().length === 0;
+}
+
+/**
+ * 超时/卡死的中止文案。
+ *
+ * ★ 抽成纯函数，是因为这段文案今天改了四轮，**每轮都是数字与事实的偏差**：
+ *   - 用 `timeoutMs`（配置上限）冒充实际耗时 → 实际跑了 112 秒却写"跑满 1800 秒"
+ *   - `stalled:true` 是看门狗判的，却写"看门狗没有判它卡死"
+ *   - `rowToolsInTurn === 0` 不等于"没有输出"（它可能已经写了一段）
+ * 纯函数才能把这些数字逐个断言出来；埋在 200 行的方法里只能靠读代码。
+ *
+ * @param {object} o
+ * @param {string} o.name            成员名
+ * @param {boolean} o.stalledOut     是否被看门狗判死
+ * @param {number} o.durationMs      实际耗时（**不是**配置上限）
+ * @param {number} o.timeoutMs       配置的单轮上限
+ * @param {number} o.toolCalls       本轮工具调用次数
+ * @param {number} o.textChars       本轮已输出字数
+ * @param {number} o.capContinues    已自动续做次数
+ * @param {number} o.maxCapContinues 上限
+ * @param {number} o.stallMs         卡死窗口（毫秒）
+ */
+export function timeoutPauseText({
+  name, stalledOut, durationMs, timeoutMs, toolCalls, textChars,
+  capContinues = 0, maxCapContinues = MAX_CAP_CONTINUES, stallMs = STALL_MS,
+}) {
+  const secs = Math.max(1, Math.round(durationMs / 1000));
+  const capSecs = Math.round(timeoutMs / 1000);
+  const stallSecs = Math.round(stallMs / 1000);
+  const toolPart = `本轮 ${toolCalls} 次工具调用`;
+  const hadText = textChars > 0;
+  const didSomething = toolCalls > 0 || hadText;
+  const textPart = hadText ? `，已输出 ${textChars} 字` : '';
+
+  if (stalledOut) {
+    return `${name} 静默 ${stallSecs} 秒，被看门狗判定卡死（耗时 ${secs} 秒，${toolPart}${textPart}）。`
+      + (toolCalls > 0
+        ? '它跑过工具，结果都还在会话里——点「接着做完」可以继续。'
+        : hadText
+          ? '它已经写了一部分，会话仍在——点「接着做完」接着写，不会重来。'
+          : '本轮没有任何工具调用、也没有输出，多半是空转了。');
+  }
+  if (capContinues >= maxCapContinues) {
+    return `${name} 跑满上限 ${capSecs} 秒被中止（耗时 ${secs} 秒，${toolPart}${textPart}）。`
+      + `已自动续做 ${maxCapContinues} 次仍未收尾，不再自动续——请确认它是不是在原地打转。`;
+  }
+  if (didSomething) {
+    return `${name} 跑满上限 ${capSecs} 秒被中止（耗时 ${secs} 秒，${toolPart}${textPart}）。`
+      + '它确实在干活，但这一轮没能在上限内收尾。';
+  }
+  return `${name} 跑满上限 ${capSecs} 秒被中止（耗时 ${secs} 秒，${toolPart}）。`
+    + '没有任何工具调用、也没有输出，多半是空转。';
 }
 
 export class Room {
@@ -1248,27 +1302,17 @@ export class Room {
          * 停因说错比不说明更糟：一整天在修"停下却不说明原因"，
          * 结果说明本身是假的，用户会按错的方向去处理。
          */
-        const secs = Math.max(1, Math.round(durationMs / 1000));
-        const toolPart = `本轮 ${rowToolsInTurn} 次工具调用`;
-        let detail;
-        if (stalledOut) {
-          detail = `${agent.name} 静默 ${Math.round(stallThreshold(timeoutMs) / 1000)} 秒，`
-            + `被看门狗判定卡死（耗时 ${secs} 秒，${toolPart}）。`
-            + (rowToolsInTurn > 0
-              ? '它跑过工具，结果都还在会话里——点「接着做完」可以继续。'
-              : '本轮没有任何工具调用、也没有输出，多半是空转了。');
-        } else if (capContinues >= MAX_CAP_CONTINUES) {
-          detail = `${agent.name} 跑满上限 ${Math.round(timeoutMs / 1000)} 秒被中止`
-            + `（耗时 ${secs} 秒，${toolPart}）。已自动续做 ${MAX_CAP_CONTINUES} 次仍未收尾，`
-            + '不再自动续——请确认它是不是在原地打转。';
-        } else if (rowToolsInTurn > 0) {
-          detail = `${agent.name} 跑满上限 ${Math.round(timeoutMs / 1000)} 秒被中止`
-            + `（耗时 ${secs} 秒，${toolPart}）。它确实在干活，但这一轮没能在上限内收尾。`;
-        } else {
-          detail = `${agent.name} 跑满上限 ${Math.round(timeoutMs / 1000)} 秒被中止`
-            + `（耗时 ${secs} 秒，${toolPart}）。没有任何工具调用、也没有输出，多半是空转。`;
-        }
-        this._pause('timeout', detail);
+        this._pause('timeout', timeoutPauseText({
+          name: agent.name,
+          stalledOut,
+          durationMs,          // 实际耗时，不是配置上限
+          timeoutMs,
+          toolCalls: rowToolsInTurn,
+          textChars: String(body ?? '').trim().length,
+          capContinues,
+          maxCapContinues: MAX_CAP_CONTINUES,
+          stallMs: stallThreshold(timeoutMs),
+        }));
       }
     }
 
