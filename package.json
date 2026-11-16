@@ -4,12 +4,26 @@
   "private": true,
   "type": "module",
   "description": "多个 claude / codex / opencode 实例在同一个房间里通过 @ 点名协作",
-  "engines": { "node": ">=20" },
-  "bin": { "maroom": "./bin/room.mjs" },
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "maroom": "./bin/room.mjs"
+  },
   "scripts": {
     "start": "node bin/room.mjs",
     "demo": "node bin/room.mjs --demo",
     "test": "node --test \"test/*.test.js\"",
     "smoke": "node scripts/smoke.mjs"
-  }
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "public/",
+    "docs/",
+    "scripts/",
+    "test/",
+    "README.md",
+    "使用说明.md"
+  ]
 }
