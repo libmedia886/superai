@@ -1160,12 +1160,18 @@ function handle(ev) {
       appendSystemNote(`${nameOf(ev.agentId)} 不会自动续做：${ev.reason}`, 'warn');
       break;
 
-    case 'failure':
-      appendSystemNote(`${nameOf(ev.agentId)} 失败：${ev.reason}${ev.detail ? ' — ' + ev.detail : ''}`, 'warn');
+    case 'failure': {
+      // reason 是代码里的枚举值，直接给人看很生硬；detail 已由后端清掉 CLI 噪音
+      const REASON_CN = { timeout: '超时', crashed: '崩溃', failed: '运行失败', interrupted: '被打断' };
+      appendSystemNote(
+        `${nameOf(ev.agentId)} ${REASON_CN[ev.reason] ?? ev.reason}${ev.detail ? ' — ' + ev.detail : ''}`,
+        'warn',
+      );
       finishTurn();
       state.busy = false;
       renderStatus();
       break;
+    }
 
     case 'context.nearLimit':
       appendSystemNote(`上下文接近上限（${Math.round((ev.ratio ?? 0) * 100)}%），下一轮将压缩`, 'warn');

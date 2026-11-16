@@ -194,3 +194,15 @@ test('清单：任务卡「账不平」提示（记录不一致不能看起来�
   const css = await readFile(new URL('../public/style.css', import.meta.url), 'utf8');
   assert.ok(css.includes('.task-warn'), '要有对应样式（不用红色：这是记录不一致，不是故障）');
 });
+
+test('清单：CLI 噪音要从失败原因里清掉（@li 13:25 贴过的那一行）', async () => {
+  await mustMention('core/room.js', 'cleanStderr', '过滤 [claude-code:*] 与 unrecognized_model');
+  const { cleanStderr } = await import('../src/core/room.js');
+  assert.equal(cleanStderr('[claude-code:unrecognized_model] {"m":1}'), '',
+    '整段噪音必须清成空串——否则用户看到的"失败原因"全是技术噪音');
+  assert.equal(cleanStderr('[claude-code:x] {}\n真实原因'), '真实原因');
+});
+
+test('清单：stalled 轮次不重复发 failure', async () => {
+  await mustMention('core/room.js', 'if (!stalledOut)', '看门狗已经发过那条，别再补一条');
+});

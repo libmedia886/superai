@@ -124,6 +124,23 @@ export const PAUSE_LABEL = {
   error: '出错停住',
 };
 
+/**
+ * ★ CLI 的例行警告不能当失败原因（@li 2026-11-16 13:25 实际贴出来的原话）。
+ *
+ * 他看到的是一行：「审校员 失败：timeout — [claude-code:unrecognized_model] {...}」
+ * 那是网关模型名不被识别的警告（功能一直正常），与本次失败毫无关系，
+ * 却把真正的原因盖掉了。用户拿到的是一句看不懂的技术噪音。
+ *
+ * 这条在合并 CR-036 时被我冲掉过一次——所以现在有单独的测试盯着。
+ */
+const STDERR_NOISE = /^(?:\[claude-code:[^\]]*\]|Claude Code doesn't recognize the model|Claude Code does not recognize the model)/;
+
+export function cleanStderr(text) {
+  const lines = String(text ?? '').split('\n').map((l) => l.trim())
+    .filter((l) => l && !STDERR_NOISE.test(l));
+  return lines.join('\n').slice(0, 500);
+}
+
 const PASS_MARKERS = /^\[?\s*(pass|no_reply|no-reply|skip|无需回应|不用回复|不需要回应)\s*\]?[。.!！]?$/i;
 
 export function isPassReply(text) {
@@ -1236,14 +1253,22 @@ export class Room {
 
       const tripped = this.health.failure(agent.id, { stall: stalled });
       if (tripped.tripped) this._pause('breaker', `${agent.name} 连续失败，已暂停`);
-      this.onEvent({
-        type: 'failure',
-        agentId: agent.id,
-        reason,
-        stalled,
-        detail: adapterResult?.error ?? adapterResult?.stderr?.slice(0, 500) ?? '',
-        health: this.health.snapshot(agent.id),
-      });
+
+      /**
+       * 看门狗在判死那一刻已经发过一条 failure（带"超过 X 秒没有输出"的具体说明）。
+       * 这里再发一条，同一个失败会在界面上显示两次，其中一条还是没有原因的重复。
+       * 所以：stalled 的那一轮不再重复 failure，只保留看门狗那条。
+       */
+      if (!stalledOut) {
+        this.onEvent({
+          type: 'failure',
+          agentId: agent.id,
+          reason,
+          stalled,
+          detail: cleanStderr(adapterResult?.error ?? adapterResult?.stderr ?? ''),
+          health: this.health.snapshot(agent.id),
+        });
+      }
 
       if (tripped.tripped) {
         this.onEvent({
