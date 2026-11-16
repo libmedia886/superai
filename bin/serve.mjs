@@ -18,7 +18,7 @@ import { DEFAULT_DATA_DIR } from '../src/core/config.js';
 import { spawn } from 'node:child_process';
 import { networkInterfaces } from 'node:os';
 import { randomBytes } from 'node:crypto';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 
 const args = process.argv.slice(2);
 const portArg = args.indexOf('--port');
@@ -95,7 +95,16 @@ if (exposed) {
   console.log('如需从其他设备访问，加 --host 0.0.0.0（会自动生成访问令牌）');
 }
 console.log('');
-console.log('按 Ctrl+C 停止。数据保存在 ~/.multiagent-chat（可用 MAROOM_DATA 覆盖）');
+// ★ 打印**绝对路径**，不只是 "~/.multiagent-chat"。
+// 两个人同时起服务时，缩写看不出来谁在用哪份数据——撞上了就是写坏数据。
+const dataDir = process.env.MAROOM_DATA || DEFAULT_DATA_DIR;
+const isDefaultData = !process.env.MAROOM_DATA;
+console.log(`按 Ctrl+C 停止。数据目录：${resolve(dataDir)}`);
+if (isDefaultData) {
+  console.log('⚠️  这是默认数据目录（真实数据）。测试请设 MAROOM_DATA=/tmp/xxx。');
+} else {
+  console.log(`   （由 MAROOM_DATA 指定，非默认目录）`);
+}
 // 网页打不开时最可能的原因是"这个终端关了/进程没了"。
 // 用户看到的第一反应应该是"重跑这条命令"，而不是怀疑软件坏了。
 console.log('');

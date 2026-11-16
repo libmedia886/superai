@@ -24,6 +24,7 @@ export class Store {
     this.toolLog = [];          // 写操作日志（只追加）
     this.actionLog = [];        // 动作执行结果（只追加）
     this.membersCreated = [];   // 成员创建记录（谁加的、为什么）
+    this.loopWarnings = [];     // 循环护栏警告（事后复盘用）
     this._seq = 0;
     this._writeChain = Promise.resolve();
   }
@@ -84,6 +85,12 @@ export class Store {
         this.actionLog.push({
           agentId: ev.agentId, taskId: ev.taskId, label: ev.label,
           ok: ev.ok, reason: ev.reason, detail: ev.detail, at: ev.at,
+        });
+        break;
+      case 'loop.warning':
+        // 安全警告也要留痕：事后要能回答"系统当时警告过没有"
+        this.loopWarnings.push({
+          agentId: ev.agentId, reasons: ev.reasons, stats: ev.stats, at: ev.at,
         });
         break;
       case 'member.created':

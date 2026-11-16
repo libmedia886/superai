@@ -95,3 +95,60 @@ test('快速往复作为辅助信号', () => {
   const r = g.record({ agentId: 'a', at: t0 + 200 });
   assert.ok(r.some((x) => x.kind === 'rapid'));
 });
+
+/* ---------- 警告要落盘（事后能复盘） ---------- */
+
+test('★ 循环警告必须写进事件流，不能只发界面', async () => {
+  const { mkdtemp } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { Store } = await import('../src/core/store.js');
+  const { Room } = await import('../src/core/room.js');
+
+  const dir = await mkdtemp(join(tmpdir(), 'lw-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+
+  // 真实场景：leader 和两个成员轮流说话。
+  // 成员之间不能互相 @（权限规则），所以链条一定经过 leader——
+  // 这正是老板房间里的循环形态：lead → carol → lead → dave → lead → …
+  // 注意：护栏**只警告不拦截**（老板定的"不设硬闸"），
+  // 所以这个环会一直转下去。测试里必须自己设界，否则永远跑不完。
+  let turns = 0;
+  const MAX_TURNS = 12;
+
+  const room = new Room({
+    id: 'r', name: 'r', goal: 't',
+    members: [
+      { id: 'lead', name: 'lead', role: 'leader', backend: 'claude', tier: 'readonly', cwd: '/tmp' },
+      { id: 'b', name: 'b', role: 'member', backend: 'claude', tier: 'readonly', cwd: '/tmp' },
+      { id: 'c', name: 'c', role: 'member', backend: 'claude', tier: 'readonly', cwd: '/tmp' },
+    ],
+    store,
+    resolveAdapter: (agent) => ({
+      run: async () => {
+        turns += 1;
+        // 到了上限就让链条自然断掉（不 @ 任何人）
+        if (turns > MAX_TURNS) return { text: '停了。', reason: 'completed' };
+        return {
+          text: agent.id === 'lead' ? '转给 @b' : '转给 @lead',
+          reason: 'completed',
+        };
+      },
+    }),
+    onEvent: () => {},
+  });
+  room.turnTimeoutMs = 5_000;
+  room.maxRetries = 0;
+
+  await room.humanSay('@lead 开始');
+  await room.drain();
+
+  assert.ok(room.store.loopWarnings.length > 0, '内存里要有警告记录');
+
+  await new Promise((r) => setTimeout(r, 150));
+  const replay = new Store(join(dir, 'room.jsonl'));
+  await replay.load();
+  assert.ok(replay.loopWarnings.length > 0, '重放后仍能查到警告——这才是"事后能复盘"');
+  assert.ok(replay.loopWarnings[0].reasons.length > 0, '要记下具体原因');
+});

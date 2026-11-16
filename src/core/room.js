@@ -1016,14 +1016,25 @@ export class Room {
     }
 
     if (reasons.length) {
-      this.onEvent({
+      const payload = {
         type: 'loop.warning',
         level: 'warn',
         agentId: agent.id,
         reasons,
         stats: this.guard.snapshot(),
         highlightStop: true,
-      });
+      };
+      // ★ 落盘。只发界面的话，事后查记录只能看到"他们聊了 12 轮"，
+      // 查不到"系统当时警告过"——那这个警告就没法复盘，
+      // 也没法回答老板"为什么没人告诉我它在绕圈"。
+      this.store.append({
+        kind: 'loop.warning',
+        agentId: agent.id,
+        reasons: reasons.map((r) => ({ kind: r.kind, text: r.text })),
+        stats: payload.stats,
+        at: Date.now(),
+      }).catch(() => {});
+      this.onEvent(payload);
     }
   }
 }
