@@ -110,7 +110,7 @@ test('清单：文档必须解释 skipped 3（否则读者以为被绕过）', a
   assert.match(doc, /仓库内跑|仓库里单独/, '要给出补跑的方法');
 });
 
-test('★ 差异只在文档/测试时，要点明"运行时一致、是否重启由人判断"', async () => {
+test('★ 差异只在文档/测试时，要点明"运行时一致、是否重启由人判断"', { skip: SKIP }, async () => {
   /**
    * 管理方 2026-11-17 07:54 的判断：线上 v37 只差 docs/ 和 test/，
    * 他**没有重启**——因为当天已因重启打断过一次正在跑的轮次。
@@ -129,7 +129,7 @@ test('★ 差异只在文档/测试时，要点明"运行时一致、是否重�
   assert.match(r.stdout, /由人判断|是否重启由人/, '**不能替人决定是否重启**');
 });
 
-test('★ 差异涉及 src/ 时必须警告"应当重新部署"', async () => {
+test('★ 差异涉及 src/ 时必须警告"应当重新部署"', { skip: SKIP }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vd5-'));
   await exec('bash', ['-c', `git -C ${REPO} archive HEAD | tar -x -C ${dir}`], { timeout: 60_000 });
   await writeFile(join(dir, 'src/core/room.js'), '// tampered\n');
