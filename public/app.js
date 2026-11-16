@@ -313,7 +313,9 @@ function renderStatus() {
   // 「继续」在停止时用来松刹车，在停住时用来接着往下走
   const canContinue = state.stopped || (Boolean(state.paused) && !state.busy && !state.current);
   $('btn-resume').classList.toggle('hidden', !canContinue);
-  $('btn-resume').textContent = state.stopped ? '▶ 继续' : '▶ 接着推进';
+  $('btn-resume').textContent = state.stopped
+    ? '▶ 继续'
+    : (state.paused?.reason === 'interrupted' ? '▶ 接着做完' : '▶ 接着推进');
   $('btn-stop').classList.toggle('hidden', state.stopped);
 }
 
@@ -581,6 +583,7 @@ const PAUSE_LABEL = {
   breaker: '连续失败，暂时停用',
   stopped: '你点了「停止」',
   summary: '总结完毕',
+  interrupted: '被打断（这一轮没做完）',
   error: '出错停住',
   cleared: '已恢复',
 };
@@ -888,6 +891,17 @@ function handle(ev) {
         appendSystemNote(`停在：${PAUSE_LABEL[ev.reason] ?? ev.reason}${ev.detail ? ` · ${ev.detail}` : ''}`, 'warn');
       }
       renderStatus();
+      break;
+
+    case 'cap.continue':
+      // 撞到单轮上限但确实在干活 → 系统自己接着做，必须说出来
+      state.paused = null;
+      appendSystemNote(ev.text ?? '撞到单轮上限，自动接着做');
+      renderStatus();
+      break;
+
+    case 'resumed.turn':
+      appendSystemNote(`${nameOf(ev.agentId)} 接着做上一轮（已输出 ${ev.partialChars ?? 0} 字，不会重做已完成的部分）`);
       break;
 
     case 'continue.kicked':

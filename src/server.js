@@ -18,7 +18,9 @@ import { randomUUID } from 'node:crypto';
 import { DEFAULT_DATA_DIR } from './core/config.js';
 import { RoomManager } from './core/sessions.js';
 import { availableTiers, TIER, TIER_DESC, normalizeTier } from './core/probe.js';
-import { DEFAULT_TURN_TIMEOUT_MS, resolveMemberTimeoutMs, timeoutSource } from './core/room.js';
+import {
+  DEFAULT_TURN_TIMEOUT_MS, MAX_CAP_CONTINUES, resolveMemberTimeoutMs, timeoutSource,
+} from './core/room.js';
 import { planMemberUpdate } from './core/memberSettings.js';
 import { detectTierOverride, EFFORT_HINTS } from './core/extraargs.js';
 import { exportMarkdown } from './core/export.js';
@@ -131,7 +133,7 @@ export async function startServer({
         singleFallback: rooms.singleFallback,
         members: [], history: [], tasks: [], roster: [], registry: [], toolLog: [],
         aiCabTier: 'readonly', maxMembers: 8, overridden: false, stopped: false,
-        headPassiveWake: true, paused: null, turnTimeoutMinutes: 20,
+        headPassiveWake: true, paused: null, turnTimeoutMinutes: 20, maxCapContinues: MAX_CAP_CONTINUES,
       };
     }
     return {
@@ -155,6 +157,9 @@ export async function startServer({
       stopped: Boolean(room.stopped),
       headPassiveWake: room.headPassiveWake !== false,
       turnTimeoutMinutes: Math.round((room.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS) / 60_000),
+      maxCapContinues: MAX_CAP_CONTINUES,
+      // 有被中断的轮次时，界面要把「继续」显示成「接着做完」
+      resumeTarget: room.resumeTarget ? { ...room.resumeTarget } : null,
       // 停顿原因必须随状态一起下发：刷新后"为什么停着"不能变成一个谜
       paused: room.pauseReason ? { ...room.pauseReason } : null,
     };
@@ -220,6 +225,8 @@ export async function startServer({
         const body = await readJson(req);
         const text = String(body.text ?? '').trim();
         if (!text) return json(res, 400, { error: '空消息' });
+        // 人发了新指令，旧的「待续」就不再成立（否则点「接着做完」会回到过期的话题）
+        room.resumeTarget = null;
         if (room.current) {
           // 有人正在说：入队，界面会显示"已排队"
           broadcast({ type: 'notice', level: 'info', text: '有人正在发言，你的消息已排队' });
@@ -253,7 +260,9 @@ export async function startServer({
         //  - 解除「停止」（resumeRoom）
         //  - 或者「接着刚才那条往下走」（continueAfterPause：清暂停原因 + 叫头头）
         if (body.kick) {
-          const r = room.continueAfterPause();
+          // 被打断的轮次优先「接着做」：会话还在，不会重做已完成的部分（CR-036）
+          const resumedTurn = room.resumeInterruptedTurn();
+          const r = resumedTurn.ok ? resumedTurn : room.continueAfterPause();
           room.drain().catch((err) => broadcast({
             type: 'failure', agentId: 'system', reason: 'crashed', detail: String(err),
           }));

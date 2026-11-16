@@ -193,3 +193,153 @@ test('打断时没有在跑的一轮 → 不落空事件（不制造噪音）', 
   await store.flush();
   assert.equal(store.controlLog.filter((c) => c.action === 'interrupt').length, 0);
 });
+
+/* ---------- CR-036：打断之后要能「接着做完」 ---------- */
+
+test('★ 打断 → pauseReason=interrupted + resumeTarget 记下是谁', async () => {
+  const { mkdtemp } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { Room } = await import('../src/core/room.js');
+  const { Store } = await import('../src/core/store.js');
+
+  const dir = await mkdtemp(join(tmpdir(), 'resume-turn-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+  let release;
+  const gate = new Promise((r) => { release = r; });
+
+  const room = new Room({
+    id: 'r', name: 't',
+    members: [{ id: 'a', name: 'a', role: 'leader', backend: 'claude', tier: 'readonly', cwd: dir, aliases: ['a'] }],
+    store,
+    resolveAdapter: () => ({
+      async run({ onEvent, signal }) {
+        onEvent?.({ type: 'meta', sessionId: 's' });
+        onEvent?.({ type: 'text', text: '我正在写第一段', done: false });
+        await Promise.race([gate, new Promise((res) => signal?.addEventListener('abort', res, { once: true }))]);
+        return { text: '我正在写第一段', sessionId: 's', reason: 'interrupted' };
+      },
+    }),
+    onEvent: () => {},
+  });
+
+  await room.humanSay('@a 写报告');
+  const draining = room.drain();
+  await new Promise((r) => setTimeout(r, 40));
+  room.interrupt();
+  release();
+  await draining;
+
+  assert.equal(room.pauseReason?.reason, 'interrupted');
+  assert.match(room.pauseReason.detail, /接着做完/);
+  assert.ok(room.resumeTarget, '要记下被中断的人，否则「继续」不知道找谁');
+  assert.equal(room.resumeTarget.agentId, 'a');
+  assert.ok(room.resumeTarget.partialChars > 0, '已输出的字数要说出来');
+});
+
+test('★ 「接着做完」→ 同一成员真的再跑一轮', async () => {
+  const { mkdtemp } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { Room } = await import('../src/core/room.js');
+  const { Store } = await import('../src/core/store.js');
+
+  const dir = await mkdtemp(join(tmpdir(), 'resume-turn2-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+  const calls = [];
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  let first = true;
+
+  const room = new Room({
+    id: 'r', name: 't',
+    members: [{ id: 'a', name: 'a', role: 'leader', backend: 'claude', tier: 'readonly', cwd: dir, aliases: ['a'] }],
+    store,
+    resolveAdapter: () => ({
+      async run({ onEvent, signal }) {
+        calls.push(agent => agent);
+        onEvent?.({ type: 'meta', sessionId: 's' });
+        if (first) {
+          first = false;
+          await Promise.race([gate, new Promise((res) => signal?.addEventListener('abort', res, { once: true }))]);
+          return { text: '半截', sessionId: 's', reason: 'interrupted' };
+        }
+        onEvent?.({ type: 'text', text: '做完了', done: false });
+        return { text: '做完了', sessionId: 's', reason: 'completed', usage: null };
+      },
+    }),
+    onEvent: () => {},
+  });
+
+  await room.humanSay('@a 写报告');
+  const draining = room.drain();
+  await new Promise((r) => setTimeout(r, 40));
+  room.interrupt();
+  release();
+  await draining;
+
+  const before = calls.length;
+  const r = room.resumeInterruptedTurn();
+  assert.equal(r.ok, true);
+  assert.equal(r.agentId, 'a');
+  assert.equal(room.resumeTarget, null, '取走即清空，不能反复续做同一轮');
+  await room.drain();
+  assert.ok(calls.length > before, '续做必须真的再跑一轮');
+  // 续做跑完后又停住了（它没 @ 任何人）——但停下来是因为"说完了"，
+  // 不能还是 "interrupted"（那会让人以为活还没接上）
+  assert.notEqual(room.pauseReason?.reason, 'interrupted',
+    '续做之后不能再挂着"被打断"的旧原因');
+});
+
+test('没有被中断的轮次时「接着做完」明确报错（不静默失败）', async () => {
+  const { room } = await makeRoom();
+  const r = room.resumeInterruptedTurn();
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /没有/);
+});
+
+test('成功完成会清掉 resumeTarget（否则「接着做完」会回到已经做完的活）', async () => {
+  const { room, store } = await makeRoom();
+  room.resumeTarget = { agentId: 'lead', taskId: null };
+  await room.humanSay('@lead 再说一句');
+  await room.drain();
+  assert.equal(room.resumeTarget, null);
+  assert.ok(store.messages.length > 0);
+});
+
+test('★ 暂停原因要落盘：重启后仍能回答"为什么停着"', async () => {
+  const { mkdtemp } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { Room } = await import('../src/core/room.js');
+  const { Store } = await import('../src/core/store.js');
+
+  const dir = await mkdtemp(join(tmpdir(), 'pause-persist-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+  const room = new Room({
+    id: 'r', name: 't', members: [], store, resolveAdapter: () => ({}), onEvent: () => {},
+  });
+  room._pause('timeout', '跑满 20 分钟被中止');
+  await store.flush();
+
+  // 重启：重新读同一个 jsonl
+  const store2 = new Store(join(dir, 'room.jsonl'));
+  await store2.load();
+  assert.equal(store2.pause?.reason, 'timeout', '暂停原因必须能从事件流恢复');
+  assert.match(store2.pause.detail, /20 分钟/);
+
+  const room2 = new Room({
+    id: 'r', name: 't', members: [], store: store2, resolveAdapter: () => ({}), onEvent: () => {},
+  });
+  assert.equal(room2.pauseReason?.reason, 'timeout', '新 Room 要接上这个原因');
+
+  // 恢复后也要落盘（否则重启又回到旧的暂停状态）
+  room2._clearPause();
+  await store2.flush();
+  const store3 = new Store(join(dir, 'room.jsonl'));
+  await store3.load();
+  assert.equal(store3.pause, null);
+});

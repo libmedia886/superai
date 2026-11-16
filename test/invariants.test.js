@@ -99,9 +99,13 @@ test('清单：CR-035 失败不被"说完了"覆盖', async () => {
   assert.ok(PAUSE_PRIORITY.stopped >= PAUSE_PRIORITY.timeout, '停止是最高优先级');
 });
 
-test('清单：CR-036 停止/打断必须落盘', async () => {
+test('清单：CR-036 停止/打断必须落盘，且能「接着做完」', async () => {
   await mustMention('core/room.js', "kind: 'control'", '人的干预要可追责');
   await mustMention('core/store.js', 'controlLog', '重放后能查到');
+  // 落盘只解决"事后能查"；当场看到的必须是"被打断、可以接着做"
+  await mustMention('core/room.js', 'resumeTarget', '记下被中断的那一轮');
+  await mustMention('core/room.js', 'resumeInterruptedTurn', '「接着做完」的入口');
+  await mustMention('server.js', 'resumeTarget = null', '人发新指令时清掉过期的待续');
 });
 
 test('清单：CR-037 卡死后续做一次', async () => {

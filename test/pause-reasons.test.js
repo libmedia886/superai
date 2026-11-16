@@ -364,3 +364,101 @@ test('优先级：timeout 压得住后到的 no_target，但 stopped 压得住 t
   room._pause('no_target', '说完了');
   assert.equal(room.pauseReason.reason, 'no_target', '清空后低优先级仍可正常使用');
 });
+
+/* ---------------- 撞上限自动续做（管理方的 MGMT 补丁）+ 打断要有原因 ---------------- */
+
+test('★ 撞上限但在干活（有工具调用）→ 自动续做，且不再标"失败"', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'capcont-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+  const events = [];
+  let round = 0;
+
+  const room = new Room({
+    id: 'r', name: '测试',
+    members: [{ id: 'a', name: 'a', role: 'leader', backend: 'claude', tier: 'readonly', cwd: dir, aliases: ['a'] }],
+    store,
+    resolveAdapter: () => ({
+      async run({ onEvent }) {
+        round += 1;
+        onEvent?.({ type: 'meta', sessionId: 's' });
+        onEvent?.({ type: 'tool', tool: 'Bash', command: 'curl …' });
+        if (round === 1) return { text: '', sessionId: 's', reason: 'timeout', usage: null };
+        onEvent?.({ type: 'text', text: '续做完成', done: false });
+        return { text: '续做完成', sessionId: 's', reason: 'completed', usage: null };
+      },
+    }),
+    onEvent: (e) => events.push(e),
+  });
+
+  await room.humanSay('@a 取证');
+  await room.drain();
+
+  const cont = events.find((e) => e.type === 'cap.continue');
+  assert.ok(cont, '撞上限且有工具调用 → 自动续做');
+  assert.equal(cont.toolCalls, 1);
+  assert.equal(round, 2, '第二轮真的跑了');
+  assert.ok(!events.some((e) => e.type === 'room.paused' && e.reason === 'error'),
+    '已经自动续做，就不能再挂"失败"——否则界面和实际状态相反');
+});
+
+test('★ 撞上限但没跑过工具 → 不续做，直接说超时（那是空转）', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'capcont2-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+  const events = [];
+  const room = new Room({
+    id: 'r', name: '测试',
+    members: [{ id: 'a', name: 'a', role: 'leader', backend: 'claude', tier: 'readonly', cwd: dir, aliases: ['a'] }],
+    store,
+    resolveAdapter: () => ({
+      async run({ onEvent }) {
+        onEvent?.({ type: 'meta', sessionId: 's' });
+        return { text: '', sessionId: 's', reason: 'timeout', usage: null };
+      },
+    }),
+    onEvent: (e) => events.push(e),
+  });
+
+  await room.humanSay('@a 想事情');
+  await room.drain();
+
+  assert.ok(!events.some((e) => e.type === 'cap.continue'), '没有工具调用就是空转，不该续做');
+  // 只读档会自动重试，重试后仍空转 → 熔断。两者都是真实原因；
+  // 关键是**绝不能**落到 no_target（"说完了"）。
+  assert.ok(['timeout', 'breaker'].includes(room.pauseReason?.reason),
+    `应是超时或熔断，实际：${room.pauseReason?.reason}`);
+});
+
+test('★ 被打断的轮次必须留下原因（不能显示成"等待人类"）', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'abort-'));
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+  const events = [];
+  let release;
+  const gate = new Promise((r) => { release = r; });
+
+  const room = new Room({
+    id: 'r', name: '测试',
+    members: [{ id: 'a', name: 'a', role: 'leader', backend: 'claude', tier: 'readonly', cwd: dir, aliases: ['a'] }],
+    store,
+    resolveAdapter: () => ({
+      async run({ onEvent, signal }) {
+        onEvent?.({ type: 'meta', sessionId: 's' });
+        await Promise.race([gate, new Promise((res) => signal?.addEventListener('abort', res, { once: true }))]);
+        return { text: '', sessionId: 's', reason: 'interrupted' };
+      },
+    }),
+    onEvent: (e) => events.push(e),
+  });
+
+  await room.humanSay('@a 干活');
+  const draining = room.drain();
+  await new Promise((r) => setTimeout(r, 30));
+  room.interrupt();
+  release();
+  await draining;
+
+  assert.equal(room.pauseReason?.reason, 'interrupted',
+    '打断后不能是 null/等待人类，否则用户不知道这轮被打断了');
+});

@@ -129,3 +129,15 @@ test('★ validateAction 会把同义词就地归一化（下游拿到的就是�
   assert.equal(validateAction(a), null);
   assert.equal(a.status, '完成', '必须写回，否则下游还是拿到「已完成」');
 });
+
+test('★ 状态 + 说明的复合写法能识别，说明写进 note（16:27 真实拒绝事故）', async () => {
+  const { normalizeStatus, statusReason, validateAction } = await import('../src/core/actions.js');
+
+  assert.equal(normalizeStatus('阻塞·需外部渠道'), '阻塞');
+  assert.equal(statusReason('阻塞·需外部渠道'), '需外部渠道');
+
+  const a = { action: 'task.update', id: 'T-001', status: '阻塞·需外部渠道' };
+  assert.equal(validateAction(a), null, '复合写法不该让整条动作被拒');
+  assert.equal(a.status, '阻塞');
+  assert.equal(a.note, '需外部渠道', '后半段是"卡在哪"的唯一线索，必须留下');
+});

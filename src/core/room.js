@@ -59,6 +59,7 @@ export const PAUSE_PRIORITY = {
   timeout: 3,
   breaker: 3,
   stopped: 4,
+  interrupted: 2,
 };
 
 /** 停顿原因 → 人话。状态栏直接显示这个，不要让人猜。 */
@@ -73,6 +74,15 @@ export const DEFAULT_TURN_TIMEOUT_MS = 20 * 60_000;
  * 而且真正的兜底是本轮硬上限，不会变成"永不杀"。
  */
 export const TOOL_FLIGHT_SILENCE_MS = 10 * 60_000;
+
+/**
+ * 撞到单轮上限、但确实在干活 → 最多自动续做几次。
+ *
+ * 「跑得久」不是错误信号，「没有任何产出」才是（那个交给看门狗）。
+ * 实测事故：管理员连跑 30 分钟、17 次工具调用，正在取证，被硬上限一刀切掉。
+ * 但续做次数必须有上限：否则等于取消了硬上限，那才是真失控。
+ */
+export const MAX_CAP_CONTINUES = 2;
 
 /**
  * 解析某个成员本轮实际生效的单轮上限。
@@ -104,6 +114,7 @@ export function timeoutSource(agent) {
 export const PAUSE_LABEL = {
   no_target: '说完了，没点名下一位',
   timeout: '超时被中止（不是说完）',
+  interrupted: '这一轮被中途打断',
   overreach: '@ 了没权限叫的人',
   only_human: '把话交回给老板',
   continue_cap: '自动接力次数到上限',
@@ -195,6 +206,10 @@ export class Room {
     this.turnTimeoutMs = turnTimeoutMs;
     /** 慢启动提示阈值（毫秒）。null = 按硬上限推算；测试可覆盖。 */
     this.slowStartMs = null;
+    /** 被打断的那一轮：供「接着做完」直接续做（CR-036） */
+    this.resumeTarget = null;
+    /** 重启后恢复上次的暂停原因（否则界面说"等待人类"，实际是停在一个原因上） */
+    this.pauseReason = store?.pause ? { ...store.pause } : null;
     /** 只读档的自动重试次数。可写及以上永不自动重试（可能已产生副作用） */
     this.maxRetries = 2;
     this.summaries = new Map(); // agentId -> 最新摘要
@@ -584,6 +599,8 @@ export class Room {
     }
     this.waitingForHuman = true;
     this.pauseReason = { reason, detail: String(detail ?? ''), at: new Date().toISOString() };
+    // 落盘：内存字段活不过重启，重启后"为什么停着"不能变成谜
+    this.store?.append?.({ kind: 'room.pause', reason, detail: this.pauseReason.detail }).catch?.(() => {});
     this.onEvent({ type: 'room.paused', reason, detail: this.pauseReason.detail });
     return this.pauseReason;
   }
@@ -592,6 +609,7 @@ export class Room {
   _clearPause() {
     if (!this.pauseReason) return;
     this.pauseReason = null;
+    this.store?.append?.({ kind: 'room.resume' }).catch?.(() => {});
     this.onEvent({ type: 'room.resumed', reason: 'cleared' });
   }
 
@@ -622,6 +640,34 @@ export class Room {
       });
     }
     return ok;
+  }
+
+  /**
+   * 把被打断的那一轮重新交给同一个人（CR-036）。
+   *
+   * 与 `resumeRoom()` 不同：那个只解「停止」这个总闸，这个是**真的重跑**。
+   * 「继续」在两种停法下含义不同：
+   *   - stopped     → 让房间重新接受消息
+   *   - interrupted → 让被打断的人接着做
+   *
+   * 为什么必须有这一条：@li 打断管理员那一轮后房间静默 19 分钟——
+   * 落盘只解决"事后能查"，他当场看到的是"一片空白"。
+   */
+  resumeInterruptedTurn() {
+    const t = this.resumeTarget;
+    if (!t) return { ok: false, reason: '没有被中断的轮次' };
+    const agent = this.members.find((m) => m.id === t.agentId);
+    if (!agent) return { ok: false, reason: '被中断的成员已不在房间里' };
+    this.resumeTarget = null;
+    this._clearPause();
+    this._enqueue(agent.id, {
+      triggerMsg: { id: `resume-${Date.now()}`, senderId: 'human', body: '（继续被中断的那一轮，接着往下做）' },
+      taskId: t.taskId,
+      source: 'human',
+      resumed: true,
+    });
+    this.onEvent({ type: 'resumed.turn', agentId: agent.id, partialChars: t.partialChars });
+    return { ok: true, agentId: agent.id };
   }
 
   /** 给某个 agent 留一条"下一轮必须看到"的说明（越权、被拒等） */
@@ -753,6 +799,12 @@ export class Room {
     let adapterResult = null;
     /** 本轮工具调用次数：决定"零产出能不能续做"与超时原因的措辞 */
     let rowToolsInTurn = 0;
+    /**
+     * 本轮撞上限后是否已经排了自动续做。
+     * 必须在**重试判定之前**可见：两条路径（撞上限续做 / 失败重试）
+     * 会同时满足同一个超时，重复入队会让这个成员白跑一轮。
+     */
+    let capAutoContinued = false;
     /** 是否已经吐出过第一个 token（正文或思考都算） */
     let sawFirstToken = false;
 
@@ -998,11 +1050,88 @@ export class Room {
       this.onEvent({ type: 'action.results', agentId: agent.id, results });
     }
 
+    const timedOut = adapterResult?.reason === EXIT.TIMEOUT && !aborted;
+    if (timedOut) {
+      this.store.append({
+        kind: 'failure',
+        agentId: agent.id,
+        taskId: job.taskId ?? null,
+        reason: EXIT.TIMEOUT,
+        stalled: stalledOut,
+        durationMs,
+        timeoutMs,
+        toolCalls: rowToolsInTurn,
+        at: Date.now(),
+      }).catch(() => {});
+      /**
+       * 撞上限但确实在干活 → 系统自己接着做。
+       *
+       * 判据与"卡死"不同：这里看的是**这一轮有没有在做事**（有工具调用），
+       * 不是"有没有产出"。没有工具调用还撞满上限，说明它在空转，不该续做。
+       */
+      const capContinues = job.capContinue ?? 0;
+      const canContinue = !stalledOut && rowToolsInTurn > 0 && capContinues < MAX_CAP_CONTINUES;
+      if (canContinue) {
+        capAutoContinued = true;
+        this._enqueue(agent.id, {
+          triggerMsg: {
+            id: `cap-continue-${Date.now()}-${agent.id}`,
+            senderId: 'system',
+            body: '撞到单轮上限，自动续做',
+          },
+          taskId: job.taskId ?? null,
+          source: 'agent',
+          kick: true,
+          capContinue: capContinues + 1,
+        });
+        this._clearPause();
+        this.onEvent({
+          type: 'cap.continue',
+          agentId: agent.id,
+          attempt: capContinues + 1,
+          max: MAX_CAP_CONTINUES,
+          toolCalls: rowToolsInTurn,
+          text: `${agent.name} 跑满 ${Math.round(timeoutMs / 1000)} 秒（本轮 ${rowToolsInTurn} 次工具调用），`
+            + `正在干活，自动接着做（第 ${capContinues + 1}/${MAX_CAP_CONTINUES} 次）`,
+        });
+      } else {
+        this._pause('timeout',
+          `${agent.name} 跑满 ${Math.round(timeoutMs / 1000)} 秒被中止`
+          + `（本轮有 ${rowToolsInTurn} 次工具调用）`
+          + (rowToolsInTurn > 0 && capContinues >= MAX_CAP_CONTINUES
+            ? `。已自动续做 ${MAX_CAP_CONTINUES} 次仍未收尾，不再自动续——请确认它是不是在原地打转。`
+            : '。它可能正在干活——看门狗没有判它卡死，是硬上限到了。'));
+      }
+    }
+
     // 3) 失败不回滚但要让界面看见，并记账到熔断器
     if (aborted) {
       // 人为打断不算 agent 的失败，不该计进熔断
       this.health.touch(agent.id);
+      /**
+       * ★ 打断必须留下「没做完」的痕迹（CR-036 的真实事故）。
+       *
+       * @li 打断管理员那一轮后，房间静默停了 19 分钟：被中断的活没人接手，
+       * `pauseReason` 仍是 null，状态栏一片空白，他只能判断成"卡死"。
+       *
+       * 打断是"砍掉正在进行的工作"，不是"这件事做完了"。所以：
+       *   1. 记下被中断的人，供「接着做完」一键续做；
+       *   2. 状态栏写明是谁、哪一轮被中断；
+       *   3. 会话仍在，续做不会重做已完成的部分。
+       */
+      this.resumeTarget = {
+        agentId: agent.id,
+        taskId: job.taskId ?? null,
+        at: new Date().toISOString(),
+        partialChars: String(body).length,
+      };
+      if (this.queue.length === 0) {
+        this._pause('interrupted',
+          `${agent.name} 的这一轮被打断（已输出 ${String(body).length} 字，未完成）。`
+          + '点「接着做完」让它继续——会话还在，不会重做已完成的部分。');
+      }
     } else if (adapterResult?.reason === EXIT.COMPLETED) {
+      this.resumeTarget = null;
       this.health.success(agent.id);
     } else {
       const reason = adapterResult?.reason ?? 'failed';
@@ -1029,18 +1158,23 @@ export class Room {
         });
       }
 
-      // 自动重试：判据是「有没有可能产生副作用」，不是「有没有权限」。
-      // 零产出且一次工具都没跑 → 磁盘和外部世界都没被碰过，续做安全；
-      // 有工具调用则绝不续做（可能已经写了文件/发了请求）。
-      // 这条区分也顺手修了 write-exec 成员"最容易超时却永不续做"的不对称。
-      const decision = retryDecision({
-        tier: agent.tier,
-        reason,
-        attempt: job.attempt ?? 0,
-        maxAttempts: this.maxRetries,
-        stalled: stalledOut || isStall(adapterResult, durationMs),
-        toolCalls: rowToolsInTurn,
-      });
+      /**
+       * 自动重试。
+       *
+       * ★ 已经排了 cap-continue 就不能再排一次：那是两条独立路径
+       * （撞上限续做 vs 失败重试），同一轮超时会同时满足，
+       * 结果这个成员被入队两次、白跑一轮。测试抓到的就是这个。
+       */
+      const decision = capAutoContinued
+        ? { retry: false, reason: '已安排自动续做' }
+        : retryDecision({
+          tier: agent.tier,
+          reason,
+          attempt: job.attempt ?? 0,
+          maxAttempts: this.maxRetries,
+          stalled: stalledOut || isStall(adapterResult, durationMs),
+          toolCalls: rowToolsInTurn,
+        });
       if (decision.retry) {
         this.onEvent({ type: 'retry', agentId: agent.id, reason: decision.reason });
         this.queue.unshift({ ...job, attempt: (job.attempt ?? 0) + 1 });
@@ -1088,25 +1222,6 @@ export class Room {
      *     重启后无法回答"那次为什么没动静"）
      *  2. 给出 `timeout` 的暂停原因——不能显示成"说完了"
      */
-    const timedOut = adapterResult?.reason === EXIT.TIMEOUT && !aborted;
-    if (timedOut) {
-      this.store.append({
-        kind: 'failure',
-        agentId: agent.id,
-        taskId: job.taskId ?? null,
-        reason: EXIT.TIMEOUT,
-        stalled: stalledOut,
-        durationMs,
-        timeoutMs,
-        toolCalls: rowToolsInTurn,
-        at: Date.now(),
-      }).catch(() => {});
-      this._pause('timeout',
-        `${agent.name} 跑满 ${Math.round(timeoutMs / 1000)} 秒被中止`
-        + `（本轮有 ${rowToolsInTurn} 次工具调用）`
-        + '。它可能正在干活——看门狗没有判它卡死，是硬上限到了。');
-    }
-
     /**
      * 失败的一轮不进接力。
      *
@@ -1120,7 +1235,15 @@ export class Room {
       && adapterResult?.reason !== EXIT.COMPLETED
       && adapterResult?.reason !== 'interrupted';
 
-    if (failedTurn && !job.passive) {
+    /**
+     * 已经决定"自动续做"的轮次，不允许再被写成失败。
+     *
+     * 两者是不同的判断：失败 = 这轮白跑了；撞上限但自动续做 = 这一轮被打断、
+     * 下一轮接着做。如果续做之后还挂一条"本轮失败（timeout）"，状态栏会和
+     * 实际状态相反：房间里明明已经有人在接着干，界面却写着失败。
+     */
+    // 超时已经有更精确的原因了（"跑满 N 秒" vs 泛泛的"失败"），不要覆盖成 error
+    if (failedTurn && !job.passive && !capAutoContinued && !timedOut) {
       // 失败也要有原因，且这个原因优先级高于任何"没点名下一位"
       this._pause('error', `${agent.name} 本轮失败（${adapterResult?.reason ?? 'unknown'}）`
         + `，耗时 ${Math.round(durationMs / 1000)} 秒、工具调用 ${rowToolsInTurn} 次。`

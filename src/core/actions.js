@@ -157,10 +157,31 @@ export function normalizeStatus(raw) {
   // 去掉尾部标点/表情，再查一次（"已完成！" / "done."）
   const stripped = String(raw).trim().replace(/[。.!！,，;；~\s]+$/g, '');
   if (TASK_STATUSES.has(stripped)) return stripped;
-  return STATUS_SYNONYMS.get(String(raw).trim())
+  const hit = STATUS_SYNONYMS.get(String(raw).trim())
     ?? STATUS_SYNONYMS.get(stripped)
-    ?? STATUS_SYNONYMS.get(t)
-    ?? null;
+    ?? STATUS_SYNONYMS.get(t);
+  if (hit) return hit;
+
+  /**
+   * 状态 + 说明 的复合写法：「阻塞·需外部渠道」「完成（待老板确认）」。
+   *
+   * 实测（16:27 房间记录）：管理员写它 → 整条动作被拒 → 任务停在待办、无人做。
+   * 模型把「状态」和「为什么」写在一起是有益表达，不该因格式丢掉：
+   * 前半段当状态，后半段当 note（那是"卡在哪"的唯一线索）。
+   */
+  const head = String(raw).trim().match(/^([^·:：,，\s（(]{1,6})/);
+  if (head) {
+    const first = STATUS_SYNONYMS.get(head[1]) ?? (TASK_STATUSES.has(head[1]) ? head[1] : null);
+    if (first) return first;
+  }
+  return null;
+}
+
+/** 从「阻塞·需外部渠道」取出后半段说明；没有则 null */
+export function statusReason(raw) {
+  const s = String(raw ?? '').trim();
+  const m = s.match(/^[^·:：,，\s（(]{1,6}\s*[·:：,，]\s*(.+)$/);
+  return m ? m[1].trim() : null;
 }
 
 /** 校验单个动作的字段，返回 null 表示合法 */
@@ -189,7 +210,10 @@ export function validateAction(a) {
         return `非法状态「${a.status}」。合法值只有这五个：${[...TASK_STATUSES].join(' / ')}`
           + '（"已完成/done/finished"这类同义词会自动归一化，不用你自己翻译）';
       }
+      const extra = statusReason(a.status);
       a.status = normalized;
+      // 复合写法里的原因写进 note：它是"卡在哪"的唯一线索
+      if (extra && a.note == null) a.note = extra;
     }
     if (a.assignee != null && typeof a.assignee !== 'string') return 'assignee 必须是成员标识';
     if (a.status == null && a.assignee == null && a.note == null) return 'task.update 没有任何要改的字段';

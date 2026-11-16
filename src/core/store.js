@@ -26,6 +26,8 @@ export class Store {
     this.membersCreated = [];   // 成员创建记录（谁加的、为什么）
     this.memberAudit = [];      // 成员变更/删除（before → after），事后追责用
     this.controlLog = [];       // 人的干预（停止/打断）：谁、何时、丢了几条
+    /** 当前暂停原因，从事件流回放（重启后仍能回答"为什么停"） */
+    this.pause = null;
     this.loopWarnings = [];     // 循环护栏警告（事后复盘用）
     this._seq = 0;
     this._writeChain = Promise.resolve();
@@ -120,6 +122,13 @@ export class Store {
         this.membersCreated.push({
           member: ev.member, createdBy: ev.createdBy, reason: ev.reason, at: ev.at,
         });
+        break;
+      case 'room.pause':
+        // 暂停原因也要落盘：内存字段活不过重启，重启后"为什么停着"就成谜了
+        this.pause = { reason: ev.reason ?? null, detail: ev.detail ?? '', at: ev.at ?? null };
+        break;
+      case 'room.resume':
+        this.pause = null;
         break;
       case 'control':
         // 人工干预必须可追责：事后翻 jsonl 要能回答"谁停的、打断了谁"
