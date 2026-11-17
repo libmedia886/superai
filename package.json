@@ -17,7 +17,8 @@
     "smoke": "node scripts/smoke.mjs",
     "verify-deploy": "bash scripts/verify-deploy.sh",
     "test:deploy": "bash scripts/verify-deploy.sh",
-    "check:exitcode": "bash scripts/check-exitcode-usage.sh"
+    "check:exitcode": "bash scripts/check-exitcode-usage.sh",
+    "pretest": "bash scripts/check-exitcode-usage.sh"
   },
   "files": [
     "bin/",

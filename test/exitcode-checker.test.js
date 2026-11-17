@@ -22,6 +22,9 @@ import { promisify } from 'node:util';
 
 const exec = promisify(execFile);
 const REPO = fileURLToPath(new URL('..', import.meta.url));
+
+/** 在 npm 包里没有 node_modules/npm 环境，跳过依赖 npm 的那条 */
+const SKIP_NO_GIT = false;
 const CHECKER = fileURLToPath(new URL('../scripts/check-exitcode-usage.sh', import.meta.url));
 
 const runChecker = async () => {
@@ -83,4 +86,39 @@ test('检查器只扫可执行代码，不扫文档（文档里的反例是教�
   assert.match(src, /for f in scripts\/\*\.sh scripts\/\*\.mjs/,
     '只扫脚本，不扫 docs —— 否则会把文档里的正确示范当成错误');
   assert.doesNotMatch(src, /for f in docs\//);
+});
+
+test('★ 检查器接进了 pretest（npm test 会先跑它）', async () => {
+  /**
+   * 管理方 2026-11-17 12:19 的建议：「需要记着跑的检查，最终会被忘掉」。
+   * 他在这条上**第三次**踩同一个坑（用 `| tail` 测检查器的退出码）。
+   */
+  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(pkg.scripts.pretest, 'bash scripts/check-exitcode-usage.sh',
+    'pretest 必须跑检查器 —— 否则它就是个"需要记着跑"的检查');
+  assert.ok(pkg.scripts['check:exitcode'], '也要保留独立命令（临时单独跑）');
+});
+
+test('★ pretest 真的会拦住违规：npm test 必须失败', { skip: SKIP_NO_GIT }, async () => {
+  /**
+   * 反证：塞一个违规脚本进去，`npm test` 必须非 0 退出。
+   * ⚠️ 量退出码时**不能接管道**（`npm test | head` 拿到的是 head 的码）——
+   *    我刚差点又犯这个错，正好被这个检查器自己抓到。
+   */
+  const probe = join(REPO, 'scripts', '_probe_pretest.sh');
+  await writeFile(probe, '#!/bin/bash\nls | tail -3\necho "code=$?"\n');
+  try {
+    // 直接跑 pretest（而不是 npm test）——
+    // npm test 会跑全部测试、其中包括本条，形成嵌套；虽然 probe
+    // 会让 pretest 立刻失败从而不会死循环，但没必要冒这个险。
+    let code = 0;
+    try {
+      await exec('npm', ['run', 'pretest'], { timeout: 60_000, cwd: REPO });
+    } catch (err) {
+      code = err.code ?? -1;
+    }
+    assert.notEqual(code, 0, '有违规时 pretest 必须失败');
+  } finally {
+    await rm(probe, { force: true });
+  }
 });
