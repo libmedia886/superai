@@ -17,7 +17,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
@@ -40,14 +40,15 @@ const hasGit = async () => {
 };
 const SKIP = (await hasGit()) ? false : '无 .git（解包产物里跳过：本测试测的是仓库内的核对脚本）';
 
-const runScript = async (target) => {
+const runScriptIn = async (scriptPath, args = []) => {
   try {
-    const r = await exec('bash', [SCRIPT, target], { timeout: 60_000 });
-    return { code: 0, stdout: r.stdout };
+    const r = await exec('bash', [scriptPath, ...args], { timeout: 60_000 });
+    return { code: 0, stdout: r.stdout, stderr: r.stderr };
   } catch (err) {
-    return { code: err.code ?? -1, stdout: err.stdout ?? '' };
+    return { code: err.code ?? -1, stdout: err.stdout ?? '', stderr: err.stderr ?? '' };
   }
 };
+const runScript = async (target) => runScriptIn(SCRIPT, [target]);
 
 test('★ 部署目录内容不同 → 必须报"内容不同"（不能漏报）', { skip: SKIP }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vd-'));
@@ -141,4 +142,24 @@ test('★ 差异涉及 src/ 时必须警告"应当重新部署"', { skip: SKIP }
   assert.equal(r.code, 1);
   assert.match(r.stdout, /涉及运行时文件|应当重新部署/, '运行时文件变了就得重新部署');
   assert.doesNotMatch(r.stdout, /可以继续运行当前版本/, '不能说"可以继续"——行为可能已经不同');
+});
+
+test('★ 在没有 .git 的地方跑（比如部署目录）→ 干净拒绝，不能输出一堆 fatal', async () => {
+  /**
+   * 管理方 09:51 指出：脚本靠 `git -C "$REPO" archive HEAD` 取基线，
+   * 所以**只能在仓库内运行**。在部署目录里跑会输出一堆 `fatal:` 然后继续，
+   * 给出一个误导性的"核对结果"——**比直接报错更糟**。
+   */
+  const dir = await mkdtemp(join(tmpdir(), 'vd-nogit-'));
+  await mkdir(join(dir, 'scripts'), { recursive: true });
+  const src = await readFile(SCRIPT, 'utf8');
+  const copy = join(dir, 'scripts', 'verify-deploy.sh');
+  await writeFile(copy, src);
+  await chmod(copy, 0o755);
+
+  const r = await runScriptIn(copy, ['..']);
+  assert.equal(r.code, 2, '应当干净地 exit 2');
+  assert.match(r.stdout + r.stderr, /必须在.*仓库内.*运行/, '要说清是环境不对');
+  assert.doesNotMatch(r.stdout + r.stderr, /fatal: 不是 Git 仓库/, '不能把 git 的原始报错甩给用户');
+  assert.doesNotMatch(r.stdout, /结论：/, '不能给出误导性的"核对结论"');
 });

@@ -9,6 +9,11 @@
 #
 # **判据必须是"enumerable 全集"，不是"我记得要查的目录"** ——
 # 与今天所有白名单/黑名单的教训同源：列举会漏，全集不会。
+#
+# WARNING: **只能在仓库内运行**。它靠 `git -C "$REPO" archive HEAD` 取基线，
+#   而部署目录里没有 .git。在部署目录里跑会输出一堆 fatal 然后继续跑
+#   （比直接报错更糟）—— 那不是脚本坏了，是环境不对。
+#   正确做法：cd <仓库> && bash scripts/verify-deploy.sh <部署目录>
 
 set -u
 TARGET="${1:-}"
@@ -30,6 +35,19 @@ fi
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+
+# 先确认这里真有 .git —— 否则输出会是一堆 fatal 加一个误导性的"核对结果"
+if ! git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; then
+  cat >&2 <<'NOGIT'
+错误：这个脚本必须在**仓库内**运行（它要用 git archive HEAD 取基线）。
+      部署目录里没有 .git，所以在那里跑会失败 —— 那不是脚本坏了。
+
+正确用法：
+  cd <仓库> && bash scripts/verify-deploy.sh <部署目录>
+  npm run verify-deploy -- <部署目录>      # 同样必须在仓库内跑
+NOGIT
+  exit 2
+fi
 
 # 用 git archive 导出 HEAD 的完整内容（不受 package.json "files" 白名单影响）
 git -C "$REPO" archive HEAD | tar -x -C "$TMP"

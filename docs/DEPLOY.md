@@ -53,6 +53,18 @@ curl -s http://127.0.0.1:4340/api/health
 curl -s http://127.0.0.1:4340/api/rooms
 ```
 
+## `verify-deploy.sh` 只能在仓库内运行
+
+它靠 `git -C <脚本所在仓库> archive HEAD` 取基线，**部署目录里没有 `.git`**。
+
+```bash
+cd <仓库> && bash scripts/verify-deploy.sh <部署目录>   # ✅
+cd <部署目录> && bash scripts/verify-deploy.sh .        # ❌ 会干净地 exit 2
+```
+
+在部署目录里跑时，现在会直接给一句人话（"必须在仓库内运行"）并 exit 2 ——
+**不会再输出一堆 `fatal:` 后继续跑**。后者比报错更糟：它会给出一个误导性的核对结论。
+
 ## `verify-deploy.sh` 的判据
 
 它用 `git archive HEAD` 导出**全集**，与目标目录逐文件比 —— **不列举目录**。
