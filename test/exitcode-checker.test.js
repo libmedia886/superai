@@ -14,7 +14,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
@@ -121,4 +121,30 @@ test('★ pretest 真的会拦住违规：npm test 必须失败', { skip: SKIP_N
   } finally {
     await rm(probe, { force: true });
   }
+});
+
+test('★ 复制到别处跑 → 干净拒绝，不能"看起来通过"', async () => {
+  /**
+   * 管理方 2026-11-17 14:03 的实测：他把脚本复制到 /tmp 跑，
+   * 结果"没有违规"——因为扫描范围变成了 /tmp 的上层目录。
+   * **看起来像通过，实际什么都没扫。** 这和 verify-deploy.sh 是同一类前提。
+   */
+  const dir = await mkdtemp(join(tmpdir(), 'ck-norepo-'));
+  const src = await readFile(CHECKER, 'utf8');
+  const copy = join(dir, 'check.sh');
+  await writeFile(copy, src);
+  await chmod(copy, 0o755);
+
+  let code = 0; let out = '';
+  try {
+    const r = await exec('bash', [copy], { timeout: 20_000, cwd: dir });
+    out = r.stdout + r.stderr;
+  } catch (err) {
+    code = err.code ?? -1;
+    out = (err.stdout ?? '') + (err.stderr ?? '');
+  }
+
+  assert.equal(code, 2, '必须 exit 2，不能返回 0');
+  assert.match(out, /必须在.*仓库内.*运行/, '要说清前提');
+  assert.doesNotMatch(out, /没有发现/, '**绝不能报告"没有违规"**——那是假通过');
 });

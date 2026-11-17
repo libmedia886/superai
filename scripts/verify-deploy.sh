@@ -10,7 +10,7 @@
 # **判据必须是"enumerable 全集"，不是"我记得要查的目录"** ——
 # 与今天所有白名单/黑名单的教训同源：列举会漏，全集不会。
 #
-# WARNING: **只能在仓库内运行**。它靠 `git -C "$REPO" archive HEAD` 取基线，
+# WARNING: **只能在仓库内运行**，扫描范围 = 本仓库 HEAD 的全集。它靠 `git -C "$REPO" archive HEAD` 取基线，
 #   而部署目录里没有 .git。在部署目录里跑会输出一堆 fatal 然后继续跑
 #   （比直接报错更糟）—— 那不是脚本坏了，是环境不对。
 #   正确做法：cd <仓库> && bash scripts/verify-deploy.sh <部署目录>

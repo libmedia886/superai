@@ -7,9 +7,31 @@
 #   `bash verify-deploy.sh … | tail -3; echo $?` → 拿到的是 tail 的 0，差点判定"拒绝逻辑失效"。
 # 这是今天最反复的一类错误：**测量方式本身没被验证**。
 
+#
+# 前提：**必须在仓库内运行**。它靠 `dirname $0/..` 定位扫描范围，
+#   复制到别处跑会去扫"那个位置的上一层"，然后报告"没有违规"——
+#   看起来像通过，实际什么都没扫。**沉默的假通过比报错糟**（和 verify-deploy 同一类前提）。
+
 set -u
 FILE_SHOWN=""
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
+
+# 先确认这真是本仓库：有 package.json 且 scripts/ 里至少有本脚本
+if [ ! -f "$REPO/package.json" ] || [ ! -d "$REPO/scripts" ]; then
+  cat >&2 <<'NOREPO'
+错误：这个脚本必须在**仓库内**运行。
+
+  它靠 dirname $0/.. 定位扫描范围（scripts/*.sh *.mjs）。
+  复制到别处跑会去扫"那个位置的上一层"，然后报告"没有违规"——
+  **看起来像通过，实际什么都没扫**。
+
+正确用法：
+  cd <仓库> && bash scripts/check-exitcode-usage.sh
+  npm run check:exitcode        # 同样必须在仓库内
+NOREPO
+  exit 2
+fi
+
 cd "$REPO" || exit 2
 
 BAD=0
