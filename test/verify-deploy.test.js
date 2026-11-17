@@ -96,6 +96,8 @@ test('清单：部署流程文档存在，且写明「核对是硬门槛」', as
   assert.match(doc, /exit=1 不等于必须重启/, '必须说明 exit=1 不等于必须重启');
   assert.match(doc, /先看差的是什么/, '必须说明要先看差异文件类型');
   assert.match(doc, /运行时/, '必须区分运行时文件与文档/工具');
+  assert.match(doc, /不重启，也要让部署目录追上 HEAD/, '必须说明"不重启也要同步文件"');
+  assert.match(doc, /不变量/, '要讲清为什么——否则下次分不清差异是新旧还是遗漏');
   assert.match(doc, /部署前/, '要有部署前核对');
   assert.match(doc, /部署后/, '要有部署后核对（核对进程 cwd）');
   assert.match(doc, /PIPESTATUS|管道会吃掉退出码/, '要提醒管道会吃掉退出码（管理方踩过）');
