@@ -1,0 +1,86 @@
+/**
+ * 「验证退出码时不能接管道」——今天最反复的一类错误。
+ *
+ * 管理方 2026-11-17 10:19 **第二次**踩同一个坑：
+ *   `bash verify-deploy.sh … | tail -3; echo $?` → 拿到的是 tail 的 0，
+ *   差点判定"拒绝逻辑失效"。
+ *
+ * 这和今天的「旁路测试」「列举会漏」「注释比代码自信」是同源：
+ * **测量方式本身没被验证，结论就不可信。**
+ *
+ * 所以加一个静态检查器，扫仓库里的脚本代码。
+ */
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { promisify } from 'node:util';
+
+const exec = promisify(execFile);
+const REPO = fileURLToPath(new URL('..', import.meta.url));
+const CHECKER = fileURLToPath(new URL('../scripts/check-exitcode-usage.sh', import.meta.url));
+
+const runChecker = async () => {
+  try {
+    const r = await exec('bash', [CHECKER], { timeout: 30_000, cwd: REPO });
+    return { code: 0, stdout: r.stdout };
+  } catch (err) {
+    return { code: err.code ?? -1, stdout: err.stdout ?? '' };
+  }
+};
+
+test('★ 当前仓库没有「管道 + $?」的写法', async () => {
+  const r = await runChecker();
+  assert.equal(r.code, 0, `发现违规：\n${r.stdout}`);
+});
+
+test('★ 检查器必须能抓到真实的违规（反证）', async () => {
+  /**
+   * 一个抓不到东西的检查器等于没有。这里塞一个真实的反例进去：
+   * 管道和 `$?` **不在同一行**（实战写法就是这样），
+   * 只看同一行的实现会漏掉它 —— 我第一版就是这么写的。
+   */
+  const bad = join(REPO, 'scripts', '_bad_exitcode_probe.sh');
+  await writeFile(bad, [
+    '#!/bin/bash',
+    'bash scripts/verify-deploy.sh /tmp | tail -3',
+    'echo "exit=$?"',
+  ].join('\n') + '\n');
+
+  try {
+    const r = await runChecker();
+    assert.equal(r.code, 1, '必须报错');
+    assert.match(r.stdout, /_bad_exitcode_probe\.sh/, '要点名文件');
+    assert.match(r.stdout, /line 3/, '要指出是读了 $? 的那一行');
+  } finally {
+    await rm(bad, { force: true });
+  }
+});
+
+test('★ 检查器不得误报正常的管道用法', async () => {
+  const ok = join(REPO, 'scripts', '_ok_pipe_probe.sh');
+  await writeFile(ok, [
+    '#!/bin/bash',
+    '# 注释里提到 $? 和管道不算违规',
+    'ls | head -3',
+    'echo done',
+    'code=${PIPESTATUS[0]}',
+  ].join('\n') + '\n');
+  try {
+    const r = await runChecker();
+    assert.equal(r.code, 0, `误报了正常用法：\n${r.stdout}`);
+  } finally {
+    await rm(ok, { force: true });
+  }
+});
+
+test('检查器只扫可执行代码，不扫文档（文档里的反例是教学）', async () => {
+  const src = await readFile(CHECKER, 'utf8');
+  assert.match(src, /for f in scripts\/\*\.sh scripts\/\*\.mjs/,
+    '只扫脚本，不扫 docs —— 否则会把文档里的正确示范当成错误');
+  assert.doesNotMatch(src, /for f in docs\//);
+});

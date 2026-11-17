@@ -162,6 +162,15 @@ bash scripts/verify-deploy.sh <部署目录>    # 现在必须是 exit=0
    `bash verify-deploy.sh <dir> | tail` → `$?` 是 `tail` 的码，永远 0。
    测退出码时不要接管道，或者用 `${PIPESTATUS[0]}`。
 
+   这类错误有人踩过两次（同一个人、同一原因），所以加了静态检查：
+
+   ```bash
+   npm run check:exitcode      # 扫 scripts/*.sh *.mjs，找「管道 + $?」
+   ```
+
+   注意它**只扫可执行代码，不扫文档** —— 文档里写「`cmd | tail` → $? 是 tail 的码」
+   是在教学，不是在犯这个错。
+
 2. **不要 `pkill node`。**
    会误伤另一个会话正在跑的服务。按 PID 停。
 
