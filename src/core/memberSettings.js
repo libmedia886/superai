@@ -55,10 +55,18 @@ export function planMemberUpdate({ member, patch = {}, members = [], confirmOver
     next.sessionId = null;
     next.sessionReset = true;
 
-    // 档位要重新校验：codex 没有 write-ask，claude 没有"无工具"以外的差别
-    const wanted = normalizeTier(backend, next.tier ?? TIER.READONLY);
+    // 档位要重新校验：不同后端支持的档位集合不同（如 codex/agy 无 readonly 与 write-ask）
+    const prevTier = next.tier ?? TIER.READONLY;
+    const wanted = normalizeTier(backend, prevTier);
     if (!tiers.includes(wanted)) {
-      next.tier = backend === 'codex' ? TIER.READ : TIER.READONLY;
+      if (prevTier === TIER.FULL && tiers.includes(TIER.FULL)) {
+        next.tier = TIER.FULL;
+      } else {
+        next.tier = (backend === 'codex' || backend === 'agy') ? TIER.READ : TIER.READONLY;
+      }
+      changed.push('tier');
+    } else if (wanted !== next.tier) {
+      next.tier = wanted;
       changed.push('tier');
     } else {
       next.tier = wanted;
@@ -241,21 +249,22 @@ export function planMemberUpdate({ member, patch = {}, members = [], confirmOver
   next.overridesTier = detectTierOverride(next.backend, next.extraArgs ?? []);
 
   /**
-   * ★ 命令白名单只对「可写+执行」档有意义。
+   * ★ 命令白名单只对「可写+执行」或「完全开放」档允许保留。
    *
    * 别的档位根本不给 Bash 工具（`tierArgs` 里 `write` 只给 Read,Write,Edit），
    * 于是 `allowedCommands` 会变成一个**看起来配好、实际不生效**的状态：
    * 界面勾着「允许联网查资料」，成员却一条命令都跑不了——又一种"界面与事实不符"。
+   * （完全开放档本身已放行全部命令，允许保留清单以便切回 write-exec 时不丢配置。）
    *
    * 以前面那种"两处各算一次迟早分叉"的教训，这里不让它存在：
    * 存档时直接拒绝，并说清该改成哪一档。
    */
   const nextCmds = next.allowedCommands ?? [];
-  if (nextCmds.length && next.tier !== TIER.WRITE_EXEC) {
+  if (nextCmds.length && next.tier !== TIER.WRITE_EXEC && next.tier !== TIER.FULL) {
     return {
       ok: false,
-      reason: `「允许执行的命令 / 联网查询」只在「可写+执行」档生效，当前档位是「${next.tier}」。`
-        + '要么把档位改成「可写+执行」，要么清空命令清单——留着不会生效。',
+      reason: `「允许执行的命令 / 联网查询」只在「可写+执行」档生效（完全开放档已默认放行全部命令），当前档位是「${next.tier}」。`
+        + '要么把档位改成「可写+执行」或「完全开放」，要么清空命令清单——留着不会生效。',
     };
   }
 

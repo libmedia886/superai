@@ -41,6 +41,15 @@ export function permissionConfig(tier) {
   const deny = 'deny';
   const allow = 'allow';
 
+  if (tier === 'full') {
+    // 完全开放档：有意放行全部内置工具、联网与外部目录（不走受控目录白名单）
+    return {
+      read: allow, edit: allow, glob: allow, grep: allow, list: allow,
+      bash: allow, task: allow, external_directory: allow,
+      webfetch: allow, skill: allow, todowrite: allow, websearch: allow, lsp: allow,
+    };
+  }
+
   /**
    * 可读档：读/搜/列目录放行，写与命令全禁。
    *
@@ -106,8 +115,10 @@ export class OpencodeAdapter extends AgentAdapter {
     const tier = this.config.tier ?? 'readonly';
     const permission = permissionConfig(tier);
     const shared = this.config.sharedDir;
-    const canUseFiles = tier && tier !== 'readonly';
-    if (shared && canUseFiles) {
+    // full 档本身已放开外部目录，不要被 sharedDir 的受限白名单反过来收窄；
+    // read / write / write-exec 保持精确路径白名单，readonly 不放行任何外部目录。
+    const canUseScopedShared = tier && tier !== 'readonly' && tier !== 'full';
+    if (shared && canUseScopedShared) {
       const sharedRoot = String(shared).replace(/\/+$/, '');
       permission.external_directory = {
         '*': 'deny',
@@ -123,6 +134,7 @@ export class OpencodeAdapter extends AgentAdapter {
 
   #args(cwd, sessionId) {
     const args = ['run', '--format', 'json', '--dir', cwd];
+    if (this.config.tier === 'full') args.push('--auto');
     if (sessionId) args.push('-s', sessionId);
     if (this.config.agent) args.push('--agent', this.config.agent);
     // 共享目录：opencode 用 --dir 只能有一个，共享区靠 opencode.json 的
@@ -132,6 +144,11 @@ export class OpencodeAdapter extends AgentAdapter {
     // 附加参数放最后：让用户能盖过上面的默认值
     args.push(...(this.config.extraArgs ?? []));
     return args;
+  }
+
+  /** 拼装命令行参数（便于单测检查各档位与模型参数） */
+  buildArgs({ cwd = '.', sessionId = null } = {}) {
+    return this.#args(cwd, sessionId);
   }
 
   async run({ prompt, cwd, sessionId, timeoutMs = DEFAULT_TIMEOUT_MS, onEvent, signal = null }) {
@@ -263,7 +280,11 @@ export class OpencodeAdapter extends AgentAdapter {
     await this.prepare(cwd);
     const res = await runJsonCli({
       command: this.config.bin || 'opencode',
-      args: ['run', '--format', 'json', '--dir', cwd],
+      args: [
+        'run', '--format', 'json', '--dir', cwd,
+        ...(this.config.tier === 'full' ? ['--auto'] : []),
+        ...modelArgs('opencode', this.config.model),
+      ],
       cwd,
       backend: 'opencode',
       forbiddenRoots: this.config.forbiddenRoots ?? [],

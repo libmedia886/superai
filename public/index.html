@@ -3,149 +3,276 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>多 AI 协作房间</title>
+<title>SuperAI · 多 AI 协作工作台</title>
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 <div id="app" class="app">
 
-  <!-- 左栏：成员与角色 -->
-  <aside class="sidebar">
+  <!-- 左栏：房间、成员与设置 -->
+  <aside id="sidebar" class="sidebar">
     <div class="brand">
-      <span class="dot"></span>
-      <span id="room-name">房间</span>
-      <button class="mini-btn" id="btn-rooms" title="房间列表（新建 / 重命名 / 删除）">⇄</button>
-    </div>
-
-    <!-- 房间列表放在左栏（不另加顶部下拉）：点一个就切过去 -->
-    <div class="section-title">
-      房间
-      <button class="mini-btn" id="btn-new-room" title="新建房间">+</button>
-    </div>
-    <ul id="room-list" class="room-list"></ul>
-
-    <div class="section-title">
-      成员
-      <button class="mini-btn" id="btn-add-member" title="添加成员">+</button>
-    </div>
-    <ul id="member-list" class="member-list"></ul>
-    <!-- 空房间：显眼入口。老板的用法是"先有头头，再让头头造人" -->
-    <button id="btn-first-member" class="first-member hidden">
-      <span class="plus">＋</span>
-      <span>
-        <b>添加第一个成员</b>
-        <small>第一个成员会自动成为「头头」</small>
+      <span class="brand-mark" aria-hidden="true">
+        <span class="dot" id="conn-dot"></span>
       </span>
-    </button>
-
-    <div class="section-title">名册</div>
-    <ul id="roster-list" class="roster-list"></ul>
-
-    <div class="section-title">
-      仓库
-      <button class="mini-btn" id="btn-add-repo" title="登记仓库">+</button>
-    </div>
-    <ul id="repo-list" class="repo-list"></ul>
-
-    <div class="cabtier-box">
-      <label for="cabtier">AI 创建成员的最高权限</label>
-      <select id="cabtier" class="cabtier-select">
-        <option value="readonly">只读（无工具，默认）</option>
-        <option value="read">可读（看文件不改）</option>
-        <option value="write">可写</option>
-        <option value="write-exec">可写+执行</option>
-      </select>
-      <div class="cabtier-hint">头头自己加人时，新成员的权限不会超过这一档。<br>只有你能改这个设置。</div>
+      <div class="brand-info">
+        <span id="room-name" class="brand-name">房间</span>
+        <span class="brand-sub">SuperAI Workbench</span>
+      </div>
+      <button class="icon-mini" id="btn-rooms" title="房间管理（新建 / 重命名 / 删除）" aria-label="房间管理">⇄</button>
     </div>
 
-    <div class="cabtier-box">
-      <label for="room-timeout">单轮最长运行（分钟）</label>
-      <input id="room-timeout" class="cabtier-select" type="number" min="1" max="120" placeholder="默认 20">
-      <div class="cabtier-hint">这是「防无限跑」的上限。卡死另由看门狗判断（90 秒无输出）。<br>改完下一轮立即生效。</div>
-    </div>
+    <!-- 房间列表 -->
+    <section class="sb-block">
+      <div class="section-title">
+        <span>房间</span>
+        <button class="mini-btn" id="btn-new-room" title="新建房间" aria-label="新建房间">＋</button>
+      </div>
+      <ul id="room-list" class="room-list"></ul>
+    </section>
 
-    <div class="cabtier-box">
-      <label class="switch-row" for="passive-wake">
-        <input type="checkbox" id="passive-wake" checked>
-        <span>成员不 @ 发言时叫醒头头</span>
-      </label>
-      <div class="cabtier-hint">头头可以回，也可以不回。<br>关掉更省 token。</div>
-    </div>
+    <!-- 成员列表 -->
+    <section class="sb-block">
+      <div class="section-title">
+        <span>成员 <em id="member-count" class="sec-count">0</em></span>
+        <button class="add-member-btn" id="btn-add-member" title="添加新成员">＋ 添加成员</button>
+      </div>
+      <ul id="member-list" class="member-list"></ul>
+      <!-- 空房间：显眼入口。先有头头，再让头头或人加人 -->
+      <button id="btn-first-member" class="first-member hidden" type="button">
+        <span class="plus">＋</span>
+        <span>
+          <b>添加第一个成员</b>
+          <small>第一个成员会自动成为「头头」</small>
+        </span>
+      </button>
+    </section>
 
+    <!-- 房间设置（可折叠，保持清爽） -->
+    <details class="sb-collapsible" open>
+      <summary class="section-title collapsible-head">
+        <span>房间设置</span>
+        <span class="chevron" aria-hidden="true">▾</span>
+      </summary>
+      <div class="settings-stack">
+        <div class="setting-card">
+          <label class="setting-label" for="cabtier">AI 创建成员的最高权限</label>
+          <select id="cabtier" class="field-control">
+            <option value="readonly">只读（无工具）</option>
+            <option value="read">可读（看文件不改）</option>
+            <option value="write">可写（工作目录内）</option>
+            <option value="write-exec">可写+执行</option>
+            <option value="full">完全开放（full · 任意文件/命令/联网）</option>
+          </select>
+          <div class="setting-hint">头头自己加人时，新成员权限不会超过这一档。</div>
+        </div>
+
+        <div class="setting-card">
+          <label class="toggle-row" for="peer-mentions">
+            <input type="checkbox" id="peer-mentions" checked>
+            <span class="toggle-track" aria-hidden="true"></span>
+            <span class="toggle-text">允许成员之间互相 @ 协作</span>
+          </label>
+          <div class="setting-hint">开启后成员可直接 @ 同伴接力，无需每次经由头头转达。</div>
+        </div>
+
+        <div class="setting-card">
+          <label class="toggle-row" for="passive-wake">
+            <input type="checkbox" id="passive-wake" checked>
+            <span class="toggle-track" aria-hidden="true"></span>
+            <span class="toggle-text">成员不 @ 发言时叫醒头头</span>
+          </label>
+          <div class="setting-hint">头头可回可不回；关闭更省 token。</div>
+        </div>
+
+        <div class="setting-card">
+          <label class="setting-label" for="room-timeout">单轮最长运行（分钟）</label>
+          <input id="room-timeout" class="field-control" type="number" min="1" max="120" placeholder="默认 20">
+          <div class="setting-hint">防无限跑硬上限（1~120）；卡死另由看门狗判（90 秒无输出）。</div>
+        </div>
+      </div>
+    </details>
+
+    <!-- 名册 -->
+    <details class="sb-collapsible">
+      <summary class="section-title collapsible-head">
+        <span>名册与职责</span>
+        <span class="chevron" aria-hidden="true">▾</span>
+      </summary>
+      <ul id="roster-list" class="roster-list"></ul>
+    </details>
+
+    <!-- 仓库 -->
+    <details class="sb-collapsible" id="repos-section" open>
+      <summary class="section-title collapsible-head">
+        <span>已登记仓库 <em id="repo-count" class="sec-count">0</em></span>
+        <span class="section-actions">
+          <button class="mini-btn" id="btn-add-repo" type="button" title="登记仓库">＋</button>
+          <span class="chevron" aria-hidden="true">▾</span>
+        </span>
+      </summary>
+      <form id="repo-add-form" class="repo-add-form hidden">
+        <input id="repo-add-input" class="field-control" placeholder="/绝对路径/到你的仓库" autocomplete="off" spellcheck="false">
+        <div class="repo-add-actions">
+          <button class="btn primary tiny" type="submit">登记</button>
+          <button class="btn ghost tiny" id="repo-add-cancel" type="button">取消</button>
+        </div>
+      </form>
+      <ul id="repo-list" class="repo-list"></ul>
+    </details>
+
+    <!-- 快捷操作 -->
     <div class="sidebar-actions">
-      <button class="btn ghost wide" id="btn-takeover" title="暂停头头，由你直接指挥">接管房间</button>
-      <button class="btn ghost wide hidden" id="btn-handback" title="把自动发言权还给头头">交还控制权</button>
-      <button class="btn ghost wide" id="btn-summarize">让某人总结</button>
-      <a class="btn ghost wide" id="btn-export" href="/api/export" download>导出 Markdown</a>
+      <button class="btn ghost wide" id="btn-takeover" type="button" title="暂停头头，由你直接指挥">⚡ 接管房间</button>
+      <button class="btn warn-outline wide hidden" id="btn-handback" type="button" title="把自动发言权还给头头">↩ 交还控制权</button>
+      <button class="btn ghost wide" id="btn-summarize" type="button">✦ 让某人总结</button>
+      <a class="btn ghost wide" id="btn-export" href="/api/export" download>↓ 导出 Markdown</a>
     </div>
   </aside>
 
-  <!-- 中栏：群聊流 -->
+  <!-- 中栏：群聊工作区 -->
   <main class="main">
     <header class="statusbar">
       <div class="status-left">
+        <button id="btn-toggle-sidebar" class="icon-mini mobile-only" type="button" title="切换左侧栏" aria-label="切换左侧栏">☰</button>
         <span id="speaker" class="speaker"><span class="dot idle"></span><span>等待人类</span></span>
-        <span id="takeover-badge" class="takeover-badge hidden">已被人工接管</span>
+        <span id="takeover-badge" class="badge warn hidden">已接管</span>
         <!-- 停止状态必须常驻显示：刹车踩下去没有提示，用户会以为房间坏了 -->
-        <span id="stopped-badge" class="stopped-badge hidden" title="房间已停止，不会自动发言。发一句话或点「继续」即可恢复。">⏸ 房间已停止</span>
+        <span id="stopped-badge" class="stopped-badge hidden" title="房间已停止，不会自动发言。发一句话或点「继续」即可恢复。">⏸ 已停止</span>
         <!-- 停顿原因：停下/思考/坏了三种状态必须在界面上可分 -->
         <span id="paused-badge" class="paused-badge hidden"></span>
         <span id="queue" class="chip hidden"></span>
       </div>
+
       <div class="status-right">
-        <span class="metric" title="本轮已发言条数">本轮 <b id="turn-count">0</b></span>
-        <span class="metric usage-metric" id="usage-metric" tabindex="0">
-          累计 <b id="usage">0</b> tok
-          <span class="usage-help" id="usage-help">?</span>
-          <span class="usage-tip" id="usage-tip">
-            这是**累计重发量**，不是你看到的字数。<br>
-            每轮都要把完整上下文重新发给模型，所以数字涨得比内容快得多——6 句话 5 万 token 是正常的。
+        <!-- 后端健康实时胶囊：点击打开后端诊断 -->
+        <button id="backend-pills" class="backend-pills" type="button" title="点击打开后端诊断与模型发现面板">
+          <span class="bp-label">后端</span>
+          <span id="bp-dots" class="bp-dots"></span>
+        </button>
+
+        <div class="metrics-group">
+          <span class="metric" title="本轮已发言条数">轮次 <b id="turn-count">0</b></span>
+          <span class="metric usage-metric" id="usage-metric" tabindex="0">
+            <b id="usage">0</b> tok
+            <span class="usage-help" id="usage-help">?</span>
+            <span class="usage-tip" id="usage-tip">
+              这是 <strong>累计重发量</strong>，不是你看到的字数。<br>
+              每轮都要把完整上下文重新发给模型，所以数字涨得比内容快得多——6 句话 5 万 token 是正常的。
+            </span>
           </span>
-        </span>
-        <span id="loop-warn" class="warn-chip hidden">检测到循环迹象</span>
-        <button id="btn-interrupt" class="btn ghost" disabled title="只打断当前这一轮发言，排队的继续">打断</button>
-        <button id="btn-resume" class="btn primary hidden" title="解除停止，成员恢复自动发言">▶ 继续</button>
-        <button id="btn-stop" class="btn danger" title="整间房停手：打断当前发言并清空队列">停止</button>
+        </div>
+
+        <span id="loop-warn" class="warn-chip hidden">⚠ 循环迹象</span>
+
+        <div class="status-controls">
+          <button id="btn-interrupt" class="btn ghost sm" type="button" disabled title="只打断当前这一轮发言，排队的继续">打断</button>
+          <button id="btn-resume" class="btn primary sm hidden" type="button" title="解除停止或继续推进">▶ 继续</button>
+          <button id="btn-stop" class="btn danger sm" type="button" title="整间房停手：打断当前发言并清空队列">停止</button>
+          <button id="btn-toggle-board" class="icon-mini mobile-only" type="button" title="切换右侧工作面板" aria-label="切换右侧工作面板">◫</button>
+        </div>
       </div>
     </header>
 
-    <!-- seq 撞号提示：常驻，刷新后按实际状态重现（不是一次性 notice） -->
+    <!-- 房间目标行内编辑条 -->
+    <div id="goal-bar" class="goal-bar">
+      <div id="goal-display" class="goal-display" role="button" tabindex="0" title="点击编辑本房间目标">
+        <span class="goal-tag">◎ 目标</span>
+        <span id="goal-text" class="goal-text placeholder">点击设定本房间目标，让 AI 团队明确交付标准…</span>
+        <span class="goal-edit-hint">编辑</span>
+      </div>
+      <form id="goal-editor" class="goal-editor hidden">
+        <span class="goal-tag">◎ 目标</span>
+        <input id="goal-input" class="goal-input" placeholder="清晰描述本房间要完成的交付目标、边界与验收标准…" maxlength="1000" autocomplete="off">
+        <button class="btn primary tiny" type="submit">保存</button>
+        <button class="btn ghost tiny" id="goal-cancel" type="button">取消</button>
+      </form>
+      <button id="goal-shared-btn" class="goal-shared-btn hidden" type="button" title="在右侧文件浏览器中查看共享目录">📁 共享目录</button>
+    </div>
+
+    <!-- seq 撞号提示：常驻，刷新后按实际状态重现 -->
     <div id="seq-warn" class="seq-warn hidden">
       <span class="seq-warn-icon">⚠️</span>
       <span id="seq-warn-text"></span>
-      <button id="seq-warn-hide" class="seq-warn-hide" title="本次会话内隐藏">×</button>
+      <button id="seq-warn-hide" class="seq-warn-hide" type="button" title="本次会话内隐藏">×</button>
     </div>
 
-    <div id="stream" class="stream" aria-live="polite"></div>
+    <div class="stream-wrap">
+      <div id="stream" class="stream" aria-live="polite"></div>
+      <button id="btn-scroll-bottom" class="scroll-bottom-btn hidden" type="button" title="回到底部最新消息">↓ 回到底部</button>
+    </div>
 
     <footer class="composer">
       <div class="mention-hint" id="mention-hint"></div>
       <!-- @ 候选列表：打 @ 就出现，可点选 / 上下键 / 回车插入 -->
       <div id="mention-menu" class="mention-menu hidden" role="listbox" aria-label="选择要 @ 的成员"></div>
-      <div class="composer-row">
-        <textarea id="input" rows="1" placeholder="对房间说话；打 @ 会弹出成员列表。Enter 发送，Shift+Enter 换行"></textarea>
-        <button id="btn-send" class="btn primary">发送</button>
+      <div class="composer-box">
+        <textarea id="input" rows="1" placeholder="向房间发消息；输入 @ 点名成员，Enter 发送，Shift+Enter 换行…"></textarea>
+        <button id="btn-send" class="btn primary send-btn" type="button">发送</button>
+      </div>
+      <div class="composer-foot">
+        <span class="composer-tips"><kbd>@</kbd> 点名成员 · <kbd>Enter</kbd> 发送 · <kbd>Shift</kbd>+<kbd>Enter</kbd> 换行</span>
       </div>
     </footer>
   </main>
 
-  <!-- 右栏：任务看板 -->
-  <aside class="board">
-    <div class="section-title board-title">任务看板</div>
-    <div id="board" class="board-cols"></div>
+  <!-- 右栏：标签页工作面板（看板 / 文件 / 动态） -->
+  <aside id="right-panel" class="board">
+    <div class="panel-tabs" role="tablist" aria-label="工作台右侧面板">
+      <button class="panel-tab active" data-tab="board" role="tab" aria-selected="true" type="button">
+        看板 <span id="tab-badge-board" class="tab-badge">0</span>
+      </button>
+      <button class="panel-tab" data-tab="files" role="tab" aria-selected="false" type="button">
+        文件 <span id="tab-badge-files" class="tab-badge">0</span>
+      </button>
+      <button class="panel-tab" data-tab="activity" role="tab" aria-selected="false" type="button">
+        动态 <span id="tab-badge-activity" class="tab-badge">0</span>
+      </button>
+    </div>
+
+    <!-- Tab 1: 任务看板 -->
+    <div id="tab-board" class="tab-pane active" role="tabpanel">
+      <div id="board" class="board-cols"></div>
+    </div>
+
+    <!-- Tab 2: 共享目录与成员工作区文件浏览器 -->
+    <div id="tab-files" class="tab-pane hidden" role="tabpanel">
+      <div class="files-toolbar">
+        <span id="files-shared-path" class="files-path" title="">共享目录</span>
+        <button id="btn-refresh-files" class="btn ghost tiny" type="button" title="刷新文件列表">↻ 刷新</button>
+      </div>
+      <div id="files-tree" class="files-tree">
+        <div class="empty-hint">加载文件列表中…</div>
+      </div>
+    </div>
+
+    <!-- Tab 3: 实时工具/写入动态日志 -->
+    <div id="tab-activity" class="tab-pane hidden" role="tabpanel">
+      <div class="activity-toolbar">
+        <div class="filter-pills" id="activity-filters">
+          <button class="filter-pill active" data-filter="all" type="button">全部</button>
+          <button class="filter-pill" data-filter="write" type="button">写入/编辑</button>
+          <button class="filter-pill" data-filter="bash" type="button">命令</button>
+        </div>
+      </div>
+      <div id="activity-list" class="activity-list">
+        <div class="empty-hint">暂无工具操作记录</div>
+      </div>
+    </div>
   </aside>
 
 </div>
 
-<!-- 落地页：房间列表。打开应用先看到这里 -->
+<!-- 落地页：房间列表 -->
 <div id="rooms-view" class="rooms-view hidden">
   <div class="rooms-panel">
     <header class="rooms-head">
       <div>
-        <h1>房间</h1>
-        <div class="rooms-sub">每个房间是独立的一群人、独立的对话和上下文。</div>
+        <div class="rooms-kicker">SuperAI Multi-Agent Workbench</div>
+        <h1>协作房间</h1>
+        <div class="rooms-sub">每个房间拥有独立的 AI 成员团队、对话上下文、任务看板与共享工作目录。</div>
       </div>
-      <button id="rooms-close" class="btn ghost hidden">返回当前房间</button>
+      <button id="rooms-close" class="btn ghost hidden" type="button">返回当前房间</button>
     </header>
 
     <div id="rooms-fallback" class="rooms-fallback hidden"></div>
@@ -153,37 +280,56 @@
     <div id="rooms-list" class="rooms-list"></div>
 
     <form id="rooms-create" class="rooms-create">
-      <input id="rooms-new-name" placeholder="新房间的名字，例如：算法研究" maxlength="40" autocomplete="off">
-      <button class="btn primary" type="submit">新建房间</button>
+      <input id="rooms-new-name" placeholder="输入新房间名称，例如：架构评审 / 算法攻坚" maxlength="40" autocomplete="off">
+      <button class="btn primary" type="submit">＋ 新建房间</button>
     </form>
-    <div class="rooms-hint">新建的房间是空的。进去后第一件事是添加成员——第一个成员会自动成为头头。</div>
+    <div class="rooms-hint">新建房间默认为空。进入后先添加第一个成员，它会自动成为「头头」。</div>
   </div>
 </div>
 
-<!-- 成员设置弹窗（替代连问四次的 prompt） -->
+<!-- 成员设置弹窗 v2 -->
 <div id="member-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="mm-title">
-  <div class="modal-panel">
+  <div class="modal-panel modal-lg">
     <header class="modal-head">
-      <h2 id="mm-title">成员设置</h2>
-      <button id="mm-close" class="btn ghost" type="button">关闭</button>
+      <div>
+        <h2 id="mm-title">成员设置</h2>
+        <div id="mm-subtitle" class="modal-sub">配置成员所使用的 CLI 后端、能力档位、模型与人设</div>
+      </div>
+      <button id="mm-close" class="btn ghost sm" type="button">关闭</button>
     </header>
 
     <div class="modal-body">
-      <label class="field">
-        <span class="field-label">名字</span>
-        <input id="mm-name" autocomplete="off" spellcheck="false">
-        <span class="field-hint">@ 用它叫人。改名不影响历史记录。</span>
-      </label>
+      <div class="field-row">
+        <label class="field">
+          <span class="field-label">名字</span>
+          <input id="mm-name" autocomplete="off" spellcheck="false" placeholder="如：lead / coder / reviewer">
+          <span class="field-hint">@ 用它叫人，改名不影响历史记录。</span>
+        </label>
 
-      <label class="field">
-        <span class="field-label">后端</span>
+        <label class="field">
+          <span class="field-label">角色</span>
+          <select id="mm-role">
+            <option value="member">成员</option>
+            <option value="leader">头头（协调与派活）</option>
+          </select>
+          <span class="field-hint">头头负责统筹、拆解与汇总。</span>
+        </label>
+      </div>
+
+      <div class="field">
+        <div class="field-label-row">
+          <span class="field-label">CLI 后端</span>
+          <button id="mm-open-diag" class="link-btn" type="button">检查后端健康与模型 →</button>
+        </div>
         <select id="mm-backend">
+          <option value="agy">agy</option>
           <option value="claude">claude</option>
           <option value="codex">codex</option>
           <option value="opencode">opencode</option>
         </select>
+        <div class="backend-inline-status" id="mm-backend-status"></div>
         <span class="field-hint" id="mm-backend-hint"></span>
-      </label>
+      </div>
 
       <div class="field">
         <span class="field-label">能力档位</span>
@@ -192,52 +338,62 @@
       </div>
 
       <div class="field-row">
-        <label class="field">
+        <div class="field">
           <span class="field-label">模型</span>
-          <input id="mm-model" list="mm-model-list" placeholder="留空 = 用该 CLI 自己的配置" autocomplete="off" spellcheck="false">
+          <input id="mm-model" list="mm-model-list" placeholder="留空 = 使用该 CLI 默认配置" autocomplete="off" spellcheck="false">
           <datalist id="mm-model-list"></datalist>
-          <span class="field-hint">留空不会传任何模型参数。</span>
-        </label>
-        <label class="field">
-          <span class="field-label">思考等级</span>
+          <div id="mm-model-chips" class="quick-chips"></div>
+          <span class="field-hint">点击上方模型标签可一键填入；留空不传模型参数。</span>
+        </div>
+        <div class="field">
+          <span class="field-label">思考等级（Effort）</span>
           <input id="mm-effort" list="mm-effort-list" placeholder="留空 = 不传" autocomplete="off" spellcheck="false">
           <datalist id="mm-effort-list"></datalist>
-          <span class="field-hint">按后端可选值。</span>
-        </label>
+          <div id="mm-effort-chips" class="quick-chips"></div>
+          <span class="field-hint">按后端支持的可选思考深度。</span>
+        </div>
       </div>
 
-      <div class="field">
+      <!-- full 档位清爽说明 -->
+      <div id="mm-full-note" class="full-tier-callout hidden">
+        <span class="callout-icon">✦</span>
+        <span><b>完全开放模式（full）</b>已默认开启全部文件工具、任意命令执行与联网能力（免审批），无需额外勾选联网或配置命令白名单。</span>
+      </div>
+
+      <!-- 非 full 档位显示联网与自定义命令 -->
+      <div id="mm-netget-field" class="field">
         <span class="field-label">联网查询</span>
         <label class="switch-row">
           <input type="checkbox" id="mm-netget">
-          <span>允许联网查资料（推荐）</span>
+          <span>允许联网查资料（受限 netget）</span>
         </label>
-        <span class="field-hint">
+        <span class="field-hint" id="mm-netget-hint">
           只允许 http/https <b>GET</b>：能下载网页，<b>读不到本机文件、写不出工作目录、不能上传</b>。
         </span>
       </div>
 
-      <label class="field">
+      <label id="mm-commands-field" class="field">
         <span class="field-label">自定义命令（留空 = 一条都不许）</span>
         <input id="mm-commands" placeholder="例：git status；一般不需要填" autocomplete="off" spellcheck="false">
-        <!-- ★ 这句话必须显示在界面上，不能只写在文档里 -->
         <span class="field-hint danger-hint">
           放开命令后，该成员可以用这些命令读写工作目录之外的任何文件（命令行没有目录围墙）。
         </span>
-        <span class="field-hint danger-hint" id="mm-curl-warn"></span>
+        <span class="field-hint danger-hint hidden" id="mm-curl-warn"></span>
       </label>
 
-      <label class="field">
-        <span class="field-label">附加启动参数</span>
-        <input id="mm-extra" placeholder="例：--add-dir /home/hope/notes" autocomplete="off" spellcheck="false">
-        <span class="field-hint" id="mm-extra-hint">破坏通信协议的参数会被拒绝；覆盖档位的需要你确认。</span>
-      </label>
+      <div class="field-row">
+        <label class="field">
+          <span class="field-label">附加启动参数</span>
+          <input id="mm-extra" placeholder="例：--add-dir /path/to/notes" autocomplete="off" spellcheck="false">
+          <span class="field-hint" id="mm-extra-hint">破坏通信协议的参数会被拒绝；覆盖档位的需确认。</span>
+        </label>
 
-      <label class="field">
-        <span class="field-label">单轮上限（分钟）</span>
-        <input id="mm-timeout" type="number" min="1" max="120" placeholder="留空 = 房间默认 20 分钟" autocomplete="off">
-        <span class="field-hint" id="mm-timeout-hint">这是"防无限跑"的上限，不是卡死判定——卡死由看门狗判（90 秒无输出）。</span>
-      </label>
+        <label class="field">
+          <span class="field-label">单轮上限（分钟）</span>
+          <input id="mm-timeout" type="number" min="1" max="120" placeholder="留空 = 房间默认 20 分钟" autocomplete="off">
+          <span class="field-hint" id="mm-timeout-hint">防无限跑上限；卡死由看门狗判（90 秒无输出）。</span>
+        </label>
+      </div>
 
       <div class="cmd-preview">
         <div class="cmd-preview-title">最终命令行预览</div>
@@ -249,16 +405,8 @@
       </div>
 
       <label class="field">
-        <span class="field-label">角色</span>
-        <select id="mm-role">
-          <option value="member">成员</option>
-          <option value="leader">头头</option>
-        </select>
-      </label>
-
-      <label class="field">
-        <span class="field-label">persona（人设）</span>
-        <textarea id="mm-persona" rows="4" placeholder="它会出现在这个成员每一轮的提示词里"></textarea>
+        <span class="field-label">Persona（人设与专长）</span>
+        <textarea id="mm-persona" rows="4" placeholder="描述该成员的角色定位、擅长领域、代码风格与协作要求…"></textarea>
       </label>
 
       <div id="mm-error" class="modal-error hidden"></div>
@@ -273,12 +421,54 @@
   </div>
 </div>
 
-<!-- 任务详情抽屉 -->
-<div id="drawer" class="drawer hidden">
+<!-- 后端诊断与模型发现面板 -->
+<div id="backends-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="bm-title">
+  <div class="modal-panel modal-xl">
+    <header class="modal-head">
+      <div>
+        <h2 id="bm-title">后端诊断与模型发现</h2>
+        <div id="bm-checked-at" class="modal-sub">检测本机 agy / claude / codex / opencode 安装状态、可用模型与连通性</div>
+      </div>
+      <div class="modal-head-actions">
+        <button id="bm-refresh" class="btn ghost sm" type="button">↻ 刷新列表</button>
+        <button id="bm-probe-all" class="btn primary sm" type="button">⚡ 全部探测</button>
+        <button id="bm-close" class="btn ghost sm" type="button">关闭</button>
+      </div>
+    </header>
+    <div class="modal-body">
+      <div id="bm-list" class="backends-grid">
+        <div class="empty-hint">正在检测后端环境…</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 轻量成员选择弹窗（用于“让某人总结”） -->
+<div id="picker-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="pm-title">
+  <div class="modal-panel modal-sm">
+    <header class="modal-head">
+      <h2 id="pm-title">选择成员进行总结</h2>
+      <button id="pm-close" class="btn ghost sm" type="button">关闭</button>
+    </header>
+    <div class="modal-body">
+      <div class="picker-sub">被选中的成员会汇总当前对话结论与待办；总结完成后房间会自动暂停等你指示。</div>
+      <div id="pm-list" class="picker-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 详情抽屉（任务详情 / Diff 验收 / 文件内容预览） -->
+<div id="drawer" class="drawer hidden" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
   <div class="drawer-panel">
-    <header>
-      <h2 id="drawer-title">任务</h2>
-      <button id="drawer-close" class="btn ghost">关闭</button>
+    <header class="drawer-head">
+      <div class="drawer-head-main">
+        <h2 id="drawer-title">详情</h2>
+        <div id="drawer-meta" class="drawer-meta"></div>
+      </div>
+      <div class="drawer-head-actions">
+        <div id="drawer-actions"></div>
+        <button id="drawer-close" class="btn ghost sm" type="button">关闭</button>
+      </div>
     </header>
     <div id="drawer-body" class="drawer-body"></div>
   </div>

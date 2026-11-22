@@ -1,107 +1,70 @@
-# multiagent-chat（多 AI 协作房间）
+# SuperAI（multiagent-chat · 多 AI 协作工作台）
 
-多个 `claude` / `codex` / `opencode` 实例在同一个房间里通过 **@ 点名 + 结构化动作协议** 串行协作。
+让多个 **`agy` (Antigravity)** / **`claude`** / **`codex`** / **`opencode`** 实例在同一个协作房间里，通过 **@ 点名 + 结构化动作协议 + 共享目录 + 任务看板 + Git Worktree** 协同完成真实工程任务。
 
-**零外部 npm 依赖，现在就能跑。** 不需要 API key——直接用本机已登录的 CLI：
+**零外部 npm 依赖，开箱即用。** 直接驱动本机已安装的 CLI：
 
 ```bash
-node bin/doctor.mjs         # 环境与沙箱自检
-node bin/serve.mjs          # 启动多房间 Web 界面（http://127.0.0.1:4321）
+node bin/doctor.mjs         # 四后端环境检查与沙箱自检
+node bin/serve.mjs          # 启动多房间 Web 工作台（默认 http://127.0.0.1:4321）
 node bin/room.mjs --demo    # 终端一键演示：头头拆任务 → 派给成员 → 成员产出 → 看板更新
 node bin/room.mjs           # 终端交互模式
 ```
 
-详细操作见 [使用说明.md](./使用说明.md)，部署与基线核对见 [docs/DEPLOY.md](./docs/DEPLOY.md)。
+详细操作说明见 [使用说明.md](./使用说明.md)，部署与基线核对见 [docs/DEPLOY.md](./docs/DEPLOY.md)。
 
-## 已验证
+## 核心特性（v2）
 
-```
-npm test                       # 静态检查 + 560+ 项单元与集成测试全通过
-node scripts/smoke.mjs         # 真实 CLI 端到端：claude + codex
-node bin/room.mjs --demo       # 真实多 agent 闭环
-```
+- **四后端一等支持**：原生适配 **`agy`**（Antigravity CLI，逐字流式）、**`claude`**（Claude Code，逐字流式）、**`codex`**（Codex CLI）、**`opencode`**（OpenCode）。
+- **完全开放权限模式（`full`）**：全部 4 家后端均支持 `full` 档（无目录限制、全工具/命令/联网免审批），新建房间默认开放 `aiCabTier: 'full'` 与新建成员默认 `full` 档，同时完整保留 `readonly` / `read` / `write-ask` / `write` / `write-exec` 受控档位按需切换。
+- **开放自由协作（`allowPeerMentions`）**：新房间默认允许普通成员之间直接互 `@` 接力推进，也可在左侧「房间设置」一键切回仅头头调度模式。
+- **后端实时诊断与模型自动发现**：顶部健康胶囊实时展示 4 后端状态，点击打开诊断面板可自动列出本机/网关可用模型、提前预警配置冲突（如模型不在网关列表、缺少 `env_key`）并支持一键实测连通性。
+- **现代化协作工作台 UI**：
+  - 暗色开发者工作台，房间目标行内编辑（即时写入 prompt）；
+  - 右栏三标签页：**看板**（任务卡与 Git Worktree Diff 验收合并/丢弃）、**文件**（实时浏览房间共享目录与各成员工作区，支持 Markdown/代码预览）、**动态**（实时工具调用与写操作审计流）；
+  - XSS-safe 富文本 Markdown 渲染（标题、表格、列表、引用、带一键复制的代码块、`@` 高亮）与可操作的失败诊断横幅。
 
-交互命令：`@名字 内容`、`/board`、`/roster`、`/who`、`/stop`、`/interrupt`、`/history`。
+## 四后端能力对照
 
-数据目录默认 `~/.multiagent-chat/`（可用 `MAROOM_DATA` 覆盖）：
-`room.json`（成员与仓库登记）、`room.jsonl`（追加式事件流）、`agents/<id>/`（各自工作目录）。
+| 后端 | 流式输出 | 支持档位 | `full` 档底层参数 | 模型/思考等级发现 |
+|---|---|---|---|---|
+| `agy` | 逐字流式 | `read` / `write` / `write-exec` / `full` | `--dangerously-skip-permissions` | `agy models` 自动发现 |
+| `claude` | 逐字流式 | `readonly` / `read` / `write-ask` / `write` / `write-exec` / `full` | `--dangerously-skip-permissions` | 读取网关 `/v1/models` 与配置校验 |
+| `codex` | 整段输出 | `read` / `write-exec` / `full` | `--dangerously-bypass-approvals-and-sandbox`（含 resume） | 解析 `~/.codex/config.toml` 与 `env_key` 检查 |
+| `opencode` | 整段输出 | `readonly` / `read` / `write` / `write-exec` / `full` | `opencode.json` 全 `allow` + `--auto` | `opencode debug config` 自动发现 |
 
-冒烟实测输出（本机 claude-code 2.1.325 / codex-cli 0.167.0）：
+## 验证方式
 
-```
-== 探测 ==        claude: 可用    codex: 可用
-== 人发言 ==      解析结果：{ targets: ['lead','bob'], unknown: [] }
->>> lead 开始发言  @bob 写一句关于海洋的话。
-                  ```action {"action":"task.create",...,"assignee":"bob"} ```
-<<< lead 结束（2417ms）
-    [任务] {"id":"T-001",... ,"assignee":"bob","status":"待办","createdBy":"lead"}
->>> bob 开始发言   海把远处的天光揉成细碎的金色，潮声一遍遍漫过沙滩。
-<<< bob 结束（4843ms）
-任务：[T-001 ...]   会话映射：lead/claude sessionId✓  bob/codex sessionId✓
-```
-
-即：**人类一句 @ → 头头拆任务 → 动作协议落库 → 自动 @ 接力 → 成员产出 → 全部持久化**。
-
-## 实测校正（写进需求的依据）
-
-| 事项 | 结论 |
-|---|---|
-| `claude -p --output-format stream-json` | **必须加 `--verbose`**，否则直接报错退出 |
-| `codex exec resume` 的参数 | **不支持 `-s` 与 `-C`**。只能用 `-c sandbox_mode=read-only`，cwd 靠 spawn 的 cwd。需求 §6.1 原写法跑不通，已在本实现中修正 |
-| `codex exec --json` 流式 | **无 token 级 delta**，只能整段出字（`supportsStreaming=false`） |
-| `codex login status` | 本机报「Not logged in」+ 退出码 1，但 `exec` 正常 → **不可作可用性判据**，一律用真实探测 |
-| resume 按 cwd 隔离 | `codex exec resume --all` 说明为 "disables cwd filtering"，确认会话按 cwd 索引；工作目录必须持久不变 |
-| prompt 走 stdin | 两家都支持（`codex exec -`、`claude -p` 无位置参数），已验证 |
-| 环境变量 | 本机登录态走 `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_BASE_URL`，**清环境会断登录**。只覆盖 `NO_COLOR`/`TERM`/`LANG` |
-
-## 结构
-
-```
-bin/room.mjs           可运行外壳（演示 + 交互）
-src/core/mentions.js   @ 解析（长名优先、全角、未知 @、越权 @ 策略）
-src/core/actions.js    结构化动作协议（提取/校验/鉴权/幂等/剥离）
-src/core/room.js       房间调度：串行队列、接力、打断、循环检测、压缩、动作执行
-src/core/prompt.js     投递策略（增量 / 仅被 @ / 摘要）、动作结果回注
-src/core/compact.js    上下文压缩与 session 轮换（70% 阈值）
-src/core/probe.js      环境探测 + 沙箱自检（三项分测、按档位双向判定）
-src/core/worktree.js   仓库白名单 + worktree 生命周期
-src/core/store.js      追加式 JSONL，可重放重建
-src/core/runner.js     子进程：NDJSON 行缓冲、UTF-8、硬超时、进程组 kill
-src/adapters/          claude / codex / opencode(骨架)
-scripts/smoke.mjs      真实端到端
+```bash
+npm test                                  # 静态契约检查 + 600+ 项单元与集成测试
+node scripts/accept-e2e.mjs               # Git Worktree Diff 验收端到端
+node scripts/netget-e2e.mjs --skip-llm    # 受限网络下载器 SSRF 与路径边界验证
+node scripts/smoke.mjs                    # 真实 CLI 端到端冒烟
 ```
 
-## P0 覆盖情况
+## 目录结构
 
-| 已实现 | 说明 |
-|---|---|
-| #3 #4 #5 | @ 点名、接力、无 @ 停住 |
-| #7 | 排队 + 强制打断 |
-| #8 | 持久化（含任务、名册、会话映射，重启续聊） |
-| #9 | 无硬闸，只做循环检测提示 |
-| #12 | 环境探测（真实探测调用）+ 沙箱自检 |
-| #13 | 会话隔离（每 agent 独立 session + cwd） |
-| #14 | 上下文压缩与轮换 |
-| #15 | 三档权限（Claude 三档；Codex 只有两档，中间档硬失败） |
-| #16 #17 | 任务对象 + 看板 |
-| #18 | 名册（人编辑区与自述区分开） |
-| #21 | 结构化动作协议（8 条硬规则） |
-| #22 #23 #24 | 仓库白名单、worktree 生命周期、验收 diff |
+```
+bin/serve.mjs          多房间 Web 工作台服务
+bin/room.mjs           终端交互外壳（演示 + 交互）
+bin/doctor.mjs         四后端环境与沙箱自检
+bin/netget             受限 HTTP/HTTPS GET 包装器（带 SSRF 与目录边界拦截）
+src/adapters/          agy / claude / codex / opencode 适配器
+src/core/backends.js   四后端实时体检、模型发现与真实探测
+src/core/files.js      房间共享目录与成员工作区安全只读文件浏览器
+src/core/room.js       房间调度：串行队列、接力、互 @、打断、看门狗、循环检测、压缩
+src/core/mentions.js   @ 解析（长名优先、全角、未知 @、同级互 @ 策略）
+src/core/actions.js    结构化动作协议（task / roster / member / continue）
+src/core/prompt.js     增量/摘要投递策略、共享目录与权限约束注入
+src/core/probe.js      权限档位矩阵与双向沙箱自检
+src/core/worktree.js   仓库白名单与 Git Worktree 生命周期
+src/core/store.js      追加式 JSONL 事件存储，可重放重建
+src/core/runner.js     子进程 NDJSON 行缓冲、PATH 净化、硬超时、进程组清理
+public/                零依赖原生前端（index.html / style.css / app.js）
+```
 
-未做：Electron 图形界面、#6 总结入口的完整交互、#10 #11 的界面态展示（内核事件已备）。
+## 设计原则
 
-## 刻意做成这样的地方
-
-- **动作在轮结束后才解析**，流式期间绝不执行半截 JSON。
-- **只认本人直接输出**：嵌套/引用块里的 action 一律不执行，且**回注**告知，避免幻觉式"已分配"。
-- **幂等**：`(actor, session, turn, localId|内容哈希)` 去重，重试不会重复建任务。
-- **成员越权 @** 消息照发但不触发，并回报，不静默吞。
-- **无硬性轮数上限**，只做循环检测（连续发言 / 文本相似度 ≥0.85）并提示。
-- **失败四分类**（completed / failed / timeout / crashed），界面据此区分。
-
-## 未做（等需求定稿或属 P1）
-
-- Electron 界面、任务看板、名册编辑
-- 上下文压缩（阈值 70% → 摘要 → 轮换 session）
-- opencode 适配器（本机未安装，参数未实测，**故意抛错而不是猜参数**）
-- 并行执行（P0 定为串行）
+- **动作在轮结束后才解析**：流式输出期间绝不执行半截 JSON，且仅认本人直接输出的动作块并回注执行结果。
+- **诚实报错、绝不掩盖**：每个后端的 JSON API 错误、缺失环境变量或模型不匹配都会直接浮现在聊天流失败横幅和诊断面板中。
+- **幂等与可审计**：追加式 `room.jsonl` 保留全部消息、动作、工具调用与人工控制日志；`PATH` 净化自动屏蔽数据目录防命令劫持；文件预览双重校验 `resolve` + `realpath` 防止路径穿越。

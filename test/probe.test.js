@@ -106,7 +106,16 @@ test('Codex 没有中间档，界面不能给出选了不生效的选项', () =>
   assert.equal(supportsTier('codex', TIER.WRITE), false);
   assert.equal(supportsTier('codex', TIER.WRITE_ASK), false);
   assert.equal(supportsTier('codex', TIER.WRITE_EXEC), true);
-  assert.deepEqual(availableTiers('codex'), [TIER.READ, TIER.WRITE_EXEC]);
+  assert.equal(supportsTier('codex', TIER.FULL), true);
+  assert.deepEqual(availableTiers('codex'), [TIER.READ, TIER.WRITE_EXEC, TIER.FULL]);
+});
+
+test('agy 档位：支持 read / write / write-exec / full，不支持 readonly 与 write-ask', async () => {
+  const { normalizeTier } = await import('../src/core/probe.js');
+  assert.deepEqual(availableTiers('agy'), [TIER.READ, TIER.WRITE, TIER.WRITE_EXEC, TIER.FULL]);
+  assert.equal(supportsTier('agy', TIER.READONLY), false);
+  assert.equal(supportsTier('agy', TIER.WRITE_ASK), false);
+  assert.equal(normalizeTier('agy', TIER.READONLY), TIER.READ);
 });
 
 test('★ read 档存在且 claude/opencode 都支持（老板要的"可读"）', () => {

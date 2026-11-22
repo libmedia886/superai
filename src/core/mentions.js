@@ -88,7 +88,8 @@ export function parseMentions(text, { members, humanId = 'human' }, selfId = nul
 }
 
 /**
- * 权限过滤：成员只能 @ 自己的头头（或任一头头，当 reportsTo 未指定时）与人类。
+ * 权限过滤：成员默认只能 @ 自己的头头（或任一头头，当 reportsTo 未指定时）与人类；
+ * 当房间开启自由协作（`allowPeerMentions === true`）时，成员可直接 @ 任意成员推进。
  * 越权 @ 不触发发言，但要回报（不能静默吞掉）。
  *
  * @param {object} o
@@ -97,11 +98,13 @@ export function parseMentions(text, { members, humanId = 'human' }, selfId = nul
  * @param {string[]} [o.leaderIds]     全部头头（支持多头部组织，§4.1）
  * @param {string[]} [o.reportsTo]     该成员归属的头头；为空表示不限（兼容旧配置）
  * @param {string} [o.humanId]
+ * @param {boolean} [o.allowPeerMentions]
  */
 export function applyMentionPolicy({
   targets, actorRole, leaderIds = [], leaderId = null, reportsTo = null, humanId = 'human',
+  allowPeerMentions = false,
 }) {
-  if (actorRole !== 'member') return { allowed: targets, overreach: [] };
+  if (actorRole !== 'member' || allowPeerMentions === true) return { allowed: targets, overreach: [] };
 
   // 兼容单头头调用：leaderId 会被合并进 leaderIds
   const allLeaders = new Set([...(leaderIds ?? []), ...(leaderId ? [leaderId] : [])]);

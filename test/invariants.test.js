@@ -409,3 +409,40 @@ test('清单：本次修复的 6 项能力守卫（工具期看门狗 / 会话�
   const netgetSrc = await readFile(new URL('../bin/netget', import.meta.url), 'utf8');
   assert.match(netgetSrc, /禁止访问本机与内网地址/, 'netget 必须拦截本机与内网 SSRF');
 });
+
+test('清单：SuperAI v2 四后端与完全开放权限档（agy / claude / codex / opencode + full）', async () => {
+  await mustMention('adapters/agy.js', 'AgyAdapter', 'Antigravity (agy) 一等公民适配器');
+  await mustMention('adapters/agy.js', 'MAX_INLINE_PROMPT_BYTES', 'agy 超长 prompt 临时文件回退');
+  await mustMention('adapters/index.js', 'AgyAdapter', '工厂必须注册 agy 适配器');
+  await mustMention('core/probe.js', "FULL: 'full'", '完全开放权限档 TIER.FULL');
+  await mustMention('core/backends.js', 'inspectBackends', '四后端实时诊断与模型发现');
+  await mustMention('core/backends.js', 'probeBackend', '四后端真实短对话探测');
+  await mustMention('core/files.js', 'listRoomFiles', '房间共享目录与成员工作区文件列表');
+  await mustMention('core/files.js', 'readRoomFile', '安全路径边界只读预览');
+  await mustMention('core/mentions.js', 'allowPeerMentions', '开放成员之间直接互 @ 协作');
+  await mustMention('server.js', '/api/backends', '后端诊断 API');
+  await mustMention('server.js', '/api/files', '房间文件浏览 API');
+  await mustMention('server.js', '/api/file', '单文件只读预览 API');
+
+  const { TIER, availableTiers } = await import('../src/core/probe.js');
+  for (const backend of ['agy', 'claude', 'codex', 'opencode']) {
+    assert.ok(availableTiers(backend).includes(TIER.FULL), `${backend} 必须支持完全开放档 full`);
+  }
+
+  const { createAdapter } = await import('../src/adapters/index.js');
+  const agy = createAdapter({ id: 't1', backend: 'agy', tier: 'full' });
+  assert.equal(agy.supportsStreaming, true, 'agy 原生支持流式输出');
+  const agyArgs = agy.buildArgs({ prompt: 'hello' });
+  assert.ok(agyArgs.includes('--dangerously-skip-permissions'));
+  assert.equal(agyArgs[agyArgs.length - 2], '-p', 'agy 的 -p <prompt> 必须在参数末尾');
+
+  const codex = createAdapter({ id: 't2', backend: 'codex', tier: 'full' });
+  assert.ok(codex.buildArgs({ cwd: '/tmp' }).includes('--dangerously-bypass-approvals-and-sandbox'));
+  assert.ok(codex.buildArgs({ cwd: '/tmp', sessionId: 's1' }).includes('--dangerously-bypass-approvals-and-sandbox'));
+
+  const { permissionConfig } = await import('../src/adapters/opencode.js');
+  assert.equal(permissionConfig('full').external_directory, 'allow');
+  assert.equal(permissionConfig('full').bash, 'allow');
+  const oc = createAdapter({ id: 't3', backend: 'opencode', tier: 'full' });
+  assert.ok(oc.buildArgs({ cwd: '/tmp' }).includes('--auto'));
+});

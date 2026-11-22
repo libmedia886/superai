@@ -31,12 +31,14 @@ import { createTaskWorktree, finalizeTaskWorktree, diffAgainstBase } from './wor
  * （沙箱坏了、网络挂住），和模型自己拒绝不是一回事。
  */
 /** 把工具名归类成写操作日志里的动作类型 */
-function classifyTool(name) {
+export function classifyTool(name) {
   switch (name) {
-    case 'Write': case 'write': return 'write';
-    case 'Edit': case 'edit': case 'apply_patch': return 'edit';
-    case 'Bash': case 'bash': case 'shell': return 'bash';
-    case 'Read': case 'read': return 'read';
+    case 'Write': case 'write': case 'write_to_file': return 'write';
+    case 'Edit': case 'edit': case 'apply_patch':
+    case 'replace_file_content': case 'multi_replace_file_content': return 'edit';
+    case 'Bash': case 'bash': case 'shell': case 'run_command': return 'bash';
+    case 'Read': case 'read': case 'view_file': case 'list_dir':
+    case 'grep_search': case 'find_by_name': case 'search_web': case 'read_url_content': return 'read';
     default: return 'other';
   }
 }
@@ -248,14 +250,16 @@ export class Room {
   constructor({
     id, name, goal = '', members, store, resolveAdapter, onEvent,
     registry = [], worktreesRoot = null, onMemberCreate = null,
-    aiCabTier = DEFAULT_AI_CAB_TIER, headPassiveWake = true, sharedDir = null,
-    netgetPath = null, forbiddenRoots = [],
+    aiCabTier = DEFAULT_AI_CAB_TIER, headPassiveWake = true, allowPeerMentions = false,
+    sharedDir = null, netgetPath = null, forbiddenRoots = [],
     turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS,
   }) {
     /** 造人落地钩子（由 config 注入，负责建目录 + 写配置） */
     this.onMemberCreate = onMemberCreate;
     /** AI 能创建的成员的最高档位（人设定，默认只读） */
     this.aiCabTier = aiCabTier;
+    /** 房间级自由协作开关：允许成员直接 @ 其他成员 */
+    this.allowPeerMentions = Boolean(allowPeerMentions);
     /**
      * 头头被动唤醒：成员**不 @** 任何人的发言也会叫醒头头。
      * 老板的要求原话："任何人在群里评论，即使不 at，头头都能收到。"
@@ -1671,6 +1675,7 @@ export class Room {
         leaderIds: this.leaderIds,
         reportsTo: agent.reportsTo ?? null,
         humanId: 'human',
+        allowPeerMentions: this.allowPeerMentions,
       });
       if (unknown.length || overreach.length) {
         const text = [

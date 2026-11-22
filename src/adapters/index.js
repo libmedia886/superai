@@ -1,8 +1,10 @@
+import { AgyAdapter } from './agy.js';
 import { ClaudeAdapter } from './claude.js';
 import { CodexAdapter } from './codex.js';
 import { OpencodeAdapter } from './opencode.js';
 
 export const ADAPTERS = {
+  agy: AgyAdapter,
   claude: ClaudeAdapter,
   codex: CodexAdapter,
   opencode: OpencodeAdapter,
@@ -66,4 +68,4 @@ export function getCachedAdapter(cache, agent) {
   return adapter;
 }
 
-export { ClaudeAdapter, CodexAdapter, OpencodeAdapter };
+export { AgyAdapter, ClaudeAdapter, CodexAdapter, OpencodeAdapter };

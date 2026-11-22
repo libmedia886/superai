@@ -87,14 +87,15 @@ export async function buildRoom({
     await mkdir(cwd, { recursive: true });
 
     const tiers = availableTiers(m.backend);
-    let tier = m.tier ?? TIER.READONLY;
+    let tier = normalizeTier(m.backend, m.tier ?? TIER.READONLY);
     if (!tiers.length) {
       warnings.push(`不支持的后端：${m.backend}（成员 ${m.name} 不可用）`);
       continue;
     }
     if (!tiers.includes(tier)) {
-      warnings.push(`${m.backend} 不支持档位 ${tier}，成员 ${m.name} 已回退到只读`);
-      tier = TIER.READONLY;
+      const fallback = tiers[0] ?? TIER.READONLY;
+      warnings.push(`${m.backend} 不支持档位 ${tier}，成员 ${m.name} 已回退到 ${fallback}`);
+      tier = fallback;
     }
 
     /**
@@ -164,8 +165,8 @@ export async function buildRoom({
     store,
     registry: cfg.registry ?? [],
     worktreesRoot: join(dataDir, 'worktrees'),
-    /** 房间级权限天花板：AI 能创建的成员最高档位（人设定，默认只读） */
-    aiCabTier: cfg.aiCabTier ?? TIER.READONLY,
+    /** 房间级权限天花板：AI 能创建的成员最高档位（人设定，默认完全开放） */
+    aiCabTier: cfg.aiCabTier ?? TIER.FULL,
     /** 房间共享目录：成员能读，头头能写。协作不用再把整张表贴进群 */
     sharedDir,
     /** 受约束网络读取器路径：热加成员/AI 造人也要立刻拿到，不能等重启 */
@@ -174,6 +175,8 @@ export async function buildRoom({
     forbiddenRoots: allForbiddenRoots,
     /** 成员不 @ 发言时是否叫醒头头（房间级开关，默认开） */
     headPassiveWake: cfg.headPassiveWake !== false,
+    /** 成员互 @ 自由协作（房间级开关，默认开） */
+    allowPeerMentions: cfg.allowPeerMentions !== false,
     /**
      * 房间级单轮上限（分钟）。改完经 /api/room-settings 直接改 Room 实例，
      * 下一轮就生效——不能在磁盘上改了却要重启（CR-027 同一条教训）。

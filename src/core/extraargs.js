@@ -26,12 +26,17 @@ export const PROTOCOL_ARGS = {
   ],
   codex: ['exec', 'resume', '--json', '--skip-git-repo-check', '-C', '--last', '--all', '-'],
   opencode: ['run', '--format', '-s', '--session'],
+  agy: [
+    '-p', '--print', '--prompt', '--output-format', '--input-format',
+    '--conversation', '-c', '--continue',
+  ],
 };
 
 export const TIER_OVERRIDE_ARGS = {
   claude: ['--tools', '--permission-mode', '--permission-prompts', '--dangerously-skip-permissions'],
   codex: ['-s', '--sandbox', '--dangerously-bypass-approvals-and-sandbox'],
-  opencode: ['--dangerously-skip-permissions'],
+  opencode: ['--dangerously-skip-permissions', '--auto'],
+  agy: ['--mode', '--dangerously-skip-permissions', '--sandbox'],
 };
 
 /** codex 的档位参数也能写成 `-c sandbox_mode=...`，单独认一下 */
@@ -175,12 +180,13 @@ export function previewCommand({ backend, bin, tierArgs = [], model, effort, ext
   return parts.join(' ');
 }
 
-/** 模型参数名（三家都不同，且 codex 首轮/resume 只能用 -c） */
+/** 模型参数名（各家都不同，且 codex 首轮/resume 只能用 -c） */
 export function modelArgs(backend, model) {
   if (!model) return [];
   if (backend === 'claude') return ['--model', model];
   if (backend === 'codex') return ['-c', `model="${model}"`];
   if (backend === 'opencode') return ['-m', model];
+  if (backend === 'agy') return ['--model', model];
   return [];
 }
 
@@ -190,6 +196,7 @@ export function effortArgs(backend, effort) {
   if (backend === 'claude') return ['--effort', effort];
   if (backend === 'codex') return ['-c', `model_reasoning_effort="${effort}"`];
   if (backend === 'opencode') return ['--variant', effort];
+  if (backend === 'agy') return ['--effort', effort];
   return [];
 }
 
@@ -202,4 +209,5 @@ export const EFFORT_HINTS = {
   claude: ['low', 'medium', 'high', 'xhigh', 'max'],
   codex: ['minimal', 'low', 'medium', 'high', 'xhigh'],
   opencode: ['minimal', 'high', 'max'],
+  agy: ['low', 'medium', 'high', 'xhigh', 'max'],
 };

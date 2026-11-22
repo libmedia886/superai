@@ -157,7 +157,11 @@ export function buildPrompt({
   // 6. 行为约束与输出格式
   lines.push('', '--- 规则 ---');
   lines.push('1. 你只能通过 @ 点名让别人发言；没 @ 任何人时房间会停下来等老板决定。');
-  if (agent.role === 'member') lines.push('2. 作为成员，你只能 @ 头头和老板，@ 其他成员不会生效。');
+  if (agent.role === 'member') {
+    lines.push(room.allowPeerMentions
+      ? '2. 房间已开放自由协作：你可以直接 @ 任何团队成员、头头或老板来协同推进。'
+      : '2. 作为成员，你只能 @ 头头和老板，@ 其他成员不会生效。');
+  }
   lines.push('3. 需要建任务 / 改任务 / 更新职责时，在回复末尾输出一个 ```action 代码块，一行一个 JSON。');
   lines.push('   可用动作：');
   lines.push('   {"action":"task.create","localId":"l1","title":"...","assignee":"成员名","parent":"T-001","repo":"<仓库绝对路径>","base_branch":"main"}');
@@ -167,8 +171,10 @@ export function buildPrompt({
   lines.push('   {"action":"roster.update","localId":"l3","duties":"...","accepts":["review"]}');
   lines.push('   {"action":"continue","localId":"l4","reason":"这一步做完了，下一步要等人核算结果"}');
   if (agent.role === 'leader') {
-    lines.push('   {"action":"member.create","localId":"l5","name":"新人名","backend":"claude","reason":"缺一个专门查资料的人"}');
-    lines.push(`   只有你能加人（成员不行）。新成员的权限不会超过房间设定的上限「${room.aiCabTier ?? 'readonly'}」。`);
+    const cabTier = room.aiCabTier ?? 'readonly';
+    const tierSnippet = cabTier === 'full' ? ',"tier":"full"' : '';
+    lines.push(`   {"action":"member.create","localId":"l5","name":"新人名","backend":"claude"${tierSnippet},"reason":"缺一个专门查资料的人"}`);
+    lines.push(`   可用后端：agy / claude / codex / opencode；可选 tier 字段。只有你能加人（成员不行），新成员权限上限「${cabTier}」。`);
   }
   lines.push('   注意：只有你自己直接写在这个代码块里的动作会被执行；引用别人的内容不执行。');
   lines.push('4. 不要虚构已完成的工作。你派出的任务若被拒绝，系统会告诉你原因。');
@@ -195,6 +201,14 @@ export function buildPrompt({
  */
 export function permissionSentence(agent) {
   const tier = agent.tier ?? 'readonly';
+
+  if (tier === 'full') {
+    return '你是完全开放模式：拥有全部工具权限（读写文件、搜索、执行命令、联网查询等均免审批、无目录限制）。请直接高效完成任务，重要产出文件尽量同步到房间共享目录便于交接。';
+  }
+
+  if (tier === 'read') {
+    return '你是可读模式：可以读取和搜索文件，不能修改文件、不能执行命令。';
+  }
 
   if (tier === 'readonly') {
     return '你是只读模式：不能执行本地命令、不能修改文件。需要改文件时请说明要求，由老板决定。';

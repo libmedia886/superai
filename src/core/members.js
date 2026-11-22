@@ -22,7 +22,7 @@
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { availableTiers, TIER, TIER_RANK } from './probe.js';
+import { availableTiers, normalizeTier, TIER, TIER_RANK } from './probe.js';
 
 export const MAX_MEMBERS = 8;
 
@@ -80,7 +80,7 @@ export function planMemberCreation({ action, members, id, ceiling }) {
   if (!tiers.length) {
     return {
       ok: false,
-      reason: `不支持的后端「${backend}」，可用：${['claude', 'codex', 'opencode']
+      reason: `不支持的后端「${backend}」，可用：${['agy', 'claude', 'codex', 'opencode']
         .filter((b) => availableTiers(b).length).join(' / ')}`,
     };
   }
@@ -95,13 +95,38 @@ export function planMemberCreation({ action, members, id, ceiling }) {
     return { ok: false, reason: capped.reason, ceiling: ceiling ?? DEFAULT_AI_CAB_TIER };
   }
 
+  // ★ 后端档位合法性校验：避免造出无效的 backend+tier 组合
+  //   - 调用方未写 tier 且房间天花板不被该后端支持（如 codex/agy 遇到 readonly 天花板）→ 经 normalizeTier 收敛
+  //   - 调用方显式指定了该后端不支持的 tier → 明确拒绝
+  let finalTier = capped.tier;
+  if (!tiers.includes(finalTier)) {
+    if (action.tier == null) {
+      const normalized = normalizeTier(backend, finalTier);
+      if (tiers.includes(normalized)) {
+        finalTier = normalized;
+      } else {
+        const capRank = TIER_RANK[finalTier] ?? 0;
+        const underCap = tiers
+          .filter((t) => (TIER_RANK[t] ?? 0) <= capRank)
+          .sort((a, b) => (TIER_RANK[b] ?? 0) - (TIER_RANK[a] ?? 0));
+        finalTier = underCap[0] ?? tiers[0];
+      }
+    } else {
+      return {
+        ok: false,
+        reason: `${backend} 不支持档位「${finalTier}」，可选：${tiers.join(' / ')}`,
+        availableTiers: tiers,
+      };
+    }
+  }
+
   return {
     ok: true,
     member: {
       id: id ?? `m${Date.now().toString(36)}`,
       name,
       backend,
-      tier: capped.tier,
+      tier: finalTier,
       role: 'member',
       persona: typeof action.persona === 'string' ? action.persona.slice(0, 500) : '',
       createdByAgent: true,

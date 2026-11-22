@@ -1,38 +1,108 @@
-/* 群聊界面。与内核通过 SSE 单向接收、POST 单向发送。 */
+/* SuperAI 多 AI 协作工作台前端 · 纯原生 ES Module，零外部依赖 */
 
 const $ = (id) => document.getElementById(id);
 
+const BACKEND_ORDER = ['agy', 'claude', 'codex', 'opencode'];
+
+const DEFAULT_BACKEND_TIERS = {
+  agy: ['read', 'write', 'write-exec', 'full'],
+  claude: ['readonly', 'read', 'write-ask', 'write', 'write-exec', 'full'],
+  codex: ['read', 'write-exec', 'full'],
+  opencode: ['readonly', 'read', 'write', 'write-exec', 'full'],
+};
+
+const DEFAULT_EFFORT_HINTS = {
+  agy: ['low', 'medium', 'high', 'xhigh', 'max'],
+  claude: ['low', 'medium', 'high', 'max'],
+  codex: ['low', 'medium', 'high', 'xhigh'],
+  opencode: ['low', 'medium', 'high'],
+};
+
+const FALLBACK_MODEL_HINTS = {
+  agy: ['gemini-4-neon-high', 'gemini-3-pro', 'claude-sonnet-4-5'],
+  claude: ['opus', 'sonnet', 'haiku'],
+  codex: ['gpt-5.4', 'o3', 'codex-mini'],
+  opencode: [],
+};
+
+/** 档位说明文案（后端也有一份，前端兜底以保持零延迟显示） */
+const TIER_TEXT = {
+  full: ['完全开放', '无目录限制、可读写任意文件、可执行任意命令与联网（免审批）'],
+  'write-exec': ['可写+执行', '能改工作目录内的文件；命令默认全禁，需单独允许（允许后不受目录限制）'],
+  write: ['可写', '能改工作目录内的文件，不能执行命令'],
+  'write-ask': ['可写·每次询问', '能改文件，但每次写入都要你批准'],
+  read: ['可读', '能读文件和搜代码，不能改、不能执行命令'],
+  readonly: ['无工具', '完全碰不到文件：看不见也改不了，只能对话'],
+};
+
+/** 停顿原因 → 人话（和后端 PAUSE_LABEL 保持完全一致） */
+const PAUSE_LABEL = {
+  no_target: '说完了，没点名下一位',
+  timeout: '超时被中止（不是说完）',
+  interrupted: '被打断（这一轮没做完）',
+  overreach: '@ 了没权限叫的人',
+  only_human: '把话交回给老板',
+  continue_cap: '自动接力次数到上限',
+  breaker: '连续失败，暂时停用',
+  stopped: '你点了「停止」',
+  summary: '总结完毕',
+  error: '出错停住',
+  cleared: '已恢复',
+};
+
 const state = {
+  room: null,           // { id, name, goal, leaderId, sharedDir }
   members: [],
-  messages: [],       // 已渲染的消息
+  messages: [],         // 已渲染消息（供任务抽屉关联讨论）
   tasks: new Map(),
   roster: new Map(),
   registry: [],
-  current: null,      // { agentId, el, textEl, thinkingEl, text }
+  toolLog: [],
+  current: null,        // { agentId, el, textEl, thinking, actions, head, text, thinkText, startedAt }
   turnCount: 0,
   usage: 0,
   busy: false,
   pending: 0,
   currentSpeakerLast: null,
   leaderId: null,
-  toolLog: [],
+  aiCabTier: 'full',
   overridden: false,
   stopped: false,
+  allowPeerMentions: true,
   headPassiveWake: true,
-  resumeTarget: null,   // 有可续的轮次时，「继续」按钮变成「接着做完」
-  paused: null,      // {reason, detail, at}
-  continueToken: 0,  // "继续"按钮的用途：停止时=解除停止；停顿原因在时=接着往下走
+  resumeTarget: null,   // 有可续轮次时，「继续」按钮变成「接着做完」
+  paused: null,         // { reason, detail, at }
   // ---- 多房间 ----
-  rooms: [],          // [{id,name,memberCount,lastActivityAt}]
+  rooms: [],            // [{ id, name, memberCount, lastActivityAt, eventCount }]
   activeRoomId: null,
   singleFallback: false,
+  // ---- 后端诊断与模型发现 ----
+  backends: [],         // [{ id, label, installed, version, bin, tiers, defaultTier, effortHints, supportsStreaming, models, configuredModel, status, issues, probe }]
+  backendsCheckedAt: null,
+  backendsLoaded: false,
+  probingBackends: new Set(),
+  // ---- 文件浏览器 & 右栏标签 ----
+  activeTab: 'board',   // 'board' | 'files' | 'activity'
+  activityFilter: 'all',
+  filesData: null,      // { sharedDir, shared: [], agents: [] }
+  filesLoading: false,
+  filesError: null,
+  // ---- 失败横幅去重 ----
+  lastFailureBanner: null, // { agentId, detail, at }
+  // ---- SSE 连接状态 ----
+  connected: false,
+  disconnectedNotified: false,
 };
 
-const COLORS = ['#5b9dff', '#b76cf0', '#3fb950', '#d29922', '#f85149', '#39c5cf', '#e06c9f'];
+const COLORS = ['#58a6ff', '#a78bfa', '#3fb950', '#f0a050', '#f85149', '#38bdf8', '#f472b6'];
+
+/* ==========================================================================
+   基础工具函数
+   ========================================================================== */
 
 function colorFor(name) {
   let h = 0;
-  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) % COLORS.length;
+  for (const ch of String(name ?? '')) h = (h * 31 + ch.charCodeAt(0)) % COLORS.length;
   return COLORS[h];
 }
 
@@ -50,114 +120,316 @@ function fmtTokens(n) {
   return `${(n / 1_000_000).toFixed(2)}M`;
 }
 
+function fmtSize(bytes) {
+  const n = Number(bytes ?? 0);
+  if (!Number.isFinite(n) || n < 0) return '';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function fmtAgo(iso) {
+  if (!iso) return '还没有对话';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return '刚刚';
+  const min = Math.floor(ms / 60000);
+  if (min < 1) return '刚刚';
+  if (min < 60) return `${min} 分钟前`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h} 小时前`;
+  return `${Math.floor(h / 24)} 天前`;
+}
+
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
   ));
 }
 
-/**
- * 极简 Markdown：代码块 + 行内代码 + 粗体。
- * action 块不进聊天正文——实时流里由动作卡片承载；历史里直接省略
- * （历史不重放动作状态，留着占位符反而是误导）。
- */
-function renderBody(text, { live = false } = {}) {
-  const parts = String(text ?? '').split(/(```[\s\S]*?```)/g);
-  return parts.map((p) => {
-    if (p.startsWith('```')) {
-      const m = p.match(/^```([a-zA-Z]*)\n?([\s\S]*?)```$/);
-      const lang = m?.[1] ?? '';
-      const code = m?.[2] ?? p.slice(3, -3);
-      if (lang === 'action' || lang === 'actions') {
-        return live ? '' : '';
-      }
-      return `<pre><code>${escapeHtml(code.replace(/\n$/, ''))}</code></pre>`;
-    }
-    return escapeHtml(p)
-      .replace(/`([^`\n]+)`/g, '<code>$1</code>')
-      .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
-  }).join('').trim();
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/* ---------------- 渲染 ---------------- */
+async function copyText(text) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch { /* fallback below */ }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
+  ta.remove();
+  return ok;
+}
 
 function memberById(id) {
-  return state.members.find((m) => m.id === id);
+  return state.members.find((m) => m.id === id) ?? null;
 }
 
 function nameOf(id) {
   if (id === 'human') return '老板';
+  if (id === 'system') return '系统';
   return memberById(id)?.name ?? id;
+}
+
+function backendInfo(id) {
+  return state.backends.find((b) => b.id === id) ?? null;
+}
+
+function backendPillHtml(backend) {
+  const b = String(backend ?? '');
+  const cls = ['agy', 'claude', 'codex', 'opencode'].includes(b) ? b : '';
+  return `<span class="backend-pill ${cls}">${escapeHtml(b)}</span>`;
+}
+
+function tierLabel(tier) {
+  return {
+    full: '完全开放',
+    'write-exec': '可写+执行',
+    write: '可写',
+    'write-ask': '可写·询问',
+    read: '可读',
+    readonly: '无工具',
+  }[tier] ?? (tier ?? '');
+}
+
+function cabTierLabel(tier) {
+  return tierLabel(tier);
 }
 
 function avatarEl(name) {
   const el = document.createElement('div');
   el.className = 'avatar';
   el.style.background = colorFor(name);
-  el.textContent = name.slice(0, 1).toUpperCase();
+  el.textContent = String(name ?? '?').slice(0, 1).toUpperCase();
   return el;
 }
 
-function renderMemberList() {
-  const ul = $('member-list');
-  ul.innerHTML = '';
-  // 空房间：把"添加第一个成员"放在最显眼的位置。
-  // 老板的用法是"先有头头，再让头头造人"，第一个成员默认就是头头。
-  $('btn-first-member').classList.toggle('hidden', state.members.length > 0);
-  for (const m of state.members) {
-    const li = document.createElement('li');
-    li.className = 'member';
-    li.title = '点开设置：档位 / 模型 / 思考等级 / 启动参数';
-    const modelInfo = [m.model, m.effort].filter(Boolean).join(' · ');
-    li.innerHTML = `
-      <div class="member-top">
-        <span class="member-name">${escapeHtml(m.name)}</span>
-        <span class="member-role ${m.role === 'leader' ? '' : 'member'}">${m.role === 'leader' ? '头头' : '成员'}</span>
-      </div>
-      <div class="member-meta">
-        <span>${escapeHtml(m.backend)}</span>
-        <span class="tier-badge ${m.tier}">${tierLabel(m.tier)}</span>
-        ${modelInfo ? `<span class="member-model">${escapeHtml(modelInfo)}</span>` : ''}
-        ${m.overridesTier ? '<span class="member-flag" title="启动参数里有覆盖档位的项">档位被参数覆盖</span>' : ''}
-      </div>
-      ${m.sessionResetReason && m.role === 'leader' ? `<div class="session-reset" title="${escapeHtml(m.sessionResetReason)}">上下文已重置</div>` : ''}
-      ${m.timeoutSource === 'legacy' ? `<div class="timeout-legacy" title="room.json 里手写了 timeoutMs，界面上的单轮上限对它不生效">上限来自配置手写 · 实际 ${escapeHtml(String(m.effectiveTimeoutMinutes))} 分钟</div>` : ''}
-      ${approvalNote(m)}`;
-    li.querySelector('.member-top').prepend(avatarEl(m.name));
-    li.onclick = () => openMemberSettings(m.id);
-    ul.appendChild(li);
+/* ==========================================================================
+   XSS-Safe Rich Markdown Renderer
+   支持标题、粗体/斜体/删除线、行内代码、围栏代码块(+复制)、表格、列表、引用、分割线、安全链接
+   ========================================================================== */
+
+function formatInlineMarkdown(raw, { highlightMentions = false } = {}) {
+  const codeTokens = [];
+  // 先抽出行内代码，避免内部 Markdown 符号被二次解析
+  let text = String(raw ?? '').replace(/`([^`\n]+)`/g, (_, code) => {
+    const idx = codeTokens.push(`<code>${escapeHtml(code)}</code>`) - 1;
+    return `\u0000IC${idx}\u0000`;
+  });
+
+  // 全量 HTML 转义（从这里往后只插入受控标签，杜绝 XSS）
+  text = escapeHtml(text);
+
+  // 安全链接：仅放行 http:// 与 https://
+  text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => (
+    `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`
+  ));
+
+  // 粗体、删除线、斜体
+  text = text.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+  text = text.replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
+  text = text.replace(/(^|[\s(（【\[])\*([^*\n]+)\*(?=[\s.,!?;:)\]}）】]|$)/g, '$1<em>$2</em>');
+
+  // 已知成员 @ 高亮
+  if (highlightMentions && state.members.length) {
+    const sortedNames = [...state.members]
+      .map((m) => m.name)
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length);
+    if (sortedNames.length) {
+      const pattern = new RegExp(`(@(?:${sortedNames.map((n) => escapeRegExp(escapeHtml(n))).join('|')}))(?![\\w-])`, 'g');
+      text = text.replace(pattern, '<span class="mention-chip">$1</span>');
+    }
   }
+
+  // 还原行内代码
+  text = text.replace(/\u0000IC(\d+)\u0000/g, (_, i) => codeTokens[Number(i)] ?? '');
+  return text;
 }
 
-function cabTierLabel(tier) {
-  return {
-    readonly: '无工具', read: '可读', 'write-ask': '可写·询问', write: '可写', 'write-exec': '可写+执行',
-  }[tier] ?? tier;
+function isTableSeparator(line) {
+  return /^\s*\|?(\s*:?-{3,}:?\s*\|)+\s*:?-{3,}:?\s*\|?\s*$/.test(line);
 }
 
-function tierLabel(tier) {
-  if (tier === 'readonly') return '无工具';
-  if (tier === 'read') return '可读';
-  if (tier === 'write-ask') return '可写·询问';
-  if (tier === 'write') return '可写';
-  if (tier === 'write-exec') return '可写+执行';
-  return tier ?? '';
+function splitTableCells(line) {
+  return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
 }
 
-/**
- * 说清"问不问人"，而不是只说"能不能写"。
- * 默认档是**从来不问**，用户经常误以为"每次都会问我"。
- */
-/**
- * 说清这个档位**实际**能干什么。
- *
- * "自动批准"这种话不够：write-exec 在没有命令白名单时**一条命令都跑不了**，
- * 有白名单时能跑的那几条又不受目录限制。界面必须把这两种情况分开写，
- * 否则就会重演"界面说有、实际没有"，或者反过来"界面没说、实际能连外网"。
- */
+function renderMarkdown(text, { stripActions = true, highlightMentions = false } = {}) {
+  const src = String(text ?? '').replace(/\r\n?/g, '\n');
+  if (!src.trim()) return '';
+
+  // 1. 提取围栏代码块（同时按需剔除 action/actions 块）
+  const blocks = [];
+  const withPlaceholders = src.replace(/```([a-zA-Z0-9_+-]*)[ \t]*\n?([\s\S]*?)```/g, (_, langRaw, codeRaw) => {
+    const lang = String(langRaw ?? '').trim().toLowerCase();
+    if (stripActions && (lang === 'action' || lang === 'actions')) {
+      return '\n';
+    }
+    const cleanCode = String(codeRaw ?? '').replace(/\n$/, '');
+    const html = `
+      <div class="code-block">
+        <div class="code-block-head">
+          <span class="code-lang">${escapeHtml(lang || 'text')}</span>
+          <button class="code-copy-btn" type="button" data-copy-code="1">复制</button>
+        </div>
+        <pre><code>${escapeHtml(cleanCode)}</code></pre>
+      </div>`;
+    const idx = blocks.push(html) - 1;
+    return `\n\u0000CB${idx}\u0000\n`;
+  });
+
+  // 2. 逐行块级解析
+  const lines = withPlaceholders.split('\n');
+  const out = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (!trimmed) { i += 1; continue; }
+
+    // 围栏代码块占位符
+    const cbMatch = trimmed.match(/^\u0000CB(\d+)\u0000$/);
+    if (cbMatch) {
+      out.push(blocks[Number(cbMatch[1])] ?? '');
+      i += 1;
+      continue;
+    }
+
+    // 分割线
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+      out.push('<hr>');
+      i += 1;
+      continue;
+    }
+
+    // 标题 h1-h4
+    const hMatch = line.match(/^(#{1,4})\s+(.+)$/);
+    if (hMatch) {
+      const level = hMatch[1].length;
+      out.push(`<h${level}>${formatInlineMarkdown(hMatch[2].trim(), { highlightMentions })}</h${level}>`);
+      i += 1;
+      continue;
+    }
+
+    // 表格
+    if (line.includes('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
+      const headers = splitTableCells(line);
+      i += 2;
+      const rows = [];
+      while (i < lines.length && lines[i].trim() && lines[i].includes('|') && !/^\u0000CB\d+\u0000$/.test(lines[i].trim())) {
+        rows.push(splitTableCells(lines[i]));
+        i += 1;
+      }
+      const thead = `<thead><tr>${headers.map((h) => `<th>${formatInlineMarkdown(h, { highlightMentions })}</th>`).join('')}</tr></thead>`;
+      const tbody = rows.length
+        ? `<tbody>${rows.map((r) => `<tr>${headers.map((_, ci) => `<td>${formatInlineMarkdown(r[ci] ?? '', { highlightMentions })}</td>`).join('')}</tr>`).join('')}</tbody>`
+        : '';
+      out.push(`<div class="md-table-wrap"><table>${thead}${tbody}</table></div>`);
+      continue;
+    }
+
+    // 引用块
+    if (/^>\s?/.test(trimmed)) {
+      const qLines = [];
+      while (i < lines.length && /^>\s?/.test(lines[i].trim())) {
+        qLines.push(lines[i].trim().replace(/^>\s?/, ''));
+        i += 1;
+      }
+      out.push(`<blockquote>${qLines.map((q) => formatInlineMarkdown(q, { highlightMentions })).join('<br>')}</blockquote>`);
+      continue;
+    }
+
+    // 无序列表
+    if (/^\s*[-*•]\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*[-*•]\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*[-*•]\s+/, ''));
+        i += 1;
+      }
+      out.push(`<ul>${items.map((it) => `<li>${formatInlineMarkdown(it, { highlightMentions })}</li>`).join('')}</ul>`);
+      continue;
+    }
+
+    // 有序列表
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*\d+\.\s+/, ''));
+        i += 1;
+      }
+      out.push(`<ol>${items.map((it) => `<li>${formatInlineMarkdown(it, { highlightMentions })}</li>`).join('')}</ol>`);
+      continue;
+    }
+
+    // 普通段落
+    const pLines = [];
+    while (
+      i < lines.length
+      && lines[i].trim()
+      && !/^\u0000CB\d+\u0000$/.test(lines[i].trim())
+      && !/^#{1,4}\s+/.test(lines[i])
+      && !/^(-{3,}|\*{3,}|_{3,})$/.test(lines[i].trim())
+      && !/^>\s?/.test(lines[i].trim())
+      && !/^\s*[-*•]\s+/.test(lines[i])
+      && !/^\s*\d+\.\s+/.test(lines[i])
+      && !(lines[i].includes('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1]))
+    ) {
+      pLines.push(lines[i]);
+      i += 1;
+    }
+    if (pLines.length) {
+      out.push(`<p>${pLines.map((pl) => formatInlineMarkdown(pl, { highlightMentions })).join('<br>')}</p>`);
+    }
+  }
+
+  return out.join('');
+}
+
+function renderBody(text, { live = false } = {}) {
+  const cleaned = live ? String(text ?? '').split(/```actions?\b/)[0] : String(text ?? '');
+  return renderMarkdown(cleaned, { stripActions: true, highlightMentions: true });
+}
+
+/* 代码块复制按钮事件委托 */
+function bindCodeCopyDelegation(container) {
+  container.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-copy-code]');
+    if (!btn) return;
+    const codeEl = btn.closest('.code-block')?.querySelector('pre code');
+    if (!codeEl) return;
+    const ok = await copyText(codeEl.textContent ?? '');
+    if (ok) {
+      btn.textContent = '已复制 ✓';
+      btn.classList.add('copied');
+      setTimeout(() => {
+        btn.textContent = '复制';
+        btn.classList.remove('copied');
+      }, 1600);
+    }
+  });
+}
+
+/* ==========================================================================
+   左栏渲染：成员 / 名册 / 仓库 / 房间列表
+   ========================================================================== */
+
 function approvalNote(member) {
   const tier = member.tier;
   if (tier === 'readonly' || tier === 'read') return '';
+  if (tier === 'full') {
+    return '<div class="approval-note full-note">完全开放：任意文件、命令与联网（免审批）</div>';
+  }
   if (tier === 'write-ask') return '<div class="approval-note">文件写入：每次询问</div>';
   const base = '<div class="approval-note auto">文件写入：自动批准，不会询问</div>';
   if (tier !== 'write-exec') return base;
@@ -172,14 +444,49 @@ function approvalNote(member) {
     return '<div class="approval-note">命令：仅联网查资料（受限 GET，写不出工作目录）</div>';
   }
   const netPart = hasNetget ? '＋联网查资料 ' : '';
-  return `<div class="approval-note cmd">命令：${netPart}仅 ${escapeHtml(rawCmds.join(' '))} <br>`
+  return `<div class="approval-note cmd">命令：${netPart}仅 ${escapeHtml(rawCmds.join(' '))}<br>`
     + '<span class="cmd-risk">自定义命令不受目录限制</span></div>';
+}
+
+function renderMemberList() {
+  const ul = $('member-list');
+  ul.innerHTML = '';
+  $('member-count').textContent = String(state.members.length);
+  $('btn-first-member').classList.toggle('hidden', state.members.length > 0);
+
+  for (const m of state.members) {
+    const li = document.createElement('li');
+    li.className = 'member';
+    li.title = '点击编辑：后端 / 档位 / 模型 / 思考等级 / 人设';
+    const modelInfo = [m.model, m.effort].filter(Boolean).join(' · ');
+    li.innerHTML = `
+      <div class="member-top">
+        <span class="member-name">${escapeHtml(m.name)}</span>
+        <span class="member-role ${m.role === 'leader' ? '' : 'member'}">${m.role === 'leader' ? '头头' : '成员'}</span>
+        <span class="member-edit-icon" aria-hidden="true">⚙</span>
+      </div>
+      <div class="member-meta">
+        ${backendPillHtml(m.backend)}
+        <span class="tier-badge ${escapeHtml(m.tier)}">${escapeHtml(tierLabel(m.tier))}</span>
+        ${modelInfo ? `<span class="member-model" title="${escapeHtml(modelInfo)}">${escapeHtml(modelInfo)}</span>` : ''}
+        ${m.overridesTier ? '<span class="member-flag" title="启动参数里有覆盖档位的项">档位被参数覆盖</span>' : ''}
+      </div>
+      ${m.sessionResetReason && m.role === 'leader' ? `<div class="session-reset" title="${escapeHtml(m.sessionResetReason)}">上下文已重置</div>` : ''}
+      ${m.timeoutSource === 'legacy' ? `<div class="timeout-legacy" title="room.json 里手写了 timeoutMs，界面上的单轮上限对它不生效">上限来自配置手写 · 实际 ${escapeHtml(String(m.effectiveTimeoutMinutes))} 分钟</div>` : ''}
+      ${approvalNote(m)}`;
+    li.querySelector('.member-top').prepend(avatarEl(m.name));
+    li.onclick = () => openMemberSettings(m.id);
+    ul.appendChild(li);
+  }
 }
 
 function renderRoster() {
   const ul = $('roster-list');
   ul.innerHTML = '';
-  // 每个成员都列出来（不只是有自述的），否则没自述的人根本没法编辑
+  if (!state.members.length) {
+    ul.innerHTML = '<li class="empty-hint">暂无成员</li>';
+    return;
+  }
   for (const m of state.members) {
     const r = state.roster.get(m.id) ?? {};
     const duty = r.humanDuties ?? r.selfDuties ?? '（未填写）';
@@ -189,8 +496,8 @@ function renderRoster() {
     li.className = 'roster-item';
     li.innerHTML = `
       <div class="roster-line">
-        <b>${escapeHtml(m.name)}</b>：<span class="roster-duty">${escapeHtml(duty)}</span>
-        <button class="mini-btn edit-roster" title="编辑职责">✎</button>
+        <b>${escapeHtml(m.name)}</b><span class="roster-duty">${escapeHtml(duty)}</span>
+        <button class="mini-btn edit-roster" type="button" title="编辑职责">✎</button>
       </div>
       ${edited ? '<div class="roster-flag">人已编辑</div>' : ''}`;
 
@@ -207,8 +514,8 @@ function startRosterEdit(li, member, current) {
     <div class="roster-edit">
       <input class="roster-input" value="${escapeHtml(current)}" placeholder="这个成员负责什么、能接什么任务">
       <div class="roster-edit-actions">
-        <button class="btn primary tiny save">保存</button>
-        <button class="btn ghost tiny cancel">取消</button>
+        <button class="btn primary tiny save" type="button">保存</button>
+        <button class="btn ghost tiny cancel" type="button">取消</button>
       </div>
     </div>`;
   const input = li.querySelector('.roster-input');
@@ -242,34 +549,68 @@ function startRosterEdit(li, member, current) {
 function renderRepos() {
   const ul = $('repo-list');
   ul.innerHTML = '';
+  $('repo-count').textContent = String(state.registry.length);
   if (!state.registry.length) {
-    ul.innerHTML = '<li class="empty-hint">未登记仓库<br>（agent 暂不能改你的项目）</li>';
+    ul.innerHTML = '<li class="empty-hint">未登记仓库（点上方 ＋ 登记本机 Git 仓库路径）</li>';
     return;
   }
   for (const r of state.registry) {
     const li = document.createElement('li');
     li.className = 'repo-item';
-    li.textContent = r.path;
+    li.title = r.path;
+    li.innerHTML = `
+      <span class="repo-path">${escapeHtml(r.path)}</span>
+      <button class="repo-del" type="button" title="移除此仓库登记">×</button>`;
+    li.querySelector('.repo-del').onclick = () => removeRepo(r.path);
     ul.appendChild(li);
   }
 }
 
+async function removeRepo(path) {
+  if (!window.confirm(`从本房间移除仓库登记？\n${path}\n\n（不会删除磁盘上的仓库，只是不再对房间开放）`)) return;
+  const res = await fetch('/api/registry/remove', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return appendSystemNote(`移除仓库失败：${data.error ?? res.status}`, 'warn');
+  state.registry = data.registry ?? state.registry.filter((r) => r.path !== path);
+  renderRepos();
+  appendSystemNote(`已移除仓库登记：${path}`);
+}
+
+/* ==========================================================================
+   右栏渲染：看板 / 文件 / 动态
+   ========================================================================== */
+
 const STATUS_ORDER = ['待办', '进行中', '待确认', '完成', '阻塞'];
+
+/**
+ * 任务卡「账不平」标记：说明里写着阻塞、状态仍是「待办」。
+ */
+function taskLooksStuck(t) {
+  const note = String(t.note ?? '');
+  return t.status === '待办' && /阻塞|需外部渠道|等外部/.test(note);
+}
 
 function renderBoard() {
   const board = $('board');
   board.innerHTML = '';
   const tasks = [...state.tasks.values()];
+  $('tab-badge-board').textContent = String(tasks.length);
+
   if (!tasks.length) {
-    board.innerHTML = '<div class="empty-hint">暂无任务</div>';
+    board.innerHTML = '<div class="empty-hint">暂无任务。让头头或成员拆解并派发任务后会实时出现在这里。</div>';
     return;
   }
+
   for (const status of STATUS_ORDER) {
     const group = tasks.filter((t) => t.status === status);
     if (!group.length) continue;
     const col = document.createElement('div');
     col.className = 'board-col';
-    col.innerHTML = `<div class="board-col-title">${status}<span class="count">${group.length}</span></div>`;
+    col.innerHTML = `<div class="board-col-title">${escapeHtml(status)}<span class="count">${group.length}</span></div>`;
     for (const t of group) {
       const card = document.createElement('div');
       card.className = 'task-card';
@@ -287,6 +628,344 @@ function renderBoard() {
   }
 }
 
+function switchRightTab(tab) {
+  state.activeTab = tab;
+  document.querySelectorAll('.panel-tab').forEach((btn) => {
+    const active = btn.dataset.tab === tab;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-selected', String(active));
+  });
+  $('tab-board').classList.toggle('hidden', tab !== 'board');
+  $('tab-files').classList.toggle('hidden', tab !== 'files');
+  $('tab-activity').classList.toggle('hidden', tab !== 'activity');
+
+  if (tab === 'files' && !state.filesLoading) {
+    fetchFiles();
+  }
+  if (tab === 'activity') {
+    renderActivity();
+  }
+}
+
+let filesRefreshTimer = null;
+function scheduleFilesRefresh() {
+  if (filesRefreshTimer) clearTimeout(filesRefreshTimer);
+  filesRefreshTimer = setTimeout(() => {
+    filesRefreshTimer = null;
+    if (state.room) fetchFiles({ silent: true });
+  }, 800);
+}
+
+async function fetchFiles({ silent = false } = {}) {
+  if (!state.room) {
+    state.filesData = null;
+    renderFiles();
+    return;
+  }
+  state.filesLoading = true;
+  if (!silent && !state.filesData) renderFiles();
+
+  try {
+    const res = await fetch('/api/files?scope=all');
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      state.filesError = data.error ?? `读取文件列表失败（${res.status}）`;
+    } else {
+      state.filesData = data;
+      state.filesError = null;
+    }
+  } catch (err) {
+    state.filesError = err.message || '网络错误';
+  } finally {
+    state.filesLoading = false;
+    renderFiles();
+  }
+}
+
+function fileIconFor(relPath) {
+  const lower = String(relPath ?? '').toLowerCase();
+  if (lower.endsWith('.md') || lower.endsWith('.markdown')) return '📝';
+  if (lower.endsWith('.json') || lower.endsWith('.yaml') || lower.endsWith('.yml') || lower.endsWith('.toml')) return '⚙';
+  if (/\.(js|ts|jsx|tsx|py|go|rs|java|c|cpp|h|sh|css|html|sql)$/.test(lower)) return '⟨/⟩';
+  if (/\.(png|jpg|jpeg|gif|svg|webp)$/.test(lower)) return '🖼';
+  return '📄';
+}
+
+function renderFiles() {
+  const tree = $('files-tree');
+  const pathEl = $('files-shared-path');
+
+  const d = state.filesData;
+  const sharedDir = d?.sharedDir ?? state.room?.sharedDir ?? '';
+  pathEl.textContent = sharedDir ? sharedDir.split('/').slice(-2).join('/') : '共享目录';
+  pathEl.title = sharedDir;
+  $('goal-shared-btn').classList.toggle('hidden', !sharedDir);
+
+  if (state.filesLoading && !d) {
+    tree.innerHTML = '<div class="empty-hint">加载文件列表中…</div>';
+    return;
+  }
+  if (state.filesError && !d) {
+    tree.innerHTML = `<div class="empty-hint">${escapeHtml(state.filesError)}</div>`;
+    $('tab-badge-files').textContent = '0';
+    return;
+  }
+
+  const shared = d?.shared ?? [];
+  const agents = d?.agents ?? [];
+  const totalCount = shared.length + agents.reduce((acc, a) => acc + (a.files?.length ?? 0), 0);
+  $('tab-badge-files').textContent = String(totalCount);
+
+  tree.innerHTML = '';
+
+  // 共享目录分组
+  const sharedGroup = document.createElement('details');
+  sharedGroup.className = 'file-group';
+  sharedGroup.open = true;
+  sharedGroup.innerHTML = `
+    <summary>
+      <span>📁 房间共享目录</span>
+      <span class="file-group-count">${shared.length}</span>
+    </summary>`;
+  if (!shared.length) {
+    sharedGroup.insertAdjacentHTML('beforeend', '<div class="empty-hint">暂无共享文件。AI 写入共享目录的文档与产出将展示在这里。</div>');
+  } else {
+    const ul = document.createElement('ul');
+    ul.className = 'file-list';
+    for (const f of shared) {
+      ul.appendChild(buildFileRow(f, { scope: 'shared' }));
+    }
+    sharedGroup.appendChild(ul);
+  }
+  tree.appendChild(sharedGroup);
+
+  // 成员工作区分组
+  for (const ag of agents) {
+    const list = ag.files ?? [];
+    const det = document.createElement('details');
+    det.className = 'file-group';
+    det.open = list.length > 0 && list.length <= 12;
+    det.innerHTML = `
+      <summary>
+        <span>🤖 @${escapeHtml(ag.name ?? nameOf(ag.agentId))} 工作区</span>
+        <span class="file-group-count">${list.length}</span>
+      </summary>`;
+    if (!list.length) {
+      det.insertAdjacentHTML('beforeend', '<div class="empty-hint">工作区为空</div>');
+    } else {
+      const ul = document.createElement('ul');
+      ul.className = 'file-list';
+      for (const f of list) {
+        ul.appendChild(buildFileRow(f, { scope: 'agent', agentId: ag.agentId, agentName: ag.name ?? nameOf(ag.agentId) }));
+      }
+      det.appendChild(ul);
+    }
+    tree.appendChild(det);
+  }
+}
+
+function buildFileRow(file, ctx) {
+  const li = document.createElement('li');
+  const parts = String(file.relPath ?? '').split('/');
+  const baseName = parts[parts.length - 1] || file.relPath;
+  const dirPart = parts.length > 1 ? parts.slice(0, -1).join('/') : '';
+  const metaBits = [dirPart, file.mtime ? fmtAgo(file.mtime) : ''].filter(Boolean).join(' · ');
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'file-row';
+  btn.title = file.relPath;
+  btn.innerHTML = `
+    <span class="file-icon">${fileIconFor(file.relPath)}</span>
+    <span class="file-info">
+      <span class="file-name">${escapeHtml(baseName)}</span>
+      ${metaBits ? `<span class="file-sub">${escapeHtml(metaBits)}</span>` : ''}
+    </span>
+    <span class="file-size">${escapeHtml(fmtSize(file.size))}</span>`;
+  btn.onclick = () => openFilePreview({ ...ctx, relPath: file.relPath });
+  li.appendChild(btn);
+  return li;
+}
+
+async function openFilePreview({ scope, agentId, agentName, relPath }) {
+  $('drawer').classList.remove('hidden');
+  $('drawer-title').textContent = relPath;
+  $('drawer-meta').innerHTML = scope === 'shared'
+    ? '<span class="tier-badge read">共享目录</span>'
+    : `<span class="tier-badge">@${escapeHtml(agentName ?? nameOf(agentId))} 工作区</span>`;
+  $('drawer-actions').innerHTML = '';
+  const body = $('drawer-body');
+  body.innerHTML = '<div class="link-note">正在读取文件内容…</div>';
+
+  const qs = scope === 'shared'
+    ? `scope=shared&path=${encodeURIComponent(relPath)}`
+    : `scope=agent&agentId=${encodeURIComponent(agentId)}&path=${encodeURIComponent(relPath)}`;
+
+  try {
+    const res = await fetch(`/api/file?${qs}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      body.innerHTML = `<div class="modal-error">无法读取文件：${escapeHtml(data.error ?? String(res.status))}</div>`;
+      return;
+    }
+
+    const content = String(data.content ?? '');
+    const isBinary = Boolean(data.binary);
+    const isMd = !isBinary && /\.(md|markdown)$/i.test(relPath);
+    $('drawer-meta').innerHTML += `<span>${escapeHtml(fmtSize(data.size))}</span>`;
+
+    if (isBinary) {
+      $('drawer-actions').innerHTML = '';
+      body.innerHTML = `<div class="truncated-banner">📦 二进制文件（${escapeHtml(fmtSize(data.size))}），不支持纯文本预览。</div>`;
+      return;
+    }
+
+    // 抽屉操作按钮：Markdown 切换预览/源码 + 复制内容
+    let renderMode = isMd ? 'preview' : 'source';
+    const renderFileBody = () => {
+      body.innerHTML = '';
+      if (data.truncated) {
+        body.insertAdjacentHTML('beforeend',
+          '<div class="truncated-banner">⚠ 文件较大，已截断展示前部内容。</div>');
+      }
+      if (renderMode === 'preview') {
+        const mdWrap = document.createElement('div');
+        mdWrap.className = 'drawer-md-view md-body';
+        mdWrap.innerHTML = renderMarkdown(content, { stripActions: false, highlightMentions: false })
+          || '<div class="empty-hint">（空文件）</div>';
+        body.appendChild(mdWrap);
+      } else {
+        const pre = document.createElement('pre');
+        pre.className = 'file-code-pre';
+        const code = document.createElement('code');
+        code.textContent = content || '（空文件）';
+        pre.appendChild(code);
+        body.appendChild(pre);
+      }
+    };
+
+    const actions = $('drawer-actions');
+    actions.innerHTML = '';
+    if (isMd) {
+      const toggleBtn = document.createElement('button');
+      toggleBtn.type = 'button';
+      toggleBtn.className = 'btn ghost sm';
+      toggleBtn.textContent = '查看源码';
+      toggleBtn.onclick = () => {
+        renderMode = renderMode === 'preview' ? 'source' : 'preview';
+        toggleBtn.textContent = renderMode === 'preview' ? '查看源码' : 'Markdown 预览';
+        renderFileBody();
+      };
+      actions.appendChild(toggleBtn);
+    }
+
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'btn ghost sm';
+    copyBtn.textContent = '复制全文';
+    copyBtn.onclick = async () => {
+      const ok = await copyText(content);
+      if (ok) {
+        copyBtn.textContent = '已复制 ✓';
+        setTimeout(() => { copyBtn.textContent = '复制全文'; }, 1500);
+      }
+    };
+    actions.appendChild(copyBtn);
+
+    renderFileBody();
+  } catch (err) {
+    body.innerHTML = `<div class="modal-error">读取失败：${escapeHtml(err.message || String(err))}</div>`;
+  }
+}
+
+function renderActivity() {
+  const listEl = $('activity-list');
+  const all = state.toolLog ?? [];
+  $('tab-badge-activity').textContent = String(all.length);
+
+  const filtered = all.filter((e) => {
+    if (state.activityFilter === 'write') return e.action === 'write' || e.action === 'edit';
+    if (state.activityFilter === 'bash') return e.action === 'bash';
+    return true;
+  });
+
+  if (!filtered.length) {
+    listEl.innerHTML = '<div class="empty-hint">暂无匹配的工具操作记录</div>';
+    return;
+  }
+
+  listEl.innerHTML = '';
+  // 最新操作排在最上面
+  const recent = filtered.slice(-150).reverse();
+  for (const e of recent) {
+    const label = { write: '写入', edit: '编辑', bash: '命令', read: '读取' }[e.action] ?? (e.action ?? '工具');
+    const target = e.action === 'bash' ? (e.command ?? '') : (e.path ?? e.command ?? '');
+    const row = document.createElement('div');
+    row.className = `activity-item ${escapeHtml(e.action ?? '')}`;
+    row.innerHTML = `
+      <div class="activity-top">
+        <span class="tool-badge">${escapeHtml(label)}</span>
+        <span class="activity-actor">@${escapeHtml(nameOf(e.agentId))}</span>
+        <span class="activity-time">${escapeHtml(fmtTime(e.at))}</span>
+      </div>
+      <div class="activity-target">${escapeHtml(String(target).slice(0, 260))}</div>`;
+    listEl.appendChild(row);
+  }
+}
+
+/* ==========================================================================
+   状态栏、目标栏与后端健康胶囊
+   ========================================================================== */
+
+function renderGoalBar() {
+  const goal = String(state.room?.goal ?? '').trim();
+  const textEl = $('goal-text');
+  if (goal) {
+    textEl.textContent = goal;
+    textEl.classList.remove('placeholder');
+    textEl.title = goal;
+  } else {
+    textEl.textContent = '点击设定本房间目标，让 AI 团队明确交付标准…';
+    textEl.classList.add('placeholder');
+    textEl.title = '';
+  }
+  $('goal-shared-btn').classList.toggle('hidden', !(state.room?.sharedDir || state.filesData?.sharedDir));
+}
+
+function openGoalEditor() {
+  if (!state.room) return;
+  $('goal-display').classList.add('hidden');
+  $('goal-editor').classList.remove('hidden');
+  const inp = $('goal-input');
+  inp.value = state.room.goal ?? '';
+  inp.focus();
+  inp.select();
+}
+
+function closeGoalEditor() {
+  $('goal-editor').classList.add('hidden');
+  $('goal-display').classList.remove('hidden');
+}
+
+async function saveGoal(e) {
+  e.preventDefault();
+  if (!state.room) return;
+  const goal = $('goal-input').value.trim();
+  const res = await fetch('/api/room-settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ goal }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    appendSystemNote(`保存房间目标失败：${data.error ?? res.status}`, 'warn');
+    return;
+  }
+  state.room.goal = goal;
+  renderGoalBar();
+  closeGoalEditor();
+}
+
 function renderStatus() {
   const sp = $('speaker');
   if (state.current) {
@@ -294,31 +973,38 @@ function renderStatus() {
   } else if (state.busy) {
     sp.innerHTML = `<span class="dot busy"></span><span>执行中…</span>`;
   } else if (state.pending > 0) {
-    // 队列里还有人：不能说"等待人类"，否则看起来像卡住了
     sp.innerHTML = `<span class="dot busy"></span><span>还有 <b>${state.pending}</b> 人待发言</span>`;
   } else if (state.currentSpeakerLast) {
-    sp.innerHTML = `<span class="dot idle"></span><span>已停止发言，等你决定</span>`;
+    sp.innerHTML = `<span class="dot idle"></span><span>已停手，等你指示</span>`;
   } else {
     sp.innerHTML = `<span class="dot idle"></span><span>等待人类</span>`;
   }
+
   $('turn-count').textContent = String(state.turnCount);
   $('usage').textContent = fmtTokens(state.usage);
   $('btn-interrupt').disabled = !state.current;
-  // 停止是一个"刹车"，必须一眼看到，而且要有松开的地方
   $('stopped-badge').classList.toggle('hidden', !state.stopped);
 
-  // 停顿原因：有就写清楚（"停在：@ 了没权限叫的人"），没有就不显示
+  const qEl = $('queue');
+  if (state.pending > 0 && state.current) {
+    qEl.textContent = `排队 ${state.pending}`;
+    qEl.classList.remove('hidden');
+  } else {
+    qEl.classList.add('hidden');
+  }
+
+  // 停顿原因：停下/思考/坏了必须可分
   const pausedEl = $('paused-badge');
   if (state.paused && !state.stopped && !state.current && !state.busy) {
     pausedEl.classList.remove('hidden');
     pausedEl.innerHTML = `停在：<strong>${escapeHtml(PAUSE_LABEL[state.paused.reason] ?? state.paused.reason)}</strong>`
-      + (state.paused.detail ? ` · ${escapeHtml(state.paused.detail.slice(0, 80))}` : '');
+      + (state.paused.detail ? ` · ${escapeHtml(state.paused.detail.slice(0, 72))}` : '');
     pausedEl.title = state.paused.detail ?? '';
   } else {
     pausedEl.classList.add('hidden');
   }
 
-  // 「继续」在停止时用来松刹车，在停住时用来接着往下走
+  // 「继续」在停止时用来松刹车，在停住时用来接着往下走（保持不变量表达式）
   const canContinue = state.stopped || (Boolean(state.paused) && !state.busy && !state.current);
   $('btn-resume').classList.toggle('hidden', !canContinue);
   $('btn-resume').textContent = state.stopped
@@ -327,9 +1013,200 @@ function renderStatus() {
   $('btn-stop').classList.toggle('hidden', state.stopped);
 }
 
-/* ---------------- 房间列表 ---------------- */
+function renderBackendPills() {
+  const host = $('bp-dots');
+  if (!host) return;
+  if (!state.backends.length) {
+    host.innerHTML = '<span class="bp-item"><span class="dot idle"></span>检测中</span>';
+    return;
+  }
+  const ordered = BACKEND_ORDER
+    .map((id) => backendInfo(id))
+    .filter(Boolean);
+  const extra = state.backends.filter((b) => !BACKEND_ORDER.includes(b.id));
+  const list = [...ordered, ...extra];
 
-/** URL 里的房间：`#room=<id>`。刷新要回到原房间，所以必须进 URL。 */
+  host.innerHTML = list.map((b) => {
+    const st = b.status ?? (b.installed ? 'ready' : 'missing');
+    return `<span class="bp-item" title="${escapeHtml(`${b.id}: ${st}${b.version ? ` (${b.version})` : ''}`)}">`
+      + `<span class="dot ${escapeHtml(st)}"></span>${escapeHtml(b.id)}</span>`;
+  }).join('');
+}
+
+/* ==========================================================================
+   后端诊断与模型发现弹窗 (#backends-modal)
+   ========================================================================== */
+
+async function fetchBackends({ silent = true, force = false } = {}) {
+  try {
+    const res = await fetch(force ? '/api/backends?force=1' : '/api/backends');
+    if (!res.ok) return;
+    const data = await res.json().catch(() => null);
+    if (!data?.backends) return;
+    state.backends = data.backends;
+    state.backendsCheckedAt = data.checkedAt ?? new Date().toISOString();
+    state.backendsLoaded = true;
+    renderBackendPills();
+    if (!$('backends-modal').classList.contains('hidden')) renderBackendsModal();
+    if (mm && !$('member-modal').classList.contains('hidden')) {
+      syncBackendSelectOptions();
+      renderModelHints();
+    }
+  } catch (err) {
+    if (!silent) appendSystemNote(`获取后端诊断失败：${err.message}`, 'warn');
+  }
+}
+
+async function probeBackend(target) {
+  const key = target === 'all' ? 'all' : target;
+  state.probingBackends.add(key);
+  renderBackendsModal();
+  try {
+    const res = await fetch('/api/backends/probe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ backend: key }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      appendSystemNote(`后端探测失败：${data.error ?? res.status}`, 'warn');
+    } else if (Array.isArray(data.backends)) {
+      state.backends = data.backends;
+      state.backendsCheckedAt = new Date().toISOString();
+      state.backendsLoaded = true;
+      renderBackendPills();
+    }
+  } catch (err) {
+    appendSystemNote(`后端探测异常：${err.message}`, 'warn');
+  } finally {
+    state.probingBackends.delete(key);
+    renderBackendsModal();
+    if (mm && !$('member-modal').classList.contains('hidden')) {
+      syncBackendSelectOptions();
+      renderModelHints();
+    }
+  }
+}
+
+function openBackendsModal() {
+  $('backends-modal').classList.remove('hidden');
+  renderBackendsModal();
+  fetchBackends({ silent: false });
+}
+
+function closeBackendsModal() {
+  $('backends-modal').classList.add('hidden');
+}
+
+function backendStatusLabel(status) {
+  if (status === 'ready') return '可用';
+  if (status === 'warn') return '需注意';
+  return '未安装 / 不可用';
+}
+
+function renderBackendsModal() {
+  const listEl = $('bm-list');
+  const checkedEl = $('bm-checked-at');
+  checkedEl.textContent = state.backendsCheckedAt
+    ? `上次检测：${fmtAgo(state.backendsCheckedAt)} · 实测连通性会向 CLI 发送极简探针请求`
+    : '检测本机 agy / claude / codex / opencode 安装状态、可用模型与连通性';
+
+  const probingAll = state.probingBackends.has('all');
+  $('bm-probe-all').disabled = probingAll;
+  $('bm-probe-all').textContent = probingAll ? '探测中…' : '⚡ 全部探测';
+
+  if (!state.backends.length) {
+    listEl.innerHTML = '<div class="empty-hint">暂无后端诊断数据，请点击右上角「刷新列表」。</div>';
+    return;
+  }
+
+  const ordered = [
+    ...BACKEND_ORDER.map((id) => backendInfo(id)).filter(Boolean),
+    ...state.backends.filter((b) => !BACKEND_ORDER.includes(b.id)),
+  ];
+
+  listEl.innerHTML = '';
+  for (const b of ordered) {
+    const st = b.status ?? (b.installed ? 'ready' : 'missing');
+    const probing = probingAll || state.probingBackends.has(b.id);
+    const models = Array.isArray(b.models) ? b.models : [];
+    const issues = Array.isArray(b.issues) ? b.issues : [];
+    const tiers = Array.isArray(b.tiers) ? b.tiers : (DEFAULT_BACKEND_TIERS[b.id] ?? []);
+
+    const card = document.createElement('div');
+    card.className = `backend-card status-${escapeHtml(st)}`;
+    card.innerHTML = `
+      <div class="bc-head">
+        <div class="bc-title-group">
+          ${backendPillHtml(b.id)}
+          <span class="bc-label">${escapeHtml(b.label ?? b.id)}</span>
+        </div>
+        <span class="bc-status ${escapeHtml(st)}">
+          <span class="dot ${escapeHtml(st)}"></span>${escapeHtml(backendStatusLabel(st))}
+        </span>
+      </div>
+
+      <div class="bc-meta">
+        ${b.version ? `<span class="bc-tag">v ${escapeHtml(b.version)}</span>` : '<span class="bc-tag">未检测到版本</span>'}
+        <span class="bc-tag">${b.supportsStreaming ? '流式输出' : '整段返回'}</span>
+        ${b.bin ? `<span class="bc-tag" title="${escapeHtml(b.bin)}">${escapeHtml(b.bin)}</span>` : ''}
+      </div>
+
+      <div>
+        <div class="bc-section-label">已发现模型（${models.length}）${b.configuredModel ? ` · 当前配置：${escapeHtml(b.configuredModel)}` : ''}</div>
+        <div class="bc-models">
+          ${models.length
+            ? models.map((m) => `<button type="button" class="bc-model-pill${m === b.configuredModel ? ' configured' : ''}" data-copy-model="${escapeHtml(m)}" title="点击复制模型名：${escapeHtml(m)}">${escapeHtml(m)}</button>`).join('')
+            : '<span class="field-hint">未发现模型列表（留空将使用 CLI 默认配置）</span>'}
+        </div>
+      </div>
+
+      <div>
+        <div class="bc-section-label">支持档位</div>
+        <div class="member-meta">
+          ${tiers.map((t) => `<span class="tier-badge ${escapeHtml(t)}">${escapeHtml(tierLabel(t))}</span>`).join('')}
+        </div>
+      </div>
+
+      ${issues.length ? `
+        <div class="bc-issues">
+          ${issues.map((iss) => `<div class="bc-issue">⚠ ${escapeHtml(iss)}</div>`).join('')}
+        </div>` : ''}
+
+      ${b.probe ? `
+        <div class="bc-probe-res ${b.probe.ok ? 'ok' : 'fail'}">
+          ${b.probe.ok ? '✓ 连通性实测通过' : '✗ 连通性实测失败'}
+          ${b.probe.reason ? ` · ${escapeHtml(b.probe.reason)}` : ''}
+          ${b.probe.at ? `（${escapeHtml(fmtAgo(b.probe.at))}）` : ''}
+        </div>` : ''}
+
+      <div class="bc-foot">
+        <span class="field-hint">${b.defaultTier ? `默认档位：${escapeHtml(tierLabel(b.defaultTier))}` : ''}</span>
+        <button class="btn ghost sm probe-btn" type="button" ${probing || !b.installed ? 'disabled' : ''}>
+          ${probing ? '实测中…' : '⚡ 实测连通性'}
+        </button>
+      </div>`;
+
+    card.querySelector('.probe-btn').onclick = () => probeBackend(b.id);
+    card.querySelectorAll('[data-copy-model]').forEach((pill) => {
+      pill.onclick = async () => {
+        const modelId = pill.dataset.copyModel;
+        const ok = await copyText(modelId);
+        if (ok) {
+          const orig = pill.textContent;
+          pill.textContent = `${orig} ✓`;
+          setTimeout(() => { pill.textContent = orig; }, 1200);
+        }
+      };
+    });
+    listEl.appendChild(card);
+  }
+}
+
+/* ==========================================================================
+   多房间管理
+   ========================================================================== */
+
 function hashRoomId() {
   const m = location.hash.match(/^#room=([^&]+)$/);
   return m ? decodeURIComponent(m[1]) : null;
@@ -342,7 +1219,6 @@ function setHashRoom(id) {
 
 function showRoomList() {
   $('rooms-view').classList.remove('hidden');
-  // 有当前房间时给一个"返回"出口；没有房间时列表本身就是唯一界面
   $('rooms-close').classList.toggle('hidden', !state.activeRoomId);
   renderRoomList();
   $('rooms-new-name').focus();
@@ -350,18 +1226,6 @@ function showRoomList() {
 
 function hideRoomList() {
   $('rooms-view').classList.add('hidden');
-}
-
-function fmtAgo(iso) {
-  if (!iso) return '还没有对话';
-  const ms = Date.now() - new Date(iso).getTime();
-  if (!Number.isFinite(ms) || ms < 0) return '';
-  const min = Math.floor(ms / 60000);
-  if (min < 1) return '刚刚有动静';
-  if (min < 60) return `${min} 分钟前`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return `${h} 小时前`;
-  return `${Math.floor(h / 24)} 天前`;
 }
 
 function renderRoomList() {
@@ -376,7 +1240,7 @@ function renderRoomList() {
   if (!state.rooms.length) {
     const empty = document.createElement('div');
     empty.className = 'rooms-empty';
-    empty.textContent = '还没有房间。在下面输入一个名字就能建第一个。';
+    empty.textContent = '还没有房间。在下面输入名字即可创建第一个协作空间。';
     list.appendChild(empty);
     return;
   }
@@ -384,53 +1248,83 @@ function renderRoomList() {
   for (const r of state.rooms) {
     const card = document.createElement('div');
     card.className = `room-card${r.id === state.activeRoomId ? ' active' : ''}`;
+    const evMeta = r.eventCount != null ? ` · ${r.eventCount} 条记录` : '';
     card.innerHTML = `
       <div class="room-card-main">
         <div class="room-card-name">${escapeHtml(r.name)}</div>
-        <div class="room-card-meta">${r.memberCount} 个成员 · ${fmtAgo(r.lastActivityAt)}</div>
+        <div class="room-card-meta">${r.memberCount} 个成员${evMeta} · ${fmtAgo(r.lastActivityAt)}</div>
       </div>
       ${r.id === state.activeRoomId ? '<span class="room-card-current">当前</span>' : ''}
-      <button class="icon-btn rename" title="只改显示名，不影响对话记录">重命名</button>
-      <button class="icon-btn del" title="删除房间（目录进 .trash，不清空）">删除</button>`;
+      <button class="icon-btn rename" type="button" title="只改显示名，不影响对话记录">重命名</button>
+      <button class="icon-btn del" type="button" title="删除房间（目录移入 .trash，不清空）">删除</button>`;
 
     card.onclick = (e) => {
-      if (e.target.closest('.rename, .del')) return;
+      if (e.target.closest('.rename, .del, .room-rename-inline')) return;
       enterRoom(r.id);
     };
     card.querySelector('.del').onclick = (e) => {
       e.stopPropagation();
       deleteRoom(r);
     };
-    card.querySelector('.rename').onclick = async (e) => {
+    card.querySelector('.rename').onclick = (e) => {
       e.stopPropagation();
-      const name = window.prompt('房间的新名字（只改显示名，对话记录不受影响）：', r.name);
-      if (!name || name.trim() === r.name) return;
-      const res = await fetch('/api/rooms', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'rename', id: r.id, name: name.trim() }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) return appendSystemNote(`重命名失败：${data.error ?? res.status}`, 'warn');
-      r.name = data.room?.name ?? name.trim();
-      if (r.id === state.activeRoomId) $('room-name').textContent = r.name;
-      renderRoomList();
+      startInlineRoomRename(card, r);
     };
     list.appendChild(card);
   }
 }
 
-/** 左栏的房间列表。这里才是日常入口；房间里也能看到别的房间并一键切过去。 */
+function startInlineRoomRename(card, r) {
+  const main = card.querySelector('.room-card-main');
+  main.innerHTML = `
+    <div class="room-rename-inline">
+      <input type="text" value="${escapeHtml(r.name)}" maxlength="40" autocomplete="off">
+      <button class="btn primary tiny save" type="button">保存</button>
+      <button class="btn ghost tiny cancel" type="button">取消</button>
+    </div>`;
+  const inp = main.querySelector('input');
+  inp.focus();
+  inp.select();
+
+  const submit = async () => {
+    const name = inp.value.trim();
+    if (!name || name === r.name) { renderRoomList(); return; }
+    const res = await fetch('/api/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'rename', id: r.id, name }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      appendSystemNote(`重命名失败：${data.error ?? res.status}`, 'warn');
+      renderRoomList();
+      return;
+    }
+    r.name = data.room?.name ?? name;
+    if (r.id === state.activeRoomId) {
+      if (state.room) state.room.name = r.name;
+      $('room-name').textContent = r.name;
+      document.title = `${r.name} · SuperAI`;
+    }
+    renderSidebarRooms();
+    renderRoomList();
+  };
+
+  main.querySelector('.save').onclick = submit;
+  main.querySelector('.cancel').onclick = () => renderRoomList();
+  inp.onkeydown = (e) => {
+    if (e.key === 'Enter') submit();
+    if (e.key === 'Escape') renderRoomList();
+  };
+}
+
 function renderSidebarRooms() {
   const ul = $('room-list');
   if (!ul) return;
   ul.innerHTML = '';
 
   if (!state.rooms.length) {
-    const li = document.createElement('li');
-    li.className = 'room-item empty';
-    li.textContent = '还没有房间';
-    ul.appendChild(li);
+    ul.innerHTML = '<li class="room-item empty">还没有房间</li>';
     return;
   }
 
@@ -440,10 +1334,13 @@ function renderSidebarRooms() {
     li.innerHTML = `
       <button class="room-item-main" type="button">
         <span class="room-item-name">${escapeHtml(r.name)}</span>
-        <span class="room-item-meta">${r.memberCount} 人</span>
+        <span class="room-item-meta">${r.memberCount}</span>
       </button>
       <button class="room-item-del" type="button" title="删除房间">×</button>`;
-    li.querySelector('.room-item-main').onclick = () => enterRoom(r.id);
+    li.querySelector('.room-item-main').onclick = () => {
+      closeMobileDrawers();
+      enterRoom(r.id);
+    };
     li.querySelector('.room-item-del').onclick = (e) => {
       e.stopPropagation();
       deleteRoom(r);
@@ -452,10 +1349,6 @@ function renderSidebarRooms() {
   }
 }
 
-/**
- * 删除房间。**二次确认在这里**（服务端只管"不能删最后一个"和"先切后删"）。
- * 文案要说清两件事：数据进了 .trash 而不是被清空；删的是当前房间会先换房间。
- */
 async function deleteRoom(r) {
   if (state.rooms.length <= 1) {
     appendSystemNote('不能删除最后一个房间。先新建一个，再删这个。', 'warn');
@@ -464,7 +1357,7 @@ async function deleteRoom(r) {
   const isActive = r.id === state.activeRoomId;
   const lines = [`删除房间「${r.name}」？`, ''];
   if (isActive) lines.push('这是当前房间：会先切到另一个房间，然后再删除。');
-  lines.push('房间目录会移到 rooms/.trash-*（不会被清空），但界面上不再出现，对话也不会再显示。');
+  lines.push('房间目录会移到 rooms/.trash-*（不会被清空），但界面上不再出现。');
   lines.push('', '确认删除吗？');
   if (!window.confirm(lines.join('\n'))) return;
 
@@ -480,7 +1373,6 @@ async function deleteRoom(r) {
   if (data.killed === false) appendSystemNote('旧房间的进程未在超时内退出，已冻结其写入', 'warn');
   appendSystemNote(`已删除房间「${data.deleted?.name ?? r.name}」`);
 
-  // 通常 rooms.updated / room.init 会先到；这里同步一份，避免列表短暂显示已删房间
   state.rooms = state.rooms.filter((x) => x.id !== r.id);
   if (isActive && data.switchedTo) {
     state.activeRoomId = data.switchedTo;
@@ -490,7 +1382,6 @@ async function deleteRoom(r) {
   renderRoomList();
 }
 
-/** 进入房间：写 hash 并让服务端切过去。状态由随后的 room.init 驱动。 */
 let pendingEnter = null;
 
 async function enterRoom(id) {
@@ -515,8 +1406,6 @@ async function enterRoom(id) {
   if (data.dropped) appendSystemNote(`切换房间，丢弃了 ${data.dropped} 条过期排队发言`, 'warn');
   if (data.killed === false) appendSystemNote('旧房间的进程未在超时内退出，已冻结其写入', 'warn');
 
-  // 服务端说"本来就是这个房间"（比如刚建完就已经切过去了）→ 不会有新的 room.init 到达，
-  // 必须就地收尾，否则会卡在列表页等一个永远不来的事件。
   if (data.changed === false) {
     pendingEnter = null;
     state.activeRoomId = id;
@@ -524,12 +1413,6 @@ async function enterRoom(id) {
   }
 }
 
-/**
- * room.init 到达后决定显示列表还是房间内容。规则只有三条：
- *  1. 刚从列表点进来（pendingEnter 命中）→ 进房间
- *  2. URL 里的房间就是当前房间（刷新 / 收藏链接）→ 进房间
- *  3. 其余（首次打开、URL 指向不存在的房间）→ 落地页 = 房间列表
- */
 function decideView(previousRoomId) {
   const wanted = hashRoomId();
 
@@ -546,66 +1429,93 @@ function decideView(previousRoomId) {
     return;
   }
   if (wanted && wanted !== state.activeRoomId && state.rooms.some((r) => r.id === wanted)) {
-    // 链接指向另一个房间：切过去（enterRoom 会写 hash 并等新的 room.init）
     enterRoom(wanted);
     return;
   }
-  // 首次打开 / 无效链接 → 房间列表。
-  // 注意这里不改 hash：用户从列表点进房间时才写，刷新才能回到原房间。
   if (!previousRoomId || !wanted) setHashRoom(null);
   showRoomList();
 }
 
-/** 把界面清成"刚打开这个房间"的状态（切换房间时用，不能沿用上一个房间的任何东西） */
 function resetRoomView() {
+  state.room = null;
   state.members = [];
   state.messages = [];
   state.tasks = new Map();
   state.roster = new Map();
   state.registry = [];
   state.toolLog = [];
+  state.filesData = null;
+  state.filesError = null;
   state.current = null;
   state.turnCount = 0;
   state.usage = 0;
   state.busy = false;
   state.pending = 0;
   state.currentSpeakerLast = null;
-  // 停止/停顿状态属于房间私有：换房间时必须清掉，
-  // 否则新房间会顶着上一个房间的红色「已停止」——和"刷新后徽章撒谎"同一类 bug。
   state.stopped = false;
   state.paused = null;
   state.resumeTarget = null;
-  // 换房间要重新判断：新房间可能没有这个问题（也可能是另一个）
+  state.lastFailureBanner = null;
   seqWarningDismissed = false;
   $('seq-warn')?.classList.add('hidden');
   $('stream').innerHTML = '';
   $('loop-warn').classList.add('hidden');
   $('btn-stop').classList.remove('urgent');
   $('mention-hint').textContent = '';
+  closeGoalEditor();
   closeMentionMenu();
   setOverridden(false);
 }
 
-/** 停顿原因 → 人话（和后端 PAUSE_LABEL 保持一致） */
-const PAUSE_LABEL = {
-  no_target: '说完了，没点名下一位',
-  overreach: '@ 了没权限叫的人',
-  only_human: '把话交回给老板',
-  continue_cap: '自动接力次数到上限',
-  breaker: '连续失败，暂时停用',
-  stopped: '你点了「停止」',
-  summary: '总结完毕',
-  timeout: '超时被中止（不是说完）',
-  interrupted: '被打断（这一轮没做完）',
-  error: '出错停住',
-  cleared: '已恢复',
-};
+/* ==========================================================================
+   聊天流与失败横幅
+   ========================================================================== */
 
-/* ---------------- 消息流 ---------------- */
+function clearWelcomeCard() {
+  $('stream').querySelector('.welcome-card')?.remove();
+}
+
+function maybeRenderWelcomeCard() {
+  const s = $('stream');
+  if (s.children.length > 0 || !state.room) return;
+  const card = document.createElement('div');
+  card.className = 'welcome-card';
+  const hasMembers = state.members.length > 0;
+  card.innerHTML = `
+    <h3>欢迎来到「${escapeHtml(state.room.name)}」</h3>
+    <p>${hasMembers
+      ? '在下方直接发消息或输入 @ 点名成员开始协作。你也可以先设定房间目标，或在顶部查看本机 CLI 后端状态。'
+      : '这是一个全新的空房间。先添加第一个 AI 成员（会自动成为头头），即可开始多智能体协作。'}</p>
+    <div class="welcome-actions">
+      ${hasMembers
+        ? '<button class="btn ghost sm" type="button" data-welcome-goal="1">◎ 设定房间目标</button>'
+        : '<button class="btn primary sm" type="button" data-welcome-add="1">＋ 添加第一个成员</button>'}
+      <button class="btn ghost sm" type="button" data-welcome-diag="1">⚡ 检查后端与模型</button>
+    </div>`;
+  card.querySelector('[data-welcome-add]')?.addEventListener('click', () => openNewMember());
+  card.querySelector('[data-welcome-goal]')?.addEventListener('click', () => openGoalEditor());
+  card.querySelector('[data-welcome-diag]')?.addEventListener('click', () => openBackendsModal());
+  s.appendChild(card);
+}
+
+function isNearBottom() {
+  const s = $('stream');
+  return (s.scrollHeight - s.scrollTop - s.clientHeight) < 140;
+}
+
+function scrollToBottom({ force = false } = {}) {
+  const s = $('stream');
+  if (force || isNearBottom()) {
+    s.scrollTop = s.scrollHeight;
+    $('btn-scroll-bottom').classList.add('hidden');
+  }
+}
 
 function ensureTurnEl(agentId) {
   if (state.current?.agentId === agentId) return state.current;
+  clearWelcomeCard();
 
+  const member = memberById(agentId);
   const wrap = document.createElement('div');
   wrap.className = 'msg agent streaming';
 
@@ -616,7 +1526,8 @@ function ensureTurnEl(agentId) {
   head.className = 'msg-head';
   head.innerHTML = `
     <span class="msg-who" style="color:${colorFor(nameOf(agentId))}">${escapeHtml(nameOf(agentId))}</span>
-    <span class="msg-role">${memberById(agentId)?.role === 'leader' ? '头头' : '成员'}</span>
+    <span class="msg-role">${member?.role === 'leader' ? '头头' : '成员'}</span>
+    ${member?.backend ? backendPillHtml(member.backend) : ''}
     <span class="msg-time"></span>`;
 
   const thinking = document.createElement('details');
@@ -624,7 +1535,7 @@ function ensureTurnEl(agentId) {
   thinking.innerHTML = '<summary>思考了 0.0 秒</summary><div class="thinking-body"></div>';
 
   const textEl = document.createElement('div');
-  textEl.className = 'msg-body';
+  textEl.className = 'msg-body md-body';
 
   const actions = document.createElement('div');
   actions.className = 'action-area';
@@ -653,6 +1564,7 @@ function finishTurn(durationMs) {
 }
 
 function appendHumanMessage(m) {
+  clearWelcomeCard();
   const wrap = document.createElement('div');
   wrap.className = 'msg human';
   const av = avatarEl('老板');
@@ -660,24 +1572,14 @@ function appendHumanMessage(m) {
   content.innerHTML = `
     <div class="msg-head">
       <span class="msg-who">老板</span>
-      <span class="msg-time">${fmtTime(m.at)}</span>
+      <span class="msg-time">${escapeHtml(fmtTime(m.at))}</span>
     </div>
-    <div class="msg-body">${renderBody(m.body)}</div>`;
+    <div class="msg-body md-body">${renderBody(m.body)}</div>`;
   wrap.append(av, content);
   $('stream').appendChild(wrap);
-  scrollToBottom();
+  scrollToBottom({ force: true });
 }
 
-/**
- * 一轮没有正常结束 → 一句人话；正常轮返回 null。
- *
- * 硬上限杀掉的那一轮最常见的形态是**一个字都没有**：AI 还在联网取资料，
- * 进程到点被杀，body 为空。以前历史里 `if (!m.body) return` 整条跳过，
- * 实时分支渲染成空气泡后照常收尾——用户只看到房间停了，一句解释都没有。
- *
- * `status` 是 room.js 落的原值：completed / timeout / crashed / failed /
- * interrupted / 已中断。只有非正常值才显示，正常轮不加噪音。
- */
 function turnFailureText(m) {
   const secs = m?.durationMs ? `${Math.round(m.durationMs / 1000)}s` : null;
   const hasBody = Boolean(String(m?.body ?? '').trim());
@@ -697,32 +1599,32 @@ function turnFailureText(m) {
   }
 }
 
-/** 历史里的 agent 消息（重开应用时补渲染，不带流式状态） */
 function appendHistoryAgentMessage(m) {
+  clearWelcomeCard();
   if (m.passed) return appendPassedNote(m.senderId);
   const failText = turnFailureText(m);
-  // 正文为空、也不是异常结束（旧数据里的空轮）：没有可说的，保持不显示
   if (!m.body && !failText) return;
+
+  const member = memberById(m.senderId);
   const wrap = document.createElement('div');
   wrap.className = 'msg agent';
+  if (m.isSummary) wrap.classList.add('summary');
   const av = avatarEl(nameOf(m.senderId));
   const content = document.createElement('div');
   content.innerHTML = `
     <div class="msg-head">
       <span class="msg-who" style="color:${colorFor(nameOf(m.senderId))}">${escapeHtml(nameOf(m.senderId))}</span>
-      <span class="msg-role">${memberById(m.senderId)?.role === 'leader' ? '头头' : '成员'}</span>
+      <span class="msg-role">${member?.role === 'leader' ? '头头' : '成员'}</span>
+      ${member?.backend ? backendPillHtml(member.backend) : ''}
       ${m.isSummary ? '<span class="summary-tag">总结</span>' : ''}
-      <span class="msg-time">${fmtTime(m.at)}${m.durationMs ? ` · ${(m.durationMs / 1000).toFixed(1)}s` : ''}</span>
+      <span class="msg-time">${escapeHtml(fmtTime(m.at))}${m.durationMs ? ` · ${(m.durationMs / 1000).toFixed(1)}s` : ''}</span>
     </div>
-    <div class="msg-body">${renderBody(m.body)}</div>`;
-  if (m.isSummary) wrap.classList.add('summary');
+    <div class="msg-body md-body">${renderBody(m.body)}</div>`;
   wrap.append(av, content);
   $('stream').appendChild(wrap);
-  // 失败/超时单独一行，不混进正常发言；空 body 的那一轮也靠它才算"看得见"
   if (failText) appendSystemNote(`${nameOf(m.senderId)} ${failText}`, 'warn');
 }
 
-/** 把刚说完的那条标记成总结：事后翻记录要能一眼分清结论和过程 */
 function markAsSummary() {
   const msgs = $('stream').querySelectorAll('.msg.agent');
   const last = msgs[msgs.length - 1];
@@ -737,19 +1639,44 @@ function markAsSummary() {
   }
 }
 
-/** 写操作小行：挂在当前发言下面，让人能实时看到"它动了什么" */
+/** 可操作的失败横幅：把真实 CLI 报错直接展示出来，并给一键直达设置/诊断的入口 */
+function appendFailureBanner({ agentId = null, title, detail = '' }) {
+  clearWelcomeCard();
+  const member = agentId ? memberById(agentId) : null;
+  const el = document.createElement('div');
+  el.className = 'failure-banner';
+  el.innerHTML = `
+    <div class="failure-banner-head">
+      <div class="failure-banner-title">
+        <span>⚠</span>
+        <span>${escapeHtml(title)}</span>
+        ${member?.backend ? backendPillHtml(member.backend) : ''}
+      </div>
+    </div>
+    ${detail ? `<pre class="failure-banner-detail">${escapeHtml(detail)}</pre>` : ''}
+    <div class="failure-banner-actions">
+      ${member ? `<button class="btn sm primary open-member-btn" type="button">⚙ 打开设置检查模型/后端</button>` : ''}
+      <button class="btn sm ghost open-diag-btn" type="button">⚡ 打开后端诊断</button>
+    </div>`;
+
+  el.querySelector('.open-member-btn')?.addEventListener('click', () => openMemberSettings(member.id));
+  el.querySelector('.open-diag-btn')?.addEventListener('click', () => openBackendsModal());
+
+  $('stream').appendChild(el);
+  scrollToBottom();
+}
+
 function appendToolNote(ev) {
   const host = state.current?.actions ?? $('stream');
-  const label = { write: '写入', edit: '编辑', bash: '执行命令' }[ev.action] ?? ev.action;
+  const label = { write: '写入', edit: '编辑', bash: '执行命令', read: '读取' }[ev.action] ?? ev.action;
   const target = ev.action === 'bash' ? ev.command : ev.path;
   const el = document.createElement('div');
-  el.className = `tool-note ${ev.action}`;
-  el.innerHTML = `<span class="tool-badge">${label}</span><code>${escapeHtml(String(target ?? '').slice(0, 200))}</code>`;
+  el.className = `tool-note ${escapeHtml(ev.action ?? '')}`;
+  el.innerHTML = `<span class="tool-badge">${escapeHtml(label)}</span><code>${escapeHtml(String(target ?? '').slice(0, 220))}</code>`;
   host.appendChild(el);
   scrollToBottom();
 }
 
-/** 历史上发生过的写操作，统一收在消息流末尾（不打断对话可读性） */
 function renderHistoricalTools(log) {
   const writes = log.filter((e) => e.action === 'write' || e.action === 'edit' || e.action === 'bash');
   if (!writes.length) return;
@@ -757,16 +1684,16 @@ function renderHistoricalTools(log) {
   const details = document.createElement('details');
   details.className = 'tool-history';
   const head = document.createElement('summary');
-  head.textContent = `历史写操作（${writes.length} 条）`;
+  head.textContent = `历史写操作与命令（${writes.length} 条 · 详细记录见右侧「动态」标签）`;
   details.appendChild(head);
 
-  for (const e of writes) {
+  for (const e of writes.slice(-60)) {
     const label = { write: '写入', edit: '编辑', bash: '执行' }[e.action] ?? e.action;
     const target = e.action === 'bash' ? e.command : e.path;
     const row = document.createElement('div');
-    row.className = `tool-note ${e.action}`;
+    row.className = `tool-note ${escapeHtml(e.action ?? '')}`;
     row.innerHTML = `
-      <span class="tool-badge">${label}</span>
+      <span class="tool-badge">${escapeHtml(label)}</span>
       <code>${escapeHtml(String(target ?? '').slice(0, 200))}</code>
       <span class="tool-who">${escapeHtml(nameOf(e.agentId))}</span>`;
     details.appendChild(row);
@@ -774,8 +1701,8 @@ function renderHistoricalTools(log) {
   $('stream').appendChild(details);
 }
 
-/** 用量提示：比普通提示更醒目一点，但不用警告色（这不是错误） */
 function appendUsageNote(text) {
+  clearWelcomeCard();
   const el = document.createElement('div');
   el.className = 'usage-note';
   el.innerHTML = `<span class="usage-note-icon">◔</span><span>${escapeHtml(text)}</span>`;
@@ -783,8 +1710,8 @@ function appendUsageNote(text) {
   scrollToBottom();
 }
 
-/** 被动唤醒后头头选择不回应——灰色小条，和失败的红黄提示分开 */
 function appendPassedNote(agentId) {
+  clearWelcomeCard();
   const el = document.createElement('div');
   el.className = 'passed-note';
   el.innerHTML = `<span class="passed-icon">✓✓</span><span>${escapeHtml(nameOf(agentId))} 已读，未回应</span>`;
@@ -793,6 +1720,7 @@ function appendPassedNote(agentId) {
 }
 
 function appendSystemNote(text, level = 'info') {
+  clearWelcomeCard();
   const el = document.createElement('div');
   el.className = `sys-note ${level === 'warn' ? 'warn' : ''}`;
   el.textContent = text;
@@ -817,12 +1745,9 @@ function appendActionCard(results) {
   scrollToBottom();
 }
 
-function scrollToBottom() {
-  const s = $('stream');
-  s.scrollTop = s.scrollHeight;
-}
-
-/* ---------------- SSE ---------------- */
+/* ==========================================================================
+   SSE 事件处理
+   ========================================================================== */
 
 function handle(ev) {
   switch (ev.type) {
@@ -832,91 +1757,134 @@ function handle(ev) {
       state.rooms = ev.rooms ?? [];
       state.singleFallback = Boolean(ev.singleFallback);
 
-      // 没有房间：界面上只剩"新建房间"这一条路
       if (!ev.room) {
         resetRoomView();
         $('room-name').textContent = '房间';
+        renderGoalBar();
         renderMemberList();
         renderRoster();
         renderRepos();
         renderBoard();
+        renderFiles();
+        renderActivity();
         renderSidebarRooms();
         setHashRoom(null);
         showRoomList();
         break;
       }
 
-      // 换了房间必须整屏重建：成员、消息、看板、护栏、接管徽章全部来自上一个房间的
-      // 东西都不能留（"刷新后徽章消失"和"新房间显示已被接管"是同一类界面撒谎）。
       if (previousRoomId && previousRoomId !== ev.room.id) resetRoomView();
 
-      state.members = ev.members;
+      state.room = { ...ev.room };
+      state.members = ev.members ?? [];
       state.leaderId = ev.room.leaderId;
       state.registry = ev.registry ?? [];
       state.toolLog = ev.toolLog ?? [];
-      state.aiCabTier = ev.aiCabTier ?? 'readonly';
+      state.aiCabTier = ev.aiCabTier ?? 'full';
       $('cabtier').value = state.aiCabTier;
       setOverridden(Boolean(ev.overridden));
       state.stopped = Boolean(ev.stopped);
       state.paused = ev.paused ?? null;
       state.resumeTarget = ev.resumeTarget ?? null;
       renderSeqWarning(ev.seqWarning ?? null);
+
+      state.allowPeerMentions = ev.allowPeerMentions !== false;
+      $('peer-mentions').checked = state.allowPeerMentions;
       state.headPassiveWake = ev.headPassiveWake !== false;
       $('passive-wake').checked = state.headPassiveWake;
-      if (ev.turnTimeoutMinutes != null) $('room-timeout').value = ev.turnTimeoutMinutes;
+      $('room-timeout').value = ev.turnTimeoutMinutes != null ? String(ev.turnTimeoutMinutes) : '';
+
       $('room-name').textContent = ev.room.name;
-      document.title = `${ev.room.name} · 多 AI 协作房间`;
-      for (const t of ev.tasks) state.tasks.set(t.id, t);
-      for (const [k, v] of ev.roster) state.roster.set(k, v);
+      document.title = `${ev.room.name} · SuperAI`;
+      renderGoalBar();
+
+      state.tasks = new Map();
+      for (const t of (ev.tasks ?? [])) state.tasks.set(t.id, t);
+      state.roster = new Map();
+      for (const [k, v] of (ev.roster ?? [])) state.roster.set(k, v);
+
       renderMemberList();
       renderRoster();
       renderRepos();
       renderBoard();
-      // 有成员的会话没接上 → 必须在聊天流里说一次，不能只挂在卡片上
+      renderActivity();
+
+      const history = ev.history ?? [];
+      state.messages = [...history];
+      state.turnCount = history.filter((m) => m.senderId !== 'human').length;
+      state.usage = history.reduce((sum, m) => sum + (m.usageTokens ?? 0), 0);
+
+      $('stream').innerHTML = '';
       for (const m of state.members) {
         if (m.sessionResetReason) {
           appendSystemNote(`@${m.name} 的上下文已重置（${m.sessionResetReason}），它会忘记之前的对话`, 'warn');
         }
       }
-      // 计数与用量从历史恢复，否则刷新后看起来像没跑过
-      state.turnCount = ev.history.filter((m) => m.senderId !== 'human').length;
-      state.usage = ev.history.reduce((sum, m) => sum + (m.usageTokens ?? 0), 0);
-      $('stream').innerHTML = '';
-      for (const m of ev.history) {
+      for (const m of history) {
         if (m.senderId === 'human') appendHumanMessage(m);
         else appendHistoryAgentMessage(m);
       }
-      // 刷新后也要能看到历史写操作（否则"日志"只活在当轮，等于没用）
-      renderHistoricalTools(ev.toolLog ?? []);
+      renderHistoricalTools(state.toolLog);
+      maybeRenderWelcomeCard();
+
       renderSidebarRooms();
       renderRoomList();
-      scrollToBottom();
+      scrollToBottom({ force: true });
       renderStatus();
+      fetchFiles({ silent: true });
 
       decideView(previousRoomId);
       break;
     }
 
-    case 'room.paused':
+    case 'room.paused': {
       state.paused = { reason: ev.reason, detail: ev.detail ?? '', at: new Date().toISOString() };
-      /**
-       * 实时事件也要同步 resumeTarget。
-       *
-       * 之前只从 room.init 读它，于是**只有刷新后按钮才变「接着做完」**。
-       * "刷新才正确"就是错的：用户不会为了看对按钮去刷新。
-       */
+      // 实时事件同步 resumeTarget，保证按钮文案「接着做完」与后端一致
       state.resumeTarget = ev.resumeTarget ?? null;
       state.busy = false;
       state.pending = 0;
-      // 只在真有内容时提示一次；"头头汇报完停住"不该刷成警告色
-      if (ev.reason !== 'no_target') {
+
+      if (ev.reason === 'error') {
+        const recentSame = state.lastFailureBanner
+          && (Date.now() - state.lastFailureBanner.at < 4000)
+          && (!ev.detail || state.lastFailureBanner.detail === ev.detail);
+        if (!recentSame) {
+          appendFailureBanner({
+            agentId: ev.agentId ?? state.lastFailureBanner?.agentId ?? state.currentSpeakerLast,
+            title: `停在：${PAUSE_LABEL.error}`,
+            detail: ev.detail ?? '',
+          });
+        }
+      } else if (ev.reason !== 'no_target') {
         appendSystemNote(`停在：${PAUSE_LABEL[ev.reason] ?? ev.reason}${ev.detail ? ` · ${ev.detail}` : ''}`, 'warn');
       }
       renderStatus();
       break;
+    }
+
+    case 'room.resumed':
+    case 'resumed':
+      state.stopped = false;
+      if (ev.reason !== 'cleared') state.paused = null;
+      if (ev.text) appendSystemNote(ev.text);
+      renderStatus();
+      break;
+
+    case 'backends.updated':
+      if (Array.isArray(ev.backends)) {
+        state.backends = ev.backends;
+        state.backendsCheckedAt = new Date().toISOString();
+        state.backendsLoaded = true;
+        renderBackendPills();
+        if (!$('backends-modal').classList.contains('hidden')) renderBackendsModal();
+        if (mm && !$('member-modal').classList.contains('hidden')) {
+          syncBackendSelectOptions();
+          renderModelHints();
+        }
+      }
+      break;
 
     case 'cap.continue':
-      // 撞到单轮上限但确实在干活 → 系统自己接着做，必须说出来
       state.paused = null;
       appendSystemNote(ev.text ?? '撞到单轮上限，自动接着做');
       renderStatus();
@@ -951,28 +1919,46 @@ function handle(ev) {
 
     case 'rooms.updated':
       state.rooms = ev.rooms ?? [];
+      renderSidebarRooms();
       renderRoomList();
       break;
 
     case 'room.renamed':
       if (ev.id === state.activeRoomId) {
+        if (state.room) state.room.name = ev.name;
         $('room-name').textContent = ev.name;
-        document.title = `${ev.name} · 多 AI 协作房间`;
+        document.title = `${ev.name} · SuperAI`;
       }
+      renderSidebarRooms();
       renderRoomList();
       break;
 
-    case 'room.settings':
-      state.headPassiveWake = ev.headPassiveWake !== false;
-      $('passive-wake').checked = state.headPassiveWake;
-      if (ev.turnTimeoutMinutes != null) $('room-timeout').value = ev.turnTimeoutMinutes;
-      appendSystemNote(ev.headPassiveWake
-        ? '成员不 @ 发言会叫醒头头'
-        : '已关闭：成员不 @ 发言不再叫醒头头');
+    case 'room.settings': {
+      const notes = [];
+      if (ev.goal !== undefined) {
+        if (state.room) state.room.goal = ev.goal ?? '';
+        renderGoalBar();
+        notes.push(ev.goal ? `房间目标已更新` : '已清空房间目标');
+      }
+      if (ev.allowPeerMentions !== undefined) {
+        state.allowPeerMentions = Boolean(ev.allowPeerMentions);
+        $('peer-mentions').checked = state.allowPeerMentions;
+        notes.push(state.allowPeerMentions ? '已开启成员之间互相 @ 协作' : '已关闭成员之间互相 @ 协作');
+      }
+      if (ev.headPassiveWake !== undefined) {
+        state.headPassiveWake = Boolean(ev.headPassiveWake);
+        $('passive-wake').checked = state.headPassiveWake;
+        notes.push(state.headPassiveWake ? '成员不 @ 发言会叫醒头头' : '已关闭：成员不 @ 发言不再叫醒头头');
+      }
+      if (ev.turnTimeoutMinutes !== undefined) {
+        $('room-timeout').value = ev.turnTimeoutMinutes != null ? String(ev.turnTimeoutMinutes) : '';
+        notes.push(ev.turnTimeoutMinutes ? `单轮上限已改为 ${ev.turnTimeoutMinutes} 分钟` : '单轮上限已恢复默认（20 分钟）');
+      }
+      if (notes.length) appendSystemNote(notes.join('；'));
       break;
+    }
 
     case 'head.passive_wake':
-      // 让老板看得懂头头为什么突然说话
       appendSystemNote(ev.text ?? `成员无 @ 发言，已叫醒头头（${ev.count} 条）`);
       break;
 
@@ -985,22 +1971,25 @@ function handle(ev) {
       break;
 
     case 'snapshot':
-      for (const t of ev.tasks) state.tasks.set(t.id, t);
-      for (const [k, v] of ev.roster) state.roster.set(k, v);
-      renderBoard();
-      renderRoster();
-      state.busy = ev.busy;
+      if (Array.isArray(ev.tasks)) {
+        for (const t of ev.tasks) state.tasks.set(t.id, t);
+        renderBoard();
+      }
+      if (Array.isArray(ev.roster)) {
+        for (const [k, v] of ev.roster) state.roster.set(k, v);
+        renderRoster();
+      }
+      state.busy = Boolean(ev.busy);
       renderStatus();
       break;
 
-    case 'turn.start': {
+    case 'turn.start':
       state.busy = true;
       state.paused = null;
       state.pending = ev.pending ?? 0;
       ensureTurnEl(ev.agentId);
       renderStatus();
       break;
-    }
 
     case 'queued':
       if (!ev.alreadyQueued) state.pending = Math.max(state.pending, ev.pending ?? 1);
@@ -1011,11 +2000,9 @@ function handle(ev) {
       const cur = state.current ?? ensureTurnEl(ev.agentId);
       if (!ev.text) break;
       cur.text += ev.text;
-      cur.textEl.textContent = cur.text;
-      // 流式期间不解析动作块，只做轻量截断显示
-      if (/```action/.test(cur.text)) {
-        cur.textEl.textContent = cur.text.split('```action')[0];
-      }
+      cur.textEl.textContent = /```actions?\b/.test(cur.text)
+        ? cur.text.split(/```actions?\b/)[0]
+        : cur.text;
       scrollToBottom();
       break;
     }
@@ -1037,9 +2024,13 @@ function handle(ev) {
 
     case 'message': {
       const m = ev.message;
-      if (m.senderId === 'human') break;
+      if (!m) break;
+      state.messages.push(m);
+      if (m.senderId === 'human') {
+        appendHumanMessage(m);
+        break;
+      }
       if (m.passed) {
-        // 「已读，未回应」：不是失败，也不是发言，必须能一眼区分
         finishTurn(m.durationMs);
         if (state.current?.agentId === m.senderId) state.current = null;
         appendPassedNote(m.senderId);
@@ -1051,22 +2042,23 @@ function handle(ev) {
       if (state.current?.agentId === m.senderId) {
         state.current.text = m.body;
         state.current.textEl.innerHTML = renderBody(m.body, { live: true });
+      } else if (m.body) {
+        appendHistoryAgentMessage(m);
       }
       finishTurn(m.durationMs);
       if (m.isSummary) markAsSummary();
-      // 超时/崩溃/中断必须留一条可见记录：空 body 的空气泡等于什么都没说
       const failText = turnFailureText(m);
       if (failText) appendSystemNote(`${nameOf(m.senderId)} ${failText}`, 'warn');
       state.currentSpeakerLast = m.senderId;
-      // 队列里还有人就不能显示"等待人类"
       state.pending = ev.pending ?? 0;
       state.busy = state.pending > 0;
       renderStatus();
+      scheduleFilesRefresh();
       break;
     }
 
     case 'action.results':
-      appendActionCard(ev.results);
+      appendActionCard(ev.results ?? []);
       break;
 
     case 'task.created':
@@ -1076,11 +2068,12 @@ function handle(ev) {
       break;
 
     case 'tool': {
-      // 写操作实时显示成小行：改了什么，一眼看到
       if (ev.action === 'write' || ev.action === 'edit' || ev.action === 'bash') {
         appendToolNote(ev);
+        scheduleFilesRefresh();
       }
-      state.toolLog.push(ev);
+      state.toolLog.push({ ...ev, at: ev.at ?? new Date().toISOString() });
+      renderActivity();
       break;
     }
 
@@ -1107,7 +2100,6 @@ function handle(ev) {
       break;
 
     case 'member.created':
-      // 头头自己加的人：立即出现在成员列表里
       if (!state.members.some((m) => m.id === ev.member.id)) {
         state.members.push(ev.member);
         renderMemberList();
@@ -1162,13 +2154,11 @@ function handle(ev) {
       $('btn-stop').classList.remove('urgent');
       break;
 
-    case 'usage.warning':   // 用量提示：只提示不拦截
-      // 只提示不拦截：老板说过不用考虑消耗，这里只让他知道钱花在哪
+    case 'usage.warning':
       appendUsageNote(ev.text);
       break;
 
     case 'notice':
-      // 慢启动提示是"它还活着"的信号，不是警告：用 info 样式，别用黄色
       appendSystemNote(ev.text, ev.slowStart ? 'info' : ev.level);
       break;
 
@@ -1181,12 +2171,11 @@ function handle(ev) {
       break;
 
     case 'failure': {
-      // reason 是代码里的枚举值，直接给人看很生硬；detail 已由后端清掉 CLI 噪音
       const REASON_CN = { timeout: '超时', crashed: '崩溃', failed: '运行失败', interrupted: '被打断' };
-      appendSystemNote(
-        `${nameOf(ev.agentId)} ${REASON_CN[ev.reason] ?? ev.reason}${ev.detail ? ' — ' + ev.detail : ''}`,
-        'warn',
-      );
+      const title = `${nameOf(ev.agentId)} ${REASON_CN[ev.reason] ?? ev.reason}`;
+      const detail = String(ev.detail ?? '').trim();
+      state.lastFailureBanner = { agentId: ev.agentId, detail, at: Date.now() };
+      appendFailureBanner({ agentId: ev.agentId, title, detail });
       finishTurn();
       state.busy = false;
       renderStatus();
@@ -1220,13 +2209,6 @@ function handle(ev) {
       renderStatus();
       break;
 
-    case 'resumed':
-      state.stopped = false;
-      if (ev.reason !== 'cleared') state.paused = null;
-      if (ev.text) appendSystemNote(ev.text);
-      renderStatus();
-      break;
-
     case 'interrupted':
       appendSystemNote(`${nameOf(ev.agentId)} 被打断（已输出内容保留）`, 'warn');
       break;
@@ -1238,53 +2220,50 @@ function handle(ev) {
 
 function connect() {
   const es = new EventSource('/events');
+  es.onopen = () => {
+    state.connected = true;
+    $('conn-dot').className = 'dot ok';
+    if (state.disconnectedNotified) {
+      state.disconnectedNotified = false;
+      appendSystemNote('已重新连接到后台服务');
+    }
+  };
   es.onmessage = (e) => {
     try { handle(JSON.parse(e.data)); } catch (err) { console.error('bad event', err, e.data); }
   };
   es.onerror = () => {
-    appendSystemNote('与后台断开，正在重连…', 'warn');
+    state.connected = false;
+    $('conn-dot').className = 'dot warn';
+    if (!state.disconnectedNotified) {
+      state.disconnectedNotified = true;
+      appendSystemNote('与后台断开连接，正在自动重连…', 'warn');
+    }
   };
 }
 
-/* ---------------- 输入 ---------------- */
+/* ==========================================================================
+   输入区与 @ 候选自动补全
+   ========================================================================== */
 
-const names = () => state.members.map((m) => m.name);
-
-/** @ 候选菜单的状态 */
 const mention = {
   open: false,
-  items: [],        // [{name, role, backend, id}]
-  active: 0,        // 当前高亮项
-  atIndex: -1,      // 触发这次补全的 '@' 在输入框里的位置
+  items: [],
+  active: 0,
+  atIndex: -1,
 };
 
-/**
- * 找出光标前是否有"正在输入的 @"。
- *
- * 关键：**只打一个 @ 也要出列表**（frag 为空时返回全部候选）。
- * 之前要求 frag.length > 0 才算，所以用户打 @ 什么都没出现，
- * 感觉就是"这功能不存在"。
- */
 function findMentionContext(value, caret) {
   const before = value.slice(0, caret);
   const at = before.lastIndexOf('@');
   if (at < 0) return null;
-
   const frag = before.slice(at + 1);
-  // 名字里不会有空格/换行，所以遇到空白就说明这个 @ 已经结束了
   if (/\s/.test(frag)) return null;
   return { atIndex: at, frag };
 }
 
 function openMentionMenu(ctx) {
   const frag = ctx.frag.toLowerCase();
-  // 头头优先，其余按加入顺序——和广播顺序一致，用户看到的就是联系人顺序
-  const ordered = [...state.members].sort((a, b) => {
-    const la = a.role === 'leader' ? 0 : 1;
-    const lb = b.role === 'leader' ? 0 : 1;
-    return la - lb;
-  });
-
+  const ordered = [...state.members].sort((a, b) => (a.role === 'leader' ? 0 : 1) - (b.role === 'leader' ? 0 : 1));
   const hits = ordered.filter((m) => m.name.toLowerCase().startsWith(frag));
   if (!hits.length) { closeMentionMenu(); return; }
 
@@ -1304,10 +2283,10 @@ function openMentionMenu(ctx) {
     row.innerHTML = `
       <span class="mention-name">@${escapeHtml(m.name)}</span>
       <span class="mention-role ${m.role === 'leader' ? '' : 'member'}">${m.role === 'leader' ? '头头' : '成员'}</span>
-      <span class="mention-backend">${escapeHtml(m.backend ?? '')}</span>`;
-    // 点选
+      <span class="mention-backend">${backendPillHtml(m.backend ?? '')}</span>`;
+    row.prepend(avatarEl(m.name));
     row.onmousedown = (e) => {
-      e.preventDefault();   // 别让输入框失焦
+      e.preventDefault();
       pickMention(i);
     };
     menu.appendChild(row);
@@ -1329,7 +2308,6 @@ function highlightMention(index) {
   menu.children[index]?.scrollIntoView({ block: 'nearest' });
 }
 
-/** 选中第 i 个候选：把 @frag 替换成 @名字 + 空格，光标放到名字后 */
 function pickMention(i) {
   const item = mention.items[i];
   if (!item) return;
@@ -1350,12 +2328,17 @@ function pickMention(i) {
   updateMentionHint();
 }
 
+function broadcastOrder() {
+  const leader = state.members.filter((m) => m.role === 'leader');
+  const rest = state.members.filter((m) => m.role !== 'leader');
+  return [...leader, ...rest].map((m) => m.name);
+}
+
 function updateMentionHint() {
   const v = $('input').value;
   const hint = $('mention-hint');
   const caret = $('input').selectionStart ?? v.length;
 
-  // 光标前有未完成的 @ → 弹候选列表
   const ctx = findMentionContext(v, caret);
   if (ctx) {
     openMentionMenu(ctx);
@@ -1365,9 +2348,8 @@ function updateMentionHint() {
   }
   closeMentionMenu();
 
-  // 广播预告：不写 @ 会叫起所有人，得先让人知道
   const mentionsAnyone = /[@＠]\s*[\w一-鿿]/.test(v);
-  if (v.trim() && !mentionsAnyone) {
+  if (v.trim() && !mentionsAnyone && state.members.length > 0) {
     const order = broadcastOrder();
     hint.textContent = `未点名 → 将依次通知 ${order.length} 人：${order.map((n) => '@' + n).join(' → ')}`;
     hint.className = 'mention-hint warn';
@@ -1376,13 +2358,6 @@ function updateMentionHint() {
 
   hint.textContent = '';
   hint.className = 'mention-hint';
-}
-
-/** 与后端一致：头头优先，其余按成员顺序 */
-function broadcastOrder() {
-  const leader = state.members.filter((m) => m.role === 'leader');
-  const rest = state.members.filter((m) => m.role !== 'leader');
-  return [...leader, ...rest].map((m) => m.name);
 }
 
 async function send() {
@@ -1406,16 +2381,13 @@ async function send() {
 
 function autoGrow(el) {
   el.style.height = 'auto';
-  el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+  el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
 }
 
-/**
- * seq 撞号提示。
- *
- * 不能只在启动时弹一次 notice：启动时没人在线、或者用户刷新一次，提示就没了，
- * 而导出件里却写着"别用 seq 对账"——两边对不上。所以它跟着 room.init 走，
- * 常驻显示，可以手动收起（本次会话内）。
- */
+/* ==========================================================================
+   seq 撞号常驻提示
+   ========================================================================== */
+
 let seqWarningDismissed = false;
 function renderSeqWarning(warning) {
   const el = $('seq-warn');
@@ -1432,55 +2404,44 @@ $('seq-warn-hide').onclick = () => {
   $('seq-warn').classList.add('hidden');
 };
 
-/**
- * 任务卡「账不平」标记：说明里写着阻塞、状态仍是「待办」。
- *
- * 这是给"报告说改了、板上没改"这类不一致做的**可见提示**。
- * 根因修复在服务端（未成功动作必须跨轮重现），但界面也不能让这种账
- * 平白无故地看起来一致 —— 那才是最容易被当成"系统说一切正常"的形态。
- *
- * 判据刻意保守：只认明确的阻塞词，避免把普通备注误标成异常。
- */
-function taskLooksStuck(t) {
-  const note = String(t.note ?? '');
-  return t.status === '待办' && /阻塞|需外部渠道|等外部/.test(note);
-}
-
-/* ---------------- 任务抽屉 ---------------- */
+/* ==========================================================================
+   任务抽屉与 Diff 验收
+   ========================================================================== */
 
 async function openTask(id) {
   const t = state.tasks.get(id);
   if (!t) return;
   $('drawer').classList.remove('hidden');
   $('drawer-title').textContent = `${t.id}  ${t.title}`;
+  $('drawer-meta').innerHTML = `<span class="tier-badge">${escapeHtml(t.status)}</span>`
+    + (t.assignee ? `<span>负责人：@${escapeHtml(nameOf(t.assignee))}</span>` : '<span>未指派</span>');
+  $('drawer-actions').innerHTML = '';
+
   const body = $('drawer-body');
-  body.innerHTML = `<div class="link-note">加载中…</div>`;
+  body.innerHTML = '<div class="link-note">加载任务详情与改动中…</div>';
 
   const related = state.messages.filter((m) => m.taskId === id);
 
   let html = `
-    <h3>状态</h3>
-    <div>${escapeHtml(t.status)} ${t.assignee ? `→ @${escapeHtml(nameOf(t.assignee))}` : ''}</div>
+    <h3>状态与备注</h3>
+    <div class="link-note">${escapeHtml(t.status)}${t.assignee ? ` → @${escapeHtml(nameOf(t.assignee))}` : ''}${t.note ? ` · ${escapeHtml(t.note)}` : ''}</div>
     <h3>相关讨论</h3>`;
   if (related.length) {
-    html += related.map((m) => `<div class="link-note"><b>${escapeHtml(nameOf(m.senderId))}</b>：${escapeHtml(m.body.slice(0, 400))}</div>`).join('');
+    html += related.map((m) => (
+      `<div class="link-note"><b>${escapeHtml(nameOf(m.senderId))}</b>：${escapeHtml(String(m.body ?? '').slice(0, 400))}</div>`
+    )).join('');
   } else {
-    html += `<div class="link-note">该任务还没有关联讨论</div>`;
+    html += '<div class="link-note">该任务还没有关联讨论</div>';
   }
-
   body.innerHTML = html;
 
-  // 尝试拉 diff（只有建过 worktree 的任务才有）
   const diffRes = await fetch(`/api/diff?task=${encodeURIComponent(id)}`).catch(() => null);
-  if (!diffRes?.ok) {
-    // 没有 worktree：纯讨论任务，没什么可验收的
-    return;
-  }
+  if (!diffRes?.ok) return;
 
   const d = await diffRes.json();
   if (!d.files?.length) {
     body.insertAdjacentHTML('beforeend',
-      '<h3>改动</h3><div class="link-note">这个任务还没有任何改动</div>');
+      '<h3>改动</h3><div class="link-note">这个任务还没有任何代码改动</div>');
     return;
   }
 
@@ -1496,19 +2457,16 @@ async function openTask(id) {
     <pre>${colored}</pre>
     <div class="accept-bar">
       <div class="accept-note">合并会把改动写进主仓库；丢弃会删掉这个任务的副本。</div>
-      <button id="btn-merge" class="btn primary">合并进主分支</button>
-      <button id="btn-discard" class="btn danger">丢弃改动</button>
+      <button id="btn-merge" class="btn primary" type="button">合并进主分支</button>
+      <button id="btn-discard" class="btn danger" type="button">丢弃改动</button>
     </div>`);
 
   $('btn-merge').onclick = () => acceptTask(t, 'merge');
-  $('btn-discard').onclick = () => acceptTask(t, 'discard', () => {
-    // 丢弃是不可逆的，问一次
-    const hasChanges = d.files.length;
-    return window.confirm(`确定丢弃 ${t.id} 的改动？\n会删除 ${t.worktree}\n（${hasChanges} 个文件的改动将丢失）`);
-  });
+  $('btn-discard').onclick = () => acceptTask(t, 'discard', () => (
+    window.confirm(`确定丢弃 ${t.id} 的改动？\n会删除 ${t.worktree}\n（${d.files.length} 个文件的改动将丢失）`)
+  ));
 }
 
-/** 验收：合并或丢弃。两者都需要人明确点击。 */
 async function acceptTask(task, action, confirmFn) {
   if (confirmFn && !confirmFn()) return;
 
@@ -1528,7 +2486,6 @@ async function acceptTask(task, action, confirmFn) {
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok) {
-      // 冲突等失败情形：说清原因，不要把按钮留在假死状态
       showDrawerResult(`失败：${data.error ?? res.status}`, 'fail');
       btn.disabled = false;
       other.disabled = false;
@@ -1556,9 +2513,507 @@ function showDrawerResult(text, kind) {
   bar.innerHTML = `<div class="accept-result ${kind}">${escapeHtml(text)}</div>`;
 }
 
-/* ---------------- 启动 ---------------- */
+function closeDrawer() {
+  $('drawer').classList.add('hidden');
+}
 
-/* ---------------- 侧栏操作 ---------------- */
+/* ==========================================================================
+   总结成员选择弹窗 (#picker-modal)
+   ========================================================================== */
+
+function openSummarizePicker() {
+  if (!state.members.length) {
+    appendSystemNote('房间里还没有成员，无法发起总结', 'warn');
+    return;
+  }
+  const list = $('pm-list');
+  list.innerHTML = '';
+  for (const m of state.members) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'picker-row';
+    btn.innerHTML = `
+      <span class="picker-row-name">${escapeHtml(m.name)}</span>
+      <span class="member-role ${m.role === 'leader' ? '' : 'member'}">${m.role === 'leader' ? '头头' : '成员'}</span>
+      <span class="picker-row-meta">${backendPillHtml(m.backend)}</span>`;
+    btn.prepend(avatarEl(m.name));
+    btn.onclick = async () => {
+      closePickerModal();
+      const res = await fetch('/api/summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentId: m.id }),
+      });
+      if (res.ok) appendSystemNote(`${m.name} 开始总结（说完房间会停住）`);
+      else appendSystemNote('发起总结失败', 'warn');
+    };
+    list.appendChild(btn);
+  }
+  $('picker-modal').classList.remove('hidden');
+}
+
+function closePickerModal() {
+  $('picker-modal').classList.add('hidden');
+}
+
+/* ==========================================================================
+   成员设置弹窗 v2 (#member-modal)
+   ========================================================================== */
+
+let mm = null;
+
+function pickDefaultBackend() {
+  const pref = ['agy', 'claude', 'opencode', 'codex'];
+  for (const id of pref) {
+    if (backendInfo(id)?.status === 'ready') return id;
+  }
+  for (const id of pref) {
+    if (backendInfo(id)?.installed) return id;
+  }
+  return 'agy';
+}
+
+function tiersForBackend(backend, member = null) {
+  const b = backendInfo(backend);
+  if (Array.isArray(b?.tiers) && b.tiers.length) return b.tiers;
+  if (Array.isArray(member?.tiers) && member.tiers.length && member.backend === backend) return member.tiers;
+  return DEFAULT_BACKEND_TIERS[backend] ?? ['readonly', 'read', 'write', 'write-exec', 'full'];
+}
+
+function syncBackendSelectOptions() {
+  const sel = $('mm-backend');
+  const currentVal = sel.value;
+  sel.innerHTML = '';
+  for (const id of BACKEND_ORDER) {
+    const b = backendInfo(id);
+    const opt = document.createElement('option');
+    opt.value = id;
+    if (b) {
+      const icon = b.status === 'ready' ? '●' : (b.status === 'warn' ? '▲' : '○');
+      const mCount = b.models?.length ? ` · ${b.models.length} 模型` : '';
+      opt.textContent = `${icon} ${id}（${backendStatusLabel(b.status)}${mCount}）`;
+    } else {
+      opt.textContent = id;
+    }
+    sel.appendChild(opt);
+  }
+  if (currentVal && BACKEND_ORDER.includes(currentVal)) sel.value = currentVal;
+}
+
+function openMemberSettings(id) {
+  const m = memberById(id);
+  if (!m) return;
+
+  syncBackendSelectOptions();
+  mm = {
+    id: m.id,
+    original: { ...m },
+    backend: m.backend,
+    tier: m.tier,
+    confirmOverride: false,
+    isNew: false,
+  };
+
+  $('mm-title').textContent = `成员设置 · ${m.name}`;
+  $('mm-subtitle').textContent = `ID: ${m.id} · 修改后下一轮立即生效，无需重启`;
+  $('mm-name').value = m.name;
+  $('mm-backend').value = m.backend;
+  $('mm-model').value = m.model ?? '';
+  $('mm-effort').value = m.effort ?? '';
+  $('mm-extra').value = m.extraArgs ?? '';
+  $('mm-commands').value = (m.allowedCommands ?? '').replace(/\bnetget\b\s*/g, '').trim();
+  $('mm-netget').checked = /\bnetget\b/.test(m.allowedCommands ?? '');
+  updateCurlWarn();
+  $('mm-timeout').value = m.timeoutMinutes ?? '';
+  $('mm-timeout-hint').textContent = m.timeoutSource === 'legacy'
+    ? `⚠️ 当前实际生效 ${m.effectiveTimeoutMinutes} 分钟（来自配置手写 timeoutMs）；在此填入新值将覆盖它。`
+    : `实际生效：${m.effectiveTimeoutMinutes} 分钟。留空 = 使用房间默认上限。`;
+  $('mm-role').value = m.role;
+  $('mm-role').disabled = false;
+  $('mm-persona').value = m.persona ?? '';
+  $('mm-remove').classList.remove('hidden');
+  $('mm-error').classList.add('hidden');
+
+  renderTierChoices(tiersForBackend(m.backend, m));
+  renderModelHints();
+  updateTierDependentControls();
+  updatePreview();
+  $('member-modal').classList.remove('hidden');
+  $('mm-name').focus();
+}
+
+function openNewMember() {
+  const isFirst = state.members.length === 0;
+  const defaultBackend = pickDefaultBackend();
+  const support = tiersForBackend(defaultBackend);
+  const defaultTier = support.includes('full') ? 'full' : support[support.length - 1];
+
+  syncBackendSelectOptions();
+  mm = {
+    id: null,
+    original: null,
+    backend: defaultBackend,
+    tier: defaultTier,
+    confirmOverride: false,
+    isNew: true,
+    isFirst,
+  };
+
+  $('mm-title').textContent = isFirst ? '添加第一个成员（自动成为头头）' : '添加新成员';
+  $('mm-subtitle').textContent = '默认选择已就绪后端与完全开放档位，开箱即可高效协作';
+  $('mm-name').value = isFirst ? 'lead' : '';
+  $('mm-backend').value = defaultBackend;
+  $('mm-model').value = '';
+  $('mm-effort').value = '';
+  $('mm-extra').value = '';
+  $('mm-commands').value = '';
+  $('mm-netget').checked = false;
+  updateCurlWarn();
+  $('mm-timeout').value = '';
+  $('mm-timeout-hint').textContent = '防无限跑上限；卡死另由看门狗判（90 秒无输出）。';
+  $('mm-role').value = isFirst ? 'leader' : 'member';
+  $('mm-role').disabled = isFirst;
+  $('mm-persona').value = '';
+  $('mm-remove').classList.add('hidden');
+  $('mm-error').classList.add('hidden');
+
+  renderTierChoices(support);
+  renderModelHints();
+  updateTierDependentControls();
+  updatePreview();
+  $('member-modal').classList.remove('hidden');
+  $('mm-name').focus();
+  if (isFirst) $('mm-name').select();
+}
+
+function closeMemberSettings() {
+  $('member-modal').classList.add('hidden');
+  $('mm-role').disabled = false;
+  mm = null;
+}
+
+function renderTierChoices(tiers) {
+  const box = $('mm-tiers');
+  box.innerHTML = '';
+  const list = tiers.length ? tiers : ['readonly'];
+  // 将 full 放在最前面（推荐），其余按从强到弱清晰排列
+  const order = ['full', 'write-exec', 'write', 'write-ask', 'read', 'readonly'];
+  const sorted = [...new Set(list)].sort((a, b) => {
+    const ia = order.indexOf(a);
+    const ib = order.indexOf(b);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+  });
+
+  for (const tier of sorted) {
+    const [name, desc] = TIER_TEXT[tier] ?? [tier, ''];
+    const label = document.createElement('label');
+    const isFull = tier === 'full';
+    label.className = `tier-choice${isFull ? ' full-option' : ''}${mm.tier === tier ? ' selected' : ''}`;
+    label.innerHTML = `
+      <input type="radio" name="mm-tier" value="${escapeHtml(tier)}" ${mm.tier === tier ? 'checked' : ''}>
+      <span class="tier-choice-main">
+        <span class="tier-choice-head">
+          <span class="tier-choice-name">${escapeHtml(name)}</span>
+          ${isFull ? '<span class="tier-rec-tag">推荐</span>' : ''}
+        </span>
+        <span class="tier-choice-desc">${escapeHtml(desc)}</span>
+      </span>`;
+    label.querySelector('input').onchange = () => {
+      mm.tier = tier;
+      renderTierChoices(list);
+      updateTierDependentControls();
+      updatePreview();
+    };
+    box.appendChild(label);
+  }
+
+  $('mm-tier-hint').textContent = list.includes(mm.tier)
+    ? ''
+    : `当前后端不支持「${mm.tier}」，请重选一档。`;
+}
+
+function renderModelHints() {
+  const b = backendInfo(mm.backend);
+  const discovered = Array.isArray(b?.models) && b.models.length
+    ? b.models
+    : (FALLBACK_MODEL_HINTS[mm.backend] ?? []);
+
+  // datalist
+  $('mm-model-list').innerHTML = discovered.map((h) => `<option value="${escapeHtml(h)}">`).join('');
+
+  // clickable model chips
+  const modelChips = $('mm-model-chips');
+  modelChips.innerHTML = '';
+  const currentModel = $('mm-model').value.trim();
+  for (const modelName of discovered.slice(0, 12)) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = `quick-chip${currentModel === modelName ? ' active' : ''}`;
+    chip.textContent = modelName;
+    chip.title = currentModel === modelName ? '点击清除模型覆盖' : `点击选用模型 ${modelName}`;
+    chip.onclick = () => {
+      $('mm-model').value = $('mm-model').value.trim() === modelName ? '' : modelName;
+      renderModelHints();
+      updatePreview();
+    };
+    modelChips.appendChild(chip);
+  }
+
+  // effort hints + chips
+  const m = mm.isNew ? null : memberById(mm.id);
+  const efforts = (Array.isArray(b?.effortHints) && b.effortHints.length)
+    ? b.effortHints
+    : ((m?.effortHints?.length ? m.effortHints : null) ?? DEFAULT_EFFORT_HINTS[mm.backend] ?? []);
+  $('mm-effort-list').innerHTML = efforts.map((h) => `<option value="${escapeHtml(h)}">`).join('');
+
+  const effortChips = $('mm-effort-chips');
+  effortChips.innerHTML = '';
+  const currentEffort = $('mm-effort').value.trim();
+  for (const ef of efforts) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = `quick-chip${currentEffort === ef ? ' active' : ''}`;
+    chip.textContent = ef;
+    chip.onclick = () => {
+      $('mm-effort').value = $('mm-effort').value.trim() === ef ? '' : ef;
+      renderModelHints();
+      updatePreview();
+    };
+    effortChips.appendChild(chip);
+  }
+
+  // backend live inline status
+  const statusEl = $('mm-backend-status');
+  if (b) {
+    const st = b.status ?? (b.installed ? 'ready' : 'missing');
+    const issueStr = b.issues?.length ? ` · ⚠ ${b.issues[0]}` : '';
+    statusEl.innerHTML = `
+      <span class="bc-status ${escapeHtml(st)}"><span class="dot ${escapeHtml(st)}"></span>${escapeHtml(backendStatusLabel(st))}</span>
+      ${b.version ? `<span class="bc-tag">v ${escapeHtml(b.version)}</span>` : ''}
+      ${b.configuredModel ? `<span class="bc-tag">默认：${escapeHtml(b.configuredModel)}</span>` : ''}
+      ${issueStr ? `<span class="danger-hint">${escapeHtml(issueStr)}</span>` : ''}`;
+  } else {
+    statusEl.innerHTML = '';
+  }
+
+  $('mm-backend-hint').textContent = mm.backend === 'codex'
+    ? 'codex 支持「完全开放」「可写+执行」「可读」三档；模型留空使用本机 codex 配置。'
+    : (mm.backend === 'agy' ? 'agy 原生支持流式输出与模型自动发现，推荐使用完全开放档。' : '');
+}
+
+/** 根据当前档位（特别是 full vs write-exec vs 其他）切换联网与白名单控件 */
+function updateTierDependentControls() {
+  const isFull = mm?.tier === 'full';
+  $('mm-full-note').classList.toggle('hidden', !isFull);
+  $('mm-netget-field').classList.toggle('hidden', isFull);
+  $('mm-commands-field').classList.toggle('hidden', isFull);
+
+  if (isFull) return;
+
+  const isExec = mm?.tier === 'write-exec';
+  const box = $('mm-netget');
+  box.disabled = !isExec;
+  if (!isExec) box.checked = false;
+  const hint = $('mm-netget-hint');
+  if (hint) {
+    hint.dataset.orig ??= hint.innerHTML;
+    if (isExec) {
+      hint.innerHTML = hint.dataset.orig;
+    } else {
+      hint.textContent = '只有「可写+执行」或「完全开放」档才能联网：当前档位不开放命令工具。';
+    }
+  }
+}
+
+function updateCurlWarn() {
+  const v = $('mm-commands').value;
+  const risky = /(^|\s)(curl|wget)(\s|$)/.test(v);
+  const el = $('mm-curl-warn');
+  el.textContent = risky
+    ? '⚠️ curl/wget 不受目录限制：能读本机任意文件（如 file:///etc/hostname）、能写到工作目录之外、能上传外传。'
+    : '';
+  el.classList.toggle('hidden', !risky);
+}
+
+function updatePreview() {
+  const backend = $('mm-backend').value;
+  const model = $('mm-model').value.trim();
+  const effort = $('mm-effort').value.trim();
+  const extra = $('mm-extra').value.trim();
+  const tier = mm?.tier ?? 'full';
+
+  const parts = [];
+
+  if (backend === 'agy') {
+    parts.push('agy', '--output-format', 'stream-json');
+    if (tier === 'full') parts.push('--dangerously-skip-permissions', '--disable-slash-commands');
+    else if (tier === 'write-exec') parts.push('--mode', 'auto', '--disable-slash-commands');
+    else if (tier === 'write') parts.push('--mode', 'accept-edits', '--disable-slash-commands');
+    else parts.push('--mode', 'plan');
+  } else if (backend === 'claude') {
+    parts.push('claude', '-p', '--output-format', 'stream-json');
+    if (tier === 'full') parts.push('--dangerously-skip-permissions');
+    else if (tier === 'readonly') parts.push('--tools', '""');
+    else if (tier === 'read') parts.push('--tools', '"Read,Grep,Glob"');
+    else if (tier === 'write-ask') parts.push('--tools', '"Read,Write,Edit"', '--permission-prompts', 'host');
+    else if (tier === 'write') parts.push('--tools', '"Read,Write,Edit"', '--permission-mode', 'acceptEdits');
+    else if (tier === 'write-exec') parts.push('--tools', '"Read,Write,Edit,Bash"');
+  } else if (backend === 'codex') {
+    parts.push('codex', 'exec', '--json');
+    if (tier === 'full') parts.push('--dangerously-bypass-approvals-and-sandbox');
+    else if (tier === 'write-exec') parts.push('-s', 'workspace-write');
+    else parts.push('-s', 'read-only');
+  } else if (backend === 'opencode') {
+    parts.push('opencode', 'run', '--format', 'json');
+    if (tier === 'full') parts.push('--auto');
+  } else {
+    parts.push(backend);
+  }
+
+  if (model) {
+    if (backend === 'claude' || backend === 'agy') parts.push('--model', model);
+    else if (backend === 'codex') parts.push(`-c model="${model}"`);
+    else parts.push('-m', model);
+  }
+  if (effort) {
+    if (backend === 'claude' || backend === 'agy') parts.push('--effort', effort);
+    else if (backend === 'codex') parts.push(`-c model_reasoning_effort="${effort}"`);
+    else parts.push('--variant', effort);
+  }
+
+  if (tier !== 'full') {
+    const cmds = [
+      $('mm-netget').checked ? 'netget' : null,
+      ...$('mm-commands').value.trim().split(/[\s,，]+/).filter(Boolean),
+    ].filter(Boolean);
+    if (cmds.length && tier === 'write-exec') {
+      if (backend === 'claude') {
+        parts.push('--allowedTools', ...cmds.map((c) => (
+          c === 'netget' ? '"Bash(<数据目录>/bin/netget:*)"' : `"Bash(${c}:*)"`
+        )));
+      } else {
+        parts.push(`（${backend} 的可写+执行档默认放行命令，无需 --allowedTools）`);
+      }
+    } else if (cmds.length) {
+      parts.push('（命令白名单只对「可写+执行」档生效）');
+    }
+  }
+
+  if (extra) parts.push(extra);
+
+  $('mm-preview').textContent = parts.join(' ');
+
+  const overrides = /(^|\s)(--tools|--permission-mode|--permission-prompts|--dangerously-skip-permissions|--mode|-s|--sandbox|sandbox_mode=|--dangerously-bypass-approvals-and-sandbox|--variant)(\s|$|=)/.test(` ${extra} `);
+  $('mm-override-warn').classList.toggle('hidden', !overrides || !extra);
+}
+
+async function saveMemberSettings() {
+  if (!mm) return;
+  const err = $('mm-error');
+  err.classList.add('hidden');
+
+  const backend = $('mm-backend').value;
+  const name = $('mm-name').value.trim();
+  if (!name) return showModalError('名字不能为空');
+
+  const changingBackend = !mm.isNew && backend !== mm.original.backend;
+  if (changingBackend && !window.confirm(
+    `把这个成员的后端从 ${mm.original.backend} 换成 ${backend}？\n\n`
+    + '会话 id 属于原来的 CLI，换后端会重置上下文——它之前的对话记忆会清空。\n继续？',
+  )) return;
+
+  const extraText = $('mm-extra').value;
+  const overrides = /(--tools|--permission-mode|--permission-prompts|--dangerously-skip-permissions|--mode|(^|\s)-s(\s|$)|--sandbox|sandbox_mode=|--dangerously-bypass-approvals-and-sandbox)/.test(extraText);
+  if (overrides && !mm.confirmOverride) {
+    if (!window.confirm(
+      '这些启动参数会覆盖能力档位，实际权限以参数为准。\n\n'
+      + `参数：${extraText}\n\n确认要用这些参数？保存后卡片上会常驻标注「档位被参数覆盖」。`,
+    )) return;
+    mm.confirmOverride = true;
+  }
+
+  const allowedCommands = mm.tier === 'full'
+    ? ''
+    : [
+      $('mm-netget').checked ? 'netget' : null,
+      $('mm-commands').value.trim(),
+    ].filter(Boolean).join(' ');
+
+  const payload = {
+    name,
+    backend,
+    tier: mm.tier,
+    model: $('mm-model').value.trim(),
+    effort: $('mm-effort').value.trim(),
+    extraArgs: extraText,
+    allowedCommands,
+    timeoutMinutes: $('mm-timeout').value,
+    role: $('mm-role').value,
+    persona: $('mm-persona').value,
+  };
+
+  if (mm.isNew) {
+    const res = await fetch('/api/member', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...payload, tier: mm.tier, confirmOverride: mm.confirmOverride }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return showModalError(data.error ?? `保存失败（${res.status}）`);
+    appendSystemNote(`已添加成员 @${data.member?.name ?? name}（${backend} · ${tierLabel(mm.tier)}${data.role === 'leader' ? ' · 头头' : ''}）`);
+    closeMemberSettings();
+    return;
+  }
+
+  const res = await fetch('/api/member/update', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: mm.id, patch: payload, confirmOverride: mm.confirmOverride }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return showModalError(data.error ?? `保存失败（${res.status}）`);
+
+  const bits = [];
+  if (data.changed?.includes('backend')) bits.push('后端');
+  if (data.changed?.includes('tier')) bits.push('档位');
+  if (data.changed?.includes('model')) bits.push('模型');
+  if (data.changed?.includes('effort')) bits.push('思考等级');
+  if (data.changed?.includes('extraArgs')) bits.push('启动参数');
+  if (data.changed?.includes('allowedCommands')) bits.push('允许的命令');
+  if (data.changed?.includes('timeoutMinutes')) bits.push('单轮上限');
+  if (data.changed?.includes('name')) bits.push('名字');
+  if (data.sessionReset) bits.push('会话已重置');
+  appendSystemNote(bits.length ? `已更新 ${name}：${bits.join('、')}（立即生效）` : '已保存设置');
+  closeMemberSettings();
+}
+
+function showModalError(text) {
+  const el = $('mm-error');
+  el.textContent = text;
+  el.classList.remove('hidden');
+}
+
+async function removeMember() {
+  if (!mm?.id) return;
+  const m = memberById(mm.id);
+  const isOnlyLeader = m?.role === 'leader' && state.members.filter((x) => x.role === 'leader').length === 1;
+  const warn = isOnlyLeader ? '\n\n注意：这是唯一的头头，删掉之后没有人能自动接手任务。' : '';
+  if (!window.confirm(`删除成员「${m?.name}」？\n\n历史消息会保留，只从名册移除。${warn}`)) return;
+
+  const res = await fetch('/api/member/remove', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: mm.id, confirmNoLeader: isOnlyLeader }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return showModalError(data.error ?? `删除失败（${res.status}）`);
+  appendSystemNote(`已删除成员 ${data.removed?.name ?? ''}（历史消息保留）`);
+  closeMemberSettings();
+}
+
+/* ==========================================================================
+   事件绑定与启动
+   ========================================================================== */
 
 function setOverridden(on) {
   state.overridden = on;
@@ -1567,16 +3022,48 @@ function setOverridden(on) {
   $('btn-handback').classList.toggle('hidden', !on);
 }
 
+function closeMobileDrawers() {
+  $('sidebar').classList.remove('open');
+  $('right-panel').classList.remove('open');
+}
+
+// 移动端侧栏切换
+$('btn-toggle-sidebar').onclick = () => {
+  $('right-panel').classList.remove('open');
+  $('sidebar').classList.toggle('open');
+};
+$('btn-toggle-board').onclick = () => {
+  $('sidebar').classList.remove('open');
+  $('right-panel').classList.toggle('open');
+};
+
+// 房间目标行内编辑
+$('goal-display').onclick = openGoalEditor;
+$('goal-display').onkeydown = (e) => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openGoalEditor(); }
+};
+$('goal-editor').onsubmit = saveGoal;
+$('goal-cancel').onclick = closeGoalEditor;
+$('goal-input').onkeydown = (e) => {
+  if (e.key === 'Escape') closeGoalEditor();
+};
+$('goal-shared-btn').onclick = () => {
+  switchRightTab('files');
+  if (window.innerWidth <= 960) $('right-panel').classList.add('open');
+};
+
+// 房间设置控件
 $('cabtier').onchange = async (e) => {
   const tier = e.target.value;
   const label = cabTierLabel(tier);
-  if (tier !== 'readonly' && !window.confirm(
+  if ((tier === 'write-exec' || tier === 'full') && !window.confirm(
     `把 AI 创建成员的最高权限改成「${label}」？\n\n`
-    + '这意味着头头自己加的人可以直接改文件'
-    + (tier === 'write-exec' ? '并执行命令' : '')
-    + '。只有你信任房间里的 AI 时才这么做。',
+    + (tier === 'full'
+      ? '这意味着头头新拉入的成员将拥有完全开放权限（任意文件、任意命令与联网，免审批）。'
+      : '这意味着头头新拉入的成员可以改文件并按白名单执行命令。')
+    + '\n确认修改？',
   )) {
-    e.target.value = state.aiCabTier;   // 取消就还原
+    e.target.value = state.aiCabTier;
     return;
   }
   const res = await fetch('/api/cabtier', {
@@ -1586,22 +3073,23 @@ $('cabtier').onchange = async (e) => {
   });
   if (!res.ok) {
     e.target.value = state.aiCabTier;
-    appendSystemNote('设置失败', 'warn');
+    const d = await res.json().catch(() => ({}));
+    appendSystemNote(`设置最高权限失败：${d.error ?? res.status}`, 'warn');
   }
 };
 
-$('room-timeout').onchange = async (e) => {
-  const v = e.target.value;
+$('peer-mentions').onchange = async (e) => {
+  const on = e.target.checked;
   const res = await fetch('/api/room-settings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ turnTimeoutMinutes: v }),
+    body: JSON.stringify({ allowPeerMentions: on }),
   });
-  const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    appendSystemNote(`设置失败：${data.error ?? res.status}`, 'warn');
-    e.target.value = '';
+    e.target.checked = !on;
+    return appendSystemNote('更新成员互 @ 设置失败', 'warn');
   }
+  state.allowPeerMentions = on;
 };
 
 $('passive-wake').onchange = async (e) => {
@@ -1618,6 +3106,55 @@ $('passive-wake').onchange = async (e) => {
   state.headPassiveWake = on;
 };
 
+$('room-timeout').onchange = async (e) => {
+  const v = e.target.value;
+  const res = await fetch('/api/room-settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ turnTimeoutMinutes: v }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    appendSystemNote(`设置失败：${data.error ?? res.status}`, 'warn');
+    e.target.value = '';
+  }
+};
+
+// 仓库登记（行内表单替代 window.prompt）
+$('btn-add-repo').onclick = (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  $('repos-section').open = true;
+  const form = $('repo-add-form');
+  form.classList.toggle('hidden');
+  if (!form.classList.contains('hidden')) {
+    $('repo-add-input').focus();
+  }
+};
+$('repo-add-cancel').onclick = () => {
+  $('repo-add-form').classList.add('hidden');
+  $('repo-add-input').value = '';
+};
+$('repo-add-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const input = $('repo-add-input');
+  const path = input.value.trim();
+  if (!path) return;
+  const res = await fetch('/api/registry', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return appendSystemNote(`登记仓库失败：${data.error ?? res.status}`, 'warn');
+  state.registry = data.registry ?? [];
+  renderRepos();
+  input.value = '';
+  $('repo-add-form').classList.add('hidden');
+  appendSystemNote(`已登记仓库：${path}`);
+};
+
+// 快捷操作
 $('btn-takeover').onclick = async () => {
   if (!window.confirm('接管后头头会暂停自动发言，你直接 @ 任何成员。继续？')) return;
   const res = await fetch('/api/takeover', { method: 'POST' });
@@ -1636,405 +3173,64 @@ $('btn-handback').onclick = async () => {
   }
 };
 
-$('btn-summarize').onclick = () => {
-  if (!state.members.length) return;
-  const names = state.members.map((m, i) => `${i + 1}. ${m.name}`).join('\n');
-  const pick = window.prompt(`让谁做总结？输入编号：\n${names}`);
-  if (!pick) return;
-  const m = state.members[Number(pick) - 1];
-  if (!m) return appendSystemNote('编号无效', 'warn');
-  fetch('/api/summarize', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ agentId: m.id }),
-  }).then((r) => {
-    if (r.ok) appendSystemNote(`${m.name} 开始总结（说完房间会停住）`);
-    else appendSystemNote('发起总结失败', 'warn');
-  });
-};
+$('btn-summarize').onclick = openSummarizePicker;
+$('pm-close').onclick = closePickerModal;
+$('picker-modal').onclick = (e) => { if (e.target.id === 'picker-modal') closePickerModal(); };
 
-$('btn-add-repo').onclick = async () => {
-  const path = window.prompt('登记一个可用仓库（绝对路径）：\n头头只能在登记的仓库里选。');
-  if (!path) return;
-  const res = await fetch('/api/registry', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path: path.trim() }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) return appendSystemNote(`登记失败：${data.error ?? res.status}`, 'warn');
-  state.registry = data.registry ?? [];
-  renderRepos();
-  appendSystemNote(`已登记仓库：${path.trim()}`);
-};
-
+// 成员设置弹窗事件
 $('btn-add-member').onclick = () => openNewMember();
-
+$('btn-first-member').onclick = () => openNewMember();
 $('mm-close').onclick = closeMemberSettings;
 $('mm-cancel').onclick = closeMemberSettings;
 $('mm-save').onclick = saveMemberSettings;
 $('mm-remove').onclick = removeMember;
+$('mm-open-diag').onclick = () => openBackendsModal();
 $('member-modal').onclick = (e) => { if (e.target.id === 'member-modal') closeMemberSettings(); };
 
-// 换后端：档位列表要跟着变（codex 没有 write-ask，claude 没有 read 之外的差别）
 $('mm-backend').onchange = (e) => {
   mm.backend = e.target.value;
-  // 档位收敛：新后端不支持当前档就落到它最保守的一档
-  const support = {
-    claude: ['readonly', 'read', 'write-ask', 'write', 'write-exec'],
-    codex: ['read', 'write-exec'],
-    opencode: ['readonly', 'read', 'write', 'write-exec'],
-  }[mm.backend] ?? ['readonly'];
-  if (!support.includes(mm.tier)) mm.tier = support[0];
+  const support = tiersForBackend(mm.backend);
+  if (!support.includes(mm.tier)) {
+    mm.tier = support.includes('full') ? 'full' : support[0];
+  }
   renderTierChoices(support);
   renderModelHints();
+  updateTierDependentControls();
   updatePreview();
 };
 
 for (const id of ['mm-model', 'mm-effort', 'mm-extra', 'mm-commands']) {
-  $(id).addEventListener('input', updatePreview);
+  $(id).addEventListener('input', () => {
+    if (id === 'mm-model' || id === 'mm-effort') renderModelHints();
+    updatePreview();
+  });
 }
 $('mm-commands').addEventListener('input', updateCurlWarn);
 $('mm-netget').addEventListener('change', updatePreview);
 
-/**
- * 自定义命令里写了 curl/wget 时，必须红字说清它的真实边界。
- *
- * 管理方 22:11 的要求：保留入口（老板房间里 4 个成员正在用，突然移除会让它们
- * 无声失能——那正是我们今天修了一整天的"界面与事实不符"），但必须标红。
- */
-function updateCurlWarn() {
-  const v = $('mm-commands').value;
-  const risky = /(^|\s)(curl|wget)(\s|$)/.test(v);
-  const el = $('mm-curl-warn');
-  el.textContent = risky
-    ? '⚠️ curl/wget 不受目录限制：能读本机任意文件（如 file:///etc/hostname）、能写到工作目录之外、能上传外传。'
-    : '';
-  el.classList.toggle('hidden', !risky);
-}
+// 后端诊断面板事件
+$('backend-pills').onclick = openBackendsModal;
+$('bm-close').onclick = closeBackendsModal;
+$('bm-refresh').onclick = () => fetchBackends({ silent: false, force: true });
+$('bm-probe-all').onclick = () => probeBackend('all');
+$('backends-modal').onclick = (e) => { if (e.target.id === 'backends-modal') closeBackendsModal(); };
 
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !$('member-modal').classList.contains('hidden')) closeMemberSettings();
+// 右栏标签切换与筛选
+document.querySelectorAll('.panel-tab').forEach((btn) => {
+  btn.onclick = () => switchRightTab(btn.dataset.tab);
+});
+$('btn-refresh-files').onclick = () => fetchFiles({ silent: false });
+document.querySelectorAll('#activity-filters .filter-pill').forEach((btn) => {
+  btn.onclick = () => {
+    state.activityFilter = btn.dataset.filter;
+    document.querySelectorAll('#activity-filters .filter-pill').forEach((p) => {
+      p.classList.toggle('active', p === btn);
+    });
+    renderActivity();
+  };
 });
 
-/* ---------------- 成员设置弹窗 ---------------- */
-
-/** 档位说明文案（后端也有一份，这里是为了不依赖网络就能显示） */
-const TIER_TEXT = {
-  readonly: ['无工具', '完全碰不到文件：看不见也改不了，只能对话'],
-  read: ['可读', '能读文件和搜代码，不能改、不能执行命令'],
-  'write-ask': ['可写·每次询问', '能改文件，但每次写入都要你批准'],
-  write: ['可写', '能改工作目录内的文件，不能执行命令'],
-  // 别写「命令也限制在工作目录内」——放开的命令没有目录墙（实测 curl 能写 /tmp）
-  'write-exec': ['可写+执行', '能改工作目录内的文件；命令默认全禁，需单独允许（允许后不受目录限制）'],
-};
-
-const MODEL_HINTS = {
-  claude: ['fable', 'opus', 'sonnet', 'haiku'],
-  codex: [],
-  opencode: [],
-};
-
-/** 当前弹窗状态。id 为 null 表示"新建"。 */
-let mm = null;
-
-function memberByIdForSettings(id) {
-  return state.members.find((m) => m.id === id) ?? null;
-}
-
-function openMemberSettings(id) {
-  const m = memberByIdForSettings(id);
-  if (!m) return;
-
-  mm = {
-    id: m.id,
-    original: { ...m },
-    backend: m.backend,
-    tier: m.tier,
-    confirmOverride: false,
-    isNew: false,
-  };
-
-  $('mm-title').textContent = `成员设置 · ${m.name}`;
-  $('mm-name').value = m.name;
-  $('mm-backend').value = m.backend;
-  $('mm-model').value = m.model ?? '';
-  $('mm-effort').value = m.effort ?? '';
-  $('mm-extra').value = m.extraArgs ?? '';
-  $('mm-commands').value = (m.allowedCommands ?? '').replace(/\bnetget\b\s*/g, '').trim();
-  $('mm-netget').checked = /\bnetget\b/.test(m.allowedCommands ?? '');
-  updateCurlWarn();
-  $('mm-timeout').value = m.timeoutMinutes ?? '';
-  $('mm-timeout-hint').textContent = m.timeoutSource === 'legacy'
-    ? `⚠️ 当前实际生效的是 ${m.effectiveTimeoutMinutes} 分钟，来自 room.json 里手写的 timeoutMs；`
-      + '在这里填一个值会覆盖它，并让界面与实际情况重新一致。'
-    : `实际生效：${m.effectiveTimeoutMinutes} 分钟。清空 = 用房间默认，并删除配置里手写的旧值。`;
-  $('mm-role').value = m.role;
-  $('mm-persona').value = m.persona ?? '';
-  $('mm-remove').classList.remove('hidden');
-  $('mm-error').classList.add('hidden');
-
-  renderTierChoices(m.tiers ?? []);
-  renderModelHints();
-  updateNetgetAvailability();
-  updatePreview();
-  $('member-modal').classList.remove('hidden');
-  $('mm-name').focus();
-}
-
-/** 新建成员也走同一个弹窗（现在新增成员要连问四次 prompt） */
-function openNewMember() {
-  const isFirst = state.members.length === 0;
-  mm = {
-    id: null, original: null, backend: 'claude',
-    tier: isFirst ? 'readonly' : 'readonly', confirmOverride: false, isNew: true, isFirst,
-  };
-  $('mm-title').textContent = isFirst ? '添加第一个成员（它会是头头）' : '添加成员';
-  $('mm-name').value = '';
-  $('mm-backend').value = 'claude';
-  $('mm-model').value = '';
-  $('mm-effort').value = '';
-  $('mm-extra').value = '';
-  $('mm-commands').value = '';
-  $('mm-netget').checked = false;
-  updateCurlWarn();
-  $('mm-timeout').value = '';
-  $('mm-timeout-hint').textContent = '这是「防无限跑」的上限，不是卡死判定——卡死由看门狗判（90 秒无输出）。';
-  $('mm-role').value = isFirst ? 'leader' : 'member';
-  $('mm-role').disabled = isFirst;   // 第一个成员固定头头，不再多问一次
-  $('mm-persona').value = '';
-  $('mm-remove').classList.add('hidden');
-  $('mm-error').classList.add('hidden');
-  renderTierChoices(['readonly', 'read', 'write-ask', 'write', 'write-exec']);
-  renderModelHints();
-  updateNetgetAvailability();
-  updatePreview();
-  $('member-modal').classList.remove('hidden');
-  $('mm-name').focus();
-}
-
-function closeMemberSettings() {
-  $('member-modal').classList.add('hidden');
-  $('mm-role').disabled = false;
-  mm = null;
-}
-
-function renderTierChoices(tiers) {
-  const box = $('mm-tiers');
-  box.innerHTML = '';
-  const list = tiers.length ? tiers : ['readonly'];
-
-  // 档位按强弱排序，和"只读→可写→可执行"的直觉一致
-  const order = ['readonly', 'read', 'write-ask', 'write', 'write-exec'];
-  const sorted = [...list].sort((a, b) => order.indexOf(a) - order.indexOf(b));
-
-  for (const tier of sorted) {
-    const [name, desc] = TIER_TEXT[tier] ?? [tier, ''];
-    const label = document.createElement('label');
-    label.className = `tier-choice${mm.tier === tier ? ' selected' : ''}`;
-    label.innerHTML = `
-      <input type="radio" name="mm-tier" value="${tier}" ${mm.tier === tier ? 'checked' : ''}>
-      <span class="tier-choice-main">
-        <span class="tier-choice-name">${escapeHtml(name)}</span>
-        <span class="tier-choice-desc">${escapeHtml(desc)}</span>
-      </span>`;
-    label.querySelector('input').onchange = () => {
-      mm.tier = tier;
-      renderTierChoices(list);
-      updateNetgetAvailability();
-      updatePreview();
-    };
-    box.appendChild(label);
-  }
-
-  // 当前档位不在该后端支持列表里（换后端后）：明确说一声，别让界面显示一个选不中的档
-  $('mm-tier-hint').textContent = list.includes(mm.tier)
-    ? ''
-    : `当前后端不支持「${mm.tier}」，请重选一档。`;
-}
-
-function renderModelHints() {
-  const hints = MODEL_HINTS[mm.backend] ?? [];
-  $('mm-model-list').innerHTML = hints.map((h) => `<option value="${escapeHtml(h)}">`).join('');
-  const m = mm.isNew ? null : memberByIdForSettings(mm.id);
-  const efforts = (m?.effortHints) ?? [];
-  $('mm-effort-list').innerHTML = efforts.map((h) => `<option value="${escapeHtml(h)}">`).join('');
-  $('mm-backend-hint').textContent = mm.backend === 'codex'
-    ? 'codex 的沙箱只有"可读"和"可写+执行"两档；模型/等级必须留空或填它自己认识的值。'
-    : '';
-}
-
-/** 参数预览：只做展示，真正的拒绝/确认在保存时由服务端判定 */
-/**
- * 「联网查询」只在「可写+执行」档生效：别的档根本不给 Bash 工具。
- *
- * 不置灰的话会出现另一种"界面与事实不符"：勾着「允许联网查资料」，
- * 成员却一条命令都跑不了。服务端也会拒绝这种组合，但界面不该先让人填错。
- */
-function updateNetgetAvailability() {
-  const ok = mm?.tier === 'write-exec';
-  const box = $('mm-netget');
-  box.disabled = !ok;
-  if (!ok) box.checked = false;
-  const hint = box.closest('.field')?.querySelector('.field-hint');
-  if (hint) {
-    hint.dataset.orig ??= hint.textContent;
-    hint.textContent = ok
-      ? hint.dataset.orig
-      : '只有「可写+执行」档才能联网：其他档连命令工具都不给。';
-  }
-}
-
-function updatePreview() {
-  const backend = $('mm-backend').value;
-  const model = $('mm-model').value.trim();
-  const effort = $('mm-effort').value.trim();
-  const extra = $('mm-extra').value.trim();
-  const tier = mm?.tier ?? 'readonly';
-
-  const parts = [backend];
-  // 档位参数（按后端近似拼，只为让人看懂会发生什么）
-  if (backend === 'claude') {
-    if (tier === 'readonly') parts.push('--tools ""');
-    else if (tier === 'read') parts.push('--tools "Read,Grep,Glob"');
-    else parts.push('--tools "Read,Write,Edit"');
-  } else if (backend === 'codex') {
-    parts.push('-s', tier === 'write-exec' ? 'workspace-write' : 'read-only');
-  }
-  if (model) {
-    if (backend === 'claude') parts.push('--model', model);
-    else if (backend === 'codex') parts.push(`-c model="${model}"`);
-    else parts.push('-m', model);
-  }
-  if (effort) {
-    if (backend === 'claude') parts.push('--effort', effort);
-    else if (backend === 'codex') parts.push(`-c model_reasoning_effort="${effort}"`);
-    else parts.push('--variant', effort);
-  }
-  const cmds = [
-    $('mm-netget').checked ? 'netget' : null,
-    ...$('mm-commands').value.trim().split(/[\s,，]+/).filter(Boolean),
-  ].filter(Boolean);
-  if (cmds.length && tier === 'write-exec') {
-    parts.push('--allowedTools', ...cmds.map((c) => (c === 'netget'
-      ? '"Bash(<数据目录>/bin/netget:*)"'
-      : `"Bash(${c}:*)"`)));
-  } else if (cmds.length) {
-    parts.push('（命令只对「可写+执行」档生效）');
-  }
-  if (extra) parts.push(extra);
-
-  $('mm-preview').textContent = parts.join(' ');
-  // 覆盖标注：每次输入都重算，参数删掉就消失
-  const overrides = /(^|\s)(--tools|--permission-mode|--permission-prompts|--dangerously-skip-permissions|-s|--sandbox|sandbox_mode=|--dangerously-bypass-approvals-and-sandbox|--variant)/.test(` ${extra} `);
-  $('mm-override-warn').classList.toggle('hidden', !overrides || !extra);
-}
-
-async function saveMemberSettings() {
-  if (!mm) return;
-  const err = $('mm-error');
-  err.classList.add('hidden');
-
-  const backend = $('mm-backend').value;
-  const name = $('mm-name').value.trim();
-  if (!name) { return showModalError('名字不能为空'); }
-
-  // 换后端要说清上下文会重置（会话 id 属于旧 CLI）
-  const changingBackend = !mm.isNew && backend !== mm.original.backend;
-  if (changingBackend && !window.confirm(
-    `把这个成员的后端从 ${mm.original.backend} 换成 ${backend}？\n\n`
-    + '会话 id 属于原来的 CLI，换后端会**重置上下文**——它之前的对话记忆会丢。\n继续？',
-  )) return;
-
-  // 覆盖档位的参数要二次确认
-  const extraText = $('mm-extra').value;
-  const overrides = /(--tools|--permission-mode|--permission-prompts|--dangerously-skip-permissions|(^|\s)-s(\s|$)|--sandbox|sandbox_mode=|--dangerously-bypass-approvals-and-sandbox)/.test(extraText);
-  if (overrides && !mm.confirmOverride) {
-    if (!window.confirm(
-      '这些启动参数会覆盖能力档位，实际权限以参数为准。\n\n'
-      + `参数：${extraText}\n\n确认要用这些参数？保存后卡片上会常驻标注"档位被参数覆盖"。`,
-    )) return;
-    mm.confirmOverride = true;
-  }
-
-  const payload = {
-    name,
-    backend,
-    tier: mm.tier,
-    model: $('mm-model').value.trim(),
-    effort: $('mm-effort').value.trim(),
-    extraArgs: extraText,
-    allowedCommands: [
-      $('mm-netget').checked ? 'netget' : null,
-      $('mm-commands').value.trim(),
-    ].filter(Boolean).join(' '),
-    timeoutMinutes: $('mm-timeout').value,
-    role: $('mm-role').value,
-    persona: $('mm-persona').value,
-  };
-
-  if (mm.isNew) {
-    const res = await fetch('/api/member', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...payload, tier: mm.tier, confirmOverride: mm.confirmOverride }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) return showModalError(data.error ?? `保存失败（${res.status}）`);
-    appendSystemNote(`已添加成员 @${data.member?.name ?? name}（${backend} / ${tierLabel(mm.tier)}${data.role === 'leader' ? ' · 头头' : ''}）`);
-    closeMemberSettings();
-    return;
-  }
-
-  const res = await fetch('/api/member/update', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: mm.id, patch: payload, confirmOverride: mm.confirmOverride }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    return showModalError(data.error ?? `保存失败（${res.status}）`);
-  }
-
-  const bits = [];
-  if (data.changed?.includes('tier')) bits.push('档位');
-  if (data.changed?.includes('model')) bits.push('模型');
-  if (data.changed?.includes('effort')) bits.push('思考等级');
-  if (data.changed?.includes('extraArgs')) bits.push('启动参数');
-  if (data.changed?.includes('allowedCommands')) bits.push('允许的命令');
-  if (data.changed?.includes('timeoutMinutes')) bits.push('单轮上限');
-  if (data.changed?.includes('name')) bits.push('名字');
-  if (data.sessionReset) bits.push('会话已重置');
-  appendSystemNote(bits.length ? `已更新 ${name}：${bits.join('、')}（立即生效，不用重启）` : '没有改动');
-  closeMemberSettings();
-}
-
-function showModalError(text) {
-  const el = $('mm-error');
-  el.textContent = text;
-  el.classList.remove('hidden');
-}
-
-async function removeMember() {
-  if (!mm?.id) return;
-  const m = memberByIdForSettings(mm.id);
-  const isOnlyLeader = m?.role === 'leader' && state.members.filter((x) => x.role === 'leader').length === 1;
-  const warn = isOnlyLeader ? '\n\n注意：这是唯一的头头，删掉之后没有人能自动接手任务。' : '';
-  if (!window.confirm(`删除成员「${m?.name}」？\n\n历史消息会保留，只从名册移除。${warn}`)) return;
-
-  const res = await fetch('/api/member/remove', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: mm.id, confirmNoLeader: isOnlyLeader }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) return showModalError(data.error ?? `删除失败（${res.status}）`);
-  appendSystemNote(`已删除成员 ${data.removed?.name ?? ''}（历史消息保留）`);
-  closeMemberSettings();
-}
-
-/* ---------------- 房间切换 ---------------- */
-
+// 房间切换
 $('btn-rooms').onclick = async () => {
   const r = await fetch('/api/rooms').catch(() => null);
   if (r?.ok) {
@@ -2045,18 +3241,14 @@ $('btn-rooms').onclick = async () => {
   }
   showRoomList();
 };
-
 $('rooms-close').onclick = () => {
   setHashRoom(state.activeRoomId);
   hideRoomList();
 };
-
-/** 左栏「+ 新建房间」：打开列表并直接聚焦到新房间名输入框 */
 $('btn-new-room').onclick = () => {
   showRoomList();
   $('rooms-new-name').focus();
 };
-
 $('rooms-create').onsubmit = async (e) => {
   e.preventDefault();
   const input = $('rooms-new-name');
@@ -2070,8 +3262,6 @@ $('rooms-create').onsubmit = async (e) => {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return appendSystemNote(`新建失败：${data.error ?? res.status}`, 'warn');
   input.value = '';
-  // 服务端建完会直接切到新房间并广播 room.init。
-  // 但如果那个 init 已经先到了（activeRoomId 已是新房间），就就地收尾。
   const newId = data.room?.id;
   if (newId) {
     setHashRoom(newId);
@@ -2084,7 +3274,6 @@ $('rooms-create').onsubmit = async (e) => {
   }
 };
 
-// 浏览器前进/后退也要跟着换房间
 window.addEventListener('hashchange', () => {
   const id = hashRoomId();
   if (!id) return showRoomList();
@@ -2092,11 +3281,9 @@ window.addEventListener('hashchange', () => {
   else hideRoomList();
 });
 
-$('btn-first-member').onclick = () => openNewMember();
-
+// 状态栏控制按钮
 $('btn-send').onclick = send;
 $('btn-stop').onclick = async () => {
-  // 停止会清空队列并打断当前发言，问一次（和"打断"不同：打断不用问，它可逆）
   if (!window.confirm('停止整间房？\n\n会打断当前发言，并清空排队中的发言。\n说一句话或点「继续」就能恢复。')) return;
   const res = await fetch('/api/stop', { method: 'POST' });
   const data = await res.json().catch(() => ({}));
@@ -2105,7 +3292,6 @@ $('btn-stop').onclick = async () => {
 };
 
 $('btn-resume').onclick = async () => {
-  // 停止中 → 先松刹车（不发消息）；已经停住但有原因 → 让头头接着推进
   const kick = !state.stopped;
   const res = await fetch('/api/resume', {
     method: 'POST',
@@ -2115,18 +3301,38 @@ $('btn-resume').onclick = async () => {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return appendSystemNote(`恢复失败：${data.error ?? res.status}`, 'warn');
 };
+
 $('btn-interrupt').onclick = async () => {
   const res = await fetch('/api/interrupt', { method: 'POST' });
   const data = await res.json().catch(() => ({}));
-  // 没有在跑的一轮时说清楚，别让按钮看起来没反应
   if (res.ok && !data.ok) appendSystemNote('当前没有正在发言的人', 'warn');
 };
-$('drawer-close').onclick = () => $('drawer').classList.add('hidden');
-$('drawer').onclick = (e) => { if (e.target.id === 'drawer') $('drawer').classList.add('hidden'); };
 
+// 抽屉与滚动
+$('drawer-close').onclick = closeDrawer;
+$('drawer').onclick = (e) => { if (e.target.id === 'drawer') closeDrawer(); };
+$('stream').addEventListener('scroll', () => {
+  $('btn-scroll-bottom').classList.toggle('hidden', isNearBottom());
+});
+$('btn-scroll-bottom').onclick = () => scrollToBottom({ force: true });
+
+// 代码块复制委托
+bindCodeCopyDelegation($('stream'));
+bindCodeCopyDelegation($('drawer-body'));
+
+// 全局 Escape 关闭顶层弹窗/抽屉
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!$('drawer').classList.contains('hidden')) return closeDrawer();
+  if (!$('backends-modal').classList.contains('hidden')) return closeBackendsModal();
+  if (!$('member-modal').classList.contains('hidden')) return closeMemberSettings();
+  if (!$('picker-modal').classList.contains('hidden')) return closePickerModal();
+  closeMobileDrawers();
+});
+
+// 输入框交互
 $('input').addEventListener('input', (e) => { autoGrow(e.target); updateMentionHint(); });
 $('input').addEventListener('keydown', (e) => {
-  // 候选列表开着时，方向键/回车/Tab 归它用
   if (mention.open) {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -2149,18 +3355,18 @@ $('input').addEventListener('keydown', (e) => {
       return;
     }
   }
-
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     send();
   }
 });
-
-// 光标移动也要更新候选（在已有 @ 中间点来点去时）
 $('input').addEventListener('click', updateMentionHint);
 $('input').addEventListener('keyup', (e) => {
   if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) updateMentionHint();
 });
 
+// 启动初始化
 renderStatus();
+renderBackendPills();
+fetchBackends({ silent: true });
 connect();

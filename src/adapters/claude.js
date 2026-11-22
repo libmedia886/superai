@@ -69,6 +69,10 @@ export function allowedCommandArgs(cmds = [], { netgetPath = null } = {}) {
 }
 
 export function tierArgs(tier = 'readonly', { allowedCommands = [], netgetPath = null } = {}) {
+  if (tier === 'full') {
+    // 完全开放档：不传 --tools 限制，放行全部内置工具（含 Bash/WebFetch/WebSearch/Read/Write/Edit/Grep/Glob）且免审批
+    return ['--dangerously-skip-permissions'];
+  }
   if (tier === 'read') {
     // 可读档：实测 `--tools "Read,Grep,Glob" --permission-prompts none`
     // 能读 cwd 内文件，目录外被权限系统拦下。这是老板说的「可读」。
@@ -102,6 +106,7 @@ export function approvalLabel(tier) {
   if (tier === 'readonly') return '不碰文件';
   if (tier === 'read') return '只读';
   if (tier === 'write-ask') return '每次询问';
+  if (tier === 'full') return '完全开放';
   return '自动批准';
 }
 
@@ -302,7 +307,11 @@ export class ClaudeAdapter extends AgentAdapter {
     // 探测用当前档位真实跑一轮，不依赖版本号/登录提示
     const res = await runJsonCli({
       command: this.config.bin || 'claude',
-      args: ['-p', '--output-format', 'json', ...tierArgs(this.config.tier)],
+      args: [
+        '-p', '--output-format', 'json',
+        ...tierArgs(this.config.tier),
+        ...modelArgs('claude', this.config.model),
+      ],
       cwd,
       backend: 'claude',
       forbiddenRoots: this.config.forbiddenRoots ?? [],

@@ -57,11 +57,17 @@ export class CodexAdapter extends AgentAdapter {
   }
 
   #baseArgs(cwd) {
+    const isFull = this.config.tier === 'full';
+    const canShare = this.config.tier === 'write-exec' || isFull;
     return [
       'exec', '--json', '--skip-git-repo-check',
-      '-s', this.#sandboxMode(this.config.tier), '-C', cwd,
+      // 完全开放档直接跳过审批与沙箱；其余档位按沙箱模式收紧
+      ...(isFull
+        ? ['--dangerously-bypass-approvals-and-sandbox']
+        : ['-s', this.#sandboxMode(this.config.tier)]),
+      '-C', cwd,
       // 共享目录：只读档不加（read-only 沙箱下加了也写不了，只会误导）
-      ...(this.config.sharedDir && this.config.tier === 'write-exec'
+      ...(this.config.sharedDir && canShare
         ? ['--add-dir', this.config.sharedDir] : []),
       ...this.#modelEffortArgs(),
       ...(this.config.extraArgs ?? []),
@@ -69,23 +75,32 @@ export class CodexAdapter extends AgentAdapter {
   }
 
   /**
-   * 注意：`codex exec resume` 子命令**不支持** `-s` 与 `-C`（实测 0.167.0），
-   * 只能在 resume 上用 `-c sandbox_mode=` 打补丁，cwd 靠 spawn 的 cwd 参数。
+   * 注意：`codex exec resume` 子命令**不支持** `-s` 与 `-C`（实测 0.167.0/0.170.0），
+   * 完全开放档直接传 `--dangerously-bypass-approvals-and-sandbox`，
+   * 其余档位用 `-c sandbox_mode=` 打补丁，cwd 靠 spawn 的 cwd 参数。
    */
   #resumeArgs(sessionId) {
+    const isFull = this.config.tier === 'full';
     return [
       'exec', 'resume', '--json', '--skip-git-repo-check',
-      '-c', `sandbox_mode=${this.#sandboxMode(this.config.tier)}`,
+      ...(isFull
+        ? ['--dangerously-bypass-approvals-and-sandbox']
+        : ['-c', `sandbox_mode=${this.#sandboxMode(this.config.tier)}`]),
       ...this.#modelEffortArgs(),
       ...(this.config.extraArgs ?? []),
       sessionId, '-',
     ];
   }
 
-  async run({ prompt, cwd, sessionId, timeoutMs = DEFAULT_TIMEOUT_MS, onEvent, signal = null }) {
-    const args = sessionId
+  /** 拼装命令行参数（便于单测与调试检查首轮/续聊两条路径） */
+  buildArgs({ cwd = '.', sessionId = null } = {}) {
+    return sessionId
       ? this.#resumeArgs(sessionId)
       : [...this.#baseArgs(cwd), '-'];
+  }
+
+  async run({ prompt, cwd, sessionId, timeoutMs = DEFAULT_TIMEOUT_MS, onEvent, signal = null }) {
+    const args = this.buildArgs({ cwd, sessionId });
 
     let newSessionId = sessionId ?? null;
     let sawTurnCompleted = false;

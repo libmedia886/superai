@@ -410,7 +410,15 @@ export async function createRoom(dataDir, meta, name, { now = Date.now() } = {})
   await mkdir(join(dir, 'agents'), { recursive: true });
   await writeFile(
     join(dir, 'room.json'),
-    JSON.stringify({ name: clean, goal: '', registry: [], members: [] }, null, 2),
+    JSON.stringify({
+      name: clean,
+      goal: '',
+      registry: [],
+      members: [],
+      aiCabTier: 'full',
+      allowPeerMentions: true,
+      headPassiveWake: true,
+    }, null, 2),
     'utf8',
   );
 

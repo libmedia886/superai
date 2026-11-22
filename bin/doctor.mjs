@@ -25,7 +25,7 @@ const X = '\x1b[0m';
 
 const mark = { ok: `${G}✓${X}`, bad: `${R}✗${X}`, warn: `${Y}!${X}`, skip: `${DIM}–${X}` };
 
-const backends = ['claude', 'codex', 'opencode'];
+const backends = ['agy', 'claude', 'codex', 'opencode'];
 const base = await mkdtemp(join(tmpdir(), 'doctor-'));
 
 console.log(`${B}多 AI 协作房间 · 环境自检${X}\n`);
@@ -46,7 +46,12 @@ for (const backend of backends) {
     console.log(`  ${installed ? mark.warn : mark.bad} ${installed ? `已安装（${p.version}）但跑不通` : '未安装'}`);
     if (p.reason) console.log(`    ${DIM}${p.reason}${X}`);
     if (!installed) {
-      const hint = { claude: 'npm i -g @anthropic-ai/claude-code', codex: 'npm i -g @openai/codex', opencode: 'npm i -g opencode-ai' }[backend];
+      const hint = {
+        agy: 'antigravity CLI（agy）',
+        claude: 'npm i -g @anthropic-ai/claude-code',
+        codex: 'npm i -g @openai/codex',
+        opencode: 'npm i -g opencode-ai',
+      }[backend];
       if (hint) console.log(`    ${DIM}安装：${hint}${X}`);
     }
     console.log('');

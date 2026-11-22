@@ -44,7 +44,7 @@ const EXACT_ALLOW = new Set([
 ]);
 
 /**
- * 按前缀放行。三家 CLI 的认证与配置都可能走环境变量
+ * 按前缀放行。四家 CLI 的认证与配置都可能走环境变量
  * （实测本机 claude 用 ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN）。
  */
 const PREFIX_ALLOW = [
@@ -54,6 +54,9 @@ const PREFIX_ALLOW = [
   'OPENAI_',        // Codex
   'CODEX_',         // Codex
   'OPENCODE_',      // opencode
+  'AGY_',           // Antigravity CLI
+  'GEMINI_',        // Antigravity / Gemini
+  'ANTIGRAVITY_',   // Antigravity CLI
   'XDG_',           // Linux 标准目录（CLI 存会话用）
   'GIT_',           // 身份与配置；agent 可能需要
 ];
@@ -64,6 +67,7 @@ export const AUTH_VARS_BY_BACKEND = {
     'ANTHROPIC_SMALL_FAST_MODEL', 'CLAUDE_CODE_OAUTH_TOKEN'],
   codex: ['OPENAI_API_KEY', 'OPENAI_BASE_URL', 'CODEX_HOME'],
   opencode: ['OPENCODE_'],
+  agy: ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'ANTIGRAVITY_API_KEY', 'AGY_API_KEY'],
 };
 
 /**
@@ -112,6 +116,9 @@ export function childEnv(extra = {}, { backend = null, forbiddenRoots = [] } = {
     if (value === undefined) continue;
     if (EXACT_ALLOW.has(key)) { base[key] = value; continue; }
     if (extraBackendKeys?.has(key)) { base[key] = value; continue; }
+    // 明确登记在当前后端 AUTH_VARS_BY_BACKEND 里的精确变量（如 agy 的 GOOGLE_API_KEY）直接放行，
+    // 避免为了一个精确变量把整片前缀（GOOGLE_*）放给所有后端
+    if (allowedAuth?.has(key) && !NEVER_ALLOW_ENV.has(key)) { base[key] = value; continue; }
 
     const byPrefix = PREFIX_ALLOW.some((p) => key.startsWith(p));
     if (!byPrefix) continue;

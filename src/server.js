@@ -24,6 +24,8 @@ import {
 import { planMemberUpdate } from './core/memberSettings.js';
 import { detectTierOverride, EFFORT_HINTS } from './core/extraargs.js';
 import { exportMarkdown } from './core/export.js';
+import { inspectBackends, probeBackend, probeAllBackends } from './core/backends.js';
+import { listRoomFiles, readRoomFile } from './core/files.js';
 import {
   diffAgainstBase, commitWorktree, mergeTaskBranch, finalizeTaskWorktree, commitsAheadOfBase,
 } from './core/worktree.js';
@@ -148,14 +150,20 @@ export async function startServer({
         activeRoomId: null,
         singleFallback: rooms.singleFallback,
         members: [], history: [], tasks: [], roster: [], registry: [], toolLog: [],
-        aiCabTier: 'readonly', maxMembers: 8, overridden: false, stopped: false,
-        headPassiveWake: true, paused: null, turnTimeoutMinutes: 20,
+        aiCabTier: 'full', maxMembers: 8, overridden: false, stopped: false,
+        headPassiveWake: true, allowPeerMentions: true, paused: null, turnTimeoutMinutes: 20,
         maxCapContinues: MAX_CAP_CONTINUES, seqWarning: null,
       };
     }
     return {
       type: 'room.init',
-      room: { id: session.id, name: session.name, leaderId: room.leaderId },
+      room: {
+        id: session.id,
+        name: session.name,
+        goal: room.goal ?? '',
+        leaderId: room.leaderId,
+        sharedDir: room.sharedDir ?? null,
+      },
       rooms: rooms.rooms,
       activeRoomId: session.id,
       singleFallback: rooms.singleFallback,
@@ -173,6 +181,7 @@ export async function startServer({
       // 停止状态同理：刷新一下就把红色常驻提示弄丢，用户会以为房间还能用
       stopped: Boolean(room.stopped),
       headPassiveWake: room.headPassiveWake !== false,
+      allowPeerMentions: Boolean(room.allowPeerMentions),
       turnTimeoutMinutes: Math.round((room.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS) / 60_000),
       maxCapContinues: MAX_CAP_CONTINUES,
       /**
@@ -331,13 +340,40 @@ export async function startServer({
         return json(res, 200, { ok: true });
       }
 
+      /** 后端实时诊断与模型发现（无需打开房间也可查看） */
+      if (url.pathname === '/api/backends' && req.method === 'GET') {
+        const rawForce = url.searchParams.get('force');
+        const force = rawForce === '1' || rawForce === 'true';
+        const backends = await inspectBackends({ force });
+        return json(res, 200, { checkedAt: new Date().toISOString(), backends });
+      }
+
+      /** 对单个或全部后端执行真实短对话探测 */
+      if (url.pathname === '/api/backends/probe' && req.method === 'POST') {
+        const body = await readJson(req).catch(() => ({}));
+        const backend = String(body.backend ?? 'all').trim() || 'all';
+        const model = body.model ? String(body.model).trim() : null;
+        let backends;
+        if (backend === 'all') {
+          backends = await probeAllBackends();
+        } else {
+          if (!availableTiers(backend).length) {
+            return json(res, 400, { error: `未知后端：${backend}` });
+          }
+          await probeBackend(backend, { model });
+          backends = await inspectBackends();
+        }
+        broadcast({ type: 'backends.updated', backends });
+        return json(res, 200, { ok: true, backends });
+      }
+
       /** 设置权限天花板：AI 能创建的成员最高档位（只有人能改） */
       if (url.pathname === '/api/cabtier' && req.method === 'POST') {
         if (!requireRoom(res)) return;
         const body = await readJson(req);
         const tier = body.tier;
-        if (!['readonly', 'read', 'write', 'write-exec'].includes(tier)) {
-          return json(res, 400, { error: 'tier 必须是 readonly / read / write / write-exec' });
+        if (!['readonly', 'read', 'write', 'write-exec', 'full'].includes(tier)) {
+          return json(res, 400, { error: 'tier 必须是 readonly / read / write / write-exec / full' });
         }
         room.aiCabTier = tier;
         cfg.aiCabTier = tier;
@@ -347,36 +383,67 @@ export async function startServer({
       }
 
       /**
-       * 房间级设置。目前只有一项：成员不 @ 发言是否叫醒头头。
+       * 房间级设置：目标 / 单轮上限 / 头头被动唤醒 / 成员自由互 @。
        * 只有人能改（agent 动作协议里没有这个动作）。
        */
       if (url.pathname === '/api/room-settings' && req.method === 'POST') {
         if (!requireRoom(res)) return;
         const body = await readJson(req);
-          if (body.turnTimeoutMinutes !== undefined) {
+        const changed = {};
+
+        // 先校验会报错的字段，避免部分写入
+        let parsedTimeout;
+        if (body.turnTimeoutMinutes !== undefined) {
           const raw = String(body.turnTimeoutMinutes ?? '').trim();
           if (!raw) {
-            room.turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS;
-            cfg.turnTimeoutMinutes = null;
+            parsedTimeout = null;
           } else {
             const n = Number(raw);
             if (!Number.isFinite(n) || n < 1 || n > 120) {
               return json(res, 400, { error: '单轮上限必须在 1~120 分钟之间（留空 = 默认 20 分钟）' });
             }
-            room.turnTimeoutMs = Math.round(n * 60_000);   // 立即生效
-            cfg.turnTimeoutMinutes = n;
+            parsedTimeout = n;
           }
-          await manager.persist();
-          broadcast({ type: 'room.settings', turnTimeoutMinutes: cfg.turnTimeoutMinutes ?? null });
         }
 
-      if (body.headPassiveWake !== undefined) {
+        if (body.goal !== undefined) {
+          const goal = String(body.goal ?? '').trim().slice(0, 2000);
+          room.goal = goal;
+          cfg.goal = goal;
+          changed.goal = goal;
+        }
+        if (parsedTimeout !== undefined) {
+          if (parsedTimeout === null) {
+            room.turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS;
+            cfg.turnTimeoutMinutes = null;
+          } else {
+            room.turnTimeoutMs = Math.round(parsedTimeout * 60_000);   // 立即生效
+            cfg.turnTimeoutMinutes = parsedTimeout;
+          }
+          changed.turnTimeoutMinutes = cfg.turnTimeoutMinutes ?? null;
+        }
+        if (body.headPassiveWake !== undefined) {
           room.headPassiveWake = Boolean(body.headPassiveWake);
           cfg.headPassiveWake = room.headPassiveWake;
-          await manager.persist();
-          broadcast({ type: 'room.settings', headPassiveWake: room.headPassiveWake });
+          changed.headPassiveWake = room.headPassiveWake;
         }
-        return json(res, 200, { ok: true, headPassiveWake: room.headPassiveWake });
+        if (body.allowPeerMentions !== undefined) {
+          room.allowPeerMentions = Boolean(body.allowPeerMentions);
+          cfg.allowPeerMentions = room.allowPeerMentions;
+          changed.allowPeerMentions = room.allowPeerMentions;
+        }
+
+        if (Object.keys(changed).length > 0) {
+          await manager.persist();
+          broadcast({ type: 'room.settings', ...changed });
+        }
+        return json(res, 200, {
+          ok: true,
+          goal: room.goal ?? '',
+          turnTimeoutMinutes: cfg.turnTimeoutMinutes ?? null,
+          headPassiveWake: room.headPassiveWake,
+          allowPeerMentions: room.allowPeerMentions,
+        });
       }
 
       /** 登记可用仓库（只有人能加，头头加不了） */
@@ -394,6 +461,43 @@ export async function startServer({
         await manager.persist();
         broadcast({ type: 'registry.updated', registry: cfg.registry });
         return json(res, 200, { ok: true, registry: cfg.registry });
+      }
+
+      /** 移除已登记的仓库（只有人能删） */
+      if (url.pathname === '/api/registry/remove' && req.method === 'POST') {
+        if (!requireRoom(res)) return;
+        const body = await readJson(req);
+        const path = String(body.path ?? '').trim();
+        if (!path) return json(res, 400, { error: '缺少 path' });
+        cfg.registry = (cfg.registry ?? []).filter((r) => r.path !== path);
+        room.registry = cfg.registry;
+        await manager.persist();
+        broadcast({ type: 'registry.updated', registry: cfg.registry });
+        return json(res, 200, { ok: true, registry: cfg.registry });
+      }
+
+      /** 列出当前房间共享目录与成员工作区中的产出文件 */
+      if (url.pathname === '/api/files' && req.method === 'GET') {
+        if (!requireRoom(res)) return;
+        const result = await listRoomFiles({ sharedDir: room.sharedDir, members: room.members });
+        return json(res, 200, result);
+      }
+
+      /** 安全只读查看单个房间产出文件 */
+      if (url.pathname === '/api/file' && req.method === 'GET') {
+        if (!requireRoom(res)) return;
+        const scope = url.searchParams.get('scope') || 'shared';
+        const relPath = url.searchParams.get('path') || '';
+        const agentId = url.searchParams.get('agentId') || null;
+        const r = await readRoomFile({
+          scope,
+          relPath,
+          sharedDir: room.sharedDir,
+          members: room.members,
+          agentId,
+        });
+        if (!r.ok) return json(res, r.status ?? 400, { error: r.error });
+        return json(res, 200, r);
       }
 
       /* ---------- 房间：列表 / 新建 / 重命名 / 切换 ---------- */
@@ -489,7 +593,7 @@ export async function startServer({
         // 用户给 codex 选了 write、实际存成 readonly，他会以为 agent 能改文件，
         // 结果跑了半天什么都没改——这种"看起来配了、实际没生效"是最难查的。
         const tiers = availableTiers(backend);
-        const tier = body.tier ?? TIER.READONLY;
+        const tier = body.tier ?? (tiers.includes(TIER.FULL) ? TIER.FULL : tiers[0]);
         if (!tiers.includes(tier)) {
           return json(res, 400, {
             error: `${backend} 不支持档位「${tier}」，可选：${tiers.join(' / ')}`,
@@ -504,8 +608,12 @@ export async function startServer({
         const role = body.role ? (body.role === 'leader' ? 'leader' : 'member')
           : (first ? 'leader' : 'member');
 
+        let memberId = `m${Date.now().toString(36)}`;
+        while (room.members.some((m) => m.id === memberId)) {
+          memberId = `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+        }
         const baseMember = {
-          id: `m${Date.now().toString(36)}`,
+          id: memberId,
           name,
           backend,
           tier,

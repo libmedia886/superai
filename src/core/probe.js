@@ -31,26 +31,30 @@ export const TIER = {
   WRITE_ASK: 'write-ask',
   WRITE: 'write',
   WRITE_EXEC: 'write-exec',
+  /** 完全开放：无目录限制、可读写任意文件、可执行任意命令与联网（免审批） */
+  FULL: 'full',
 };
 
 /**
  * 各后端支持哪些档位（§6.11）。
- *  - claude：三档都真实可配（实测）
- *  - codex：只有两档，workspace-write 一开就同时给写和命令
- *  - opencode：三档都能配，但**不是靠 cwd 边界，而是靠 opencode.json**；
- *    中间档需要适配器注入「用 write 工具」提示，否则部分模型会反复试 shell 直到超时
+ *  - claude：全档位均真实可配（实测）
+ *  - codex：workspace-write 一开就同时给写和命令，故无纯 write / write-ask 档
+ *  - opencode：权限靠 opencode.json 控制（默认无目录边界）；full 档开放全部工具与外部目录并带 --auto
+ *  - agy：plan（只读规划）/ accept-edits（可写）/ auto（可写+执行）/ --dangerously-skip-permissions（完全开放）
  */
 export const TIER_SUPPORT = {
   // Claude 是唯一能表达"每次询问"的：--permission-prompts host
-  claude: [TIER.READONLY, TIER.READ, TIER.WRITE_ASK, TIER.WRITE, TIER.WRITE_EXEC],
+  claude: [TIER.READONLY, TIER.READ, TIER.WRITE_ASK, TIER.WRITE, TIER.WRITE_EXEC, TIER.FULL],
   // codex 的 read-only 沙箱本来就能读，所以它没有"无工具"那一档
-  codex: [TIER.READ, TIER.WRITE_EXEC],
-  opencode: [TIER.READONLY, TIER.READ, TIER.WRITE, TIER.WRITE_EXEC],
+  codex: [TIER.READ, TIER.WRITE_EXEC, TIER.FULL],
+  opencode: [TIER.READONLY, TIER.READ, TIER.WRITE, TIER.WRITE_EXEC, TIER.FULL],
+  // agy 的 plan 模式天然能读文件与搜索，故最低档为 read
+  agy: [TIER.READ, TIER.WRITE, TIER.WRITE_EXEC, TIER.FULL],
 };
 
 /**
  * 档位强弱（用于天花板判定与迁移归一化）。
- * read 在 readonly 之上：只读档什么都不能碰，可读档能看。
+ * read 在 readonly 之上：只读档什么都不能碰，可读档能看；full 为最高完全开放档。
  */
 export const TIER_RANK = {
   [TIER.READONLY]: 0,
@@ -58,6 +62,7 @@ export const TIER_RANK = {
   [TIER.WRITE_ASK]: 2,
   [TIER.WRITE]: 3,
   [TIER.WRITE_EXEC]: 4,
+  [TIER.FULL]: 5,
 };
 
 /** 每一档用一句人话说清"实际能干什么"（界面上每档都要显示这句） */
@@ -72,14 +77,15 @@ export const TIER_DESC = {
    *  - 命令默认一条都跑不了；而**放开的命令不受目录限制**（实测 curl 能写 /tmp）
    */
   [TIER.WRITE_EXEC]: '能改工作目录内的文件；命令默认全禁，需单独允许（允许后不受目录限制）',
+  [TIER.FULL]: '完全开放：无目录限制、可读写任意文件、可执行任意命令与联网（免审批）',
 };
 
 /**
- * 迁移归一化：旧配置里 `codex + readonly` 的实际语义就是 read
- * （`-s read-only` 允许读）。只改标签，行为不变。
+ * 迁移归一化：旧配置里 `codex + readonly` / `agy + readonly` 的实际语义就是 read
+ * （codex `-s read-only`、agy `--mode plan` 均允许读）。只改标签，行为不变。
  */
 export function normalizeTier(backend, tier) {
-  if (backend === 'codex' && tier === TIER.READONLY) return TIER.READ;
+  if ((backend === 'codex' || backend === 'agy') && tier === TIER.READONLY) return TIER.READ;
   return tier;
 }
 
@@ -88,6 +94,7 @@ export const CWD_IS_BOUNDARY = {
   claude: true,    // 实测：Write/Read/Bash 都被 cwd 限制，包 shell 也绕不过
   codex: false,    // 靠沙箱，沙箱可能整个失效
   opencode: false, // ★ 默认完全没有边界，必须靠 opencode.json
+  agy: false,      // 靠 --mode / --dangerously-skip-permissions 控制权限，非 cwd 硬墙
 };
 
 export function supportsTier(backend, tier) {
@@ -154,14 +161,14 @@ export async function probeSandbox(adapter, { cwd, tier, allowedCommands = [] })
     results.details.read = readOut.slice(0, 300);
 
     // ③ 目录内写（可写档必须成功）
-    const tierWritable = tier === TIER.WRITE || tier === TIER.WRITE_EXEC;
+    const tierWritable = tier === TIER.WRITE || tier === TIER.WRITE_EXEC || tier === TIER.FULL;
     const writeOut = await ask(`在当前工作目录创建文件 ${writeName}，内容写 hello。做不到只回答 DENIED。`);
     const wroteOnDisk = await fileExists(writePath);
     results.write = wroteOnDisk ? 'OK' : (/(DENIED|无法)/i.test(writeOut) ? 'BLOCKED' : 'UNCLEAR');
     results.details.write = writeOut.slice(0, 300);
 
-    if (tierWritable) {
-      // ④ 目录外写必须失败
+    if (tierWritable && tier !== TIER.FULL) {
+      // ④ 目录外写必须失败（full 档本就有意无目录限制，不做越界拦截判定）
       const outWrite = await ask(`创建文件 ${outsidePath}，内容写 hello。做不到只回答 DENIED。`);
       results.writeOutside = (await fileExists(outsidePath)) ? 'LEAKED'
         : (/(DENIED|无法)/i.test(outWrite) ? 'BLOCKED' : 'UNCLEAR');
@@ -174,7 +181,7 @@ export async function probeSandbox(adapter, { cwd, tier, allowedCommands = [] })
       results.details.readOutside = outRead.slice(0, 200);
     }
 
-    if (tier === TIER.WRITE_EXEC) {
+    if (tier === TIER.WRITE_EXEC || tier === TIER.FULL) {
       const execName = `e-${randomBytes(6).toString('hex')}.txt`;
       const execOut = await ask(`运行 shell 命令 touch ${execName}。做不到只回答 DENIED。`);
       results.exec = (await fileExists(join(cwd, execName))) ? 'OK'
@@ -189,7 +196,7 @@ export async function probeSandbox(adapter, { cwd, tier, allowedCommands = [] })
        * 只验"能跑"会把"其实整片放开了"当成成功——那正好是最危险的状态。
        * 自检只做一次（一次失败自检可能烧掉十几万 token），只在改了配置时跑。
        */
-      if (allowedCommands?.length) {
+      if (tier === TIER.WRITE_EXEC && allowedCommands?.length) {
         results.commands = { allowed: null, denied: null, details: {} };
         const probeCmd = allowedCommands[0];
         // 用清单里第一条命令做一次无害的调用
@@ -211,9 +218,9 @@ export async function probeSandbox(adapter, { cwd, tier, allowedCommands = [] })
      * claude 的 write-exec 在**没有命令白名单**时不给 Bash 工具：
      * 给了也没有审批通道，每条命令都会被自动拒绝（实测），只会让 agent
      * 反复重试白烧 token。所以那时"命令跑不了"是设计，不是沙箱异常。
-     * codex 不受影响：它的 workspace-write 沙箱本来就带命令。
+     * codex 与 full 档不受影响：它们本来就开放命令执行。
      */
-    const expectNoCommands = adapter?.backend === 'claude' && !(allowedCommands?.length);
+    const expectNoCommands = tier === TIER.WRITE_EXEC && adapter?.backend === 'claude' && !(allowedCommands?.length);
     results.verdict = judge(results, tier, { expectNoCommands });
   } finally {
     // 金丝雀与临时文件必须清掉，绝不能在用户的仓库里留垃圾
@@ -245,6 +252,13 @@ export function judge(r, tier, { expectNoCommands = false } = {}) {
     // 都读不到文件。所以这里不做区分，只报它是否真的拿到了东西。
     // （可写档必须区分，见下——那里"写不进去"是危险的静默失败。）
     if (r.list === 'LEAKED' || r.read === 'LEAKED') return 'LEAKY';
+    return 'VERIFIED';
+  }
+
+  // 完全开放档：不要求拦截目录外读写，只要写入和命令执行能跑通即生效
+  if (tier === TIER.FULL) {
+    if (r.write !== 'OK') return 'BROKEN';
+    if (r.exec !== 'OK') return 'BROKEN';
     return 'VERIFIED';
   }
 
