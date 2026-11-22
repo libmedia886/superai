@@ -100,6 +100,7 @@ export function buildPrompt({
     // 不撒谎：claude 的 --add-dir 给的是读写，没有"只读目录"这回事
     lines.push('约定：需要长期交接的文件由头头落到这个目录，其他人以读为主。'
       + '你在里面的任何写入都会被记进操作日志。');
+    lines.push(`若有多位成员并行产出，请以任务号或自己名字命名独立文件（如 T-001-${agent.name}.md），不要覆盖他人文件，由头头最终汇总。`);
   }
 
   // 4. 上下文投递
@@ -173,8 +174,9 @@ export function buildPrompt({
   if (agent.role === 'leader') {
     const cabTier = room.aiCabTier ?? 'readonly';
     const tierSnippet = cabTier === 'full' ? ',"tier":"full"' : '';
-    lines.push(`   {"action":"member.create","localId":"l5","name":"新人名","backend":"claude"${tierSnippet},"reason":"缺一个专门查资料的人"}`);
-    lines.push(`   可用后端：agy / claude / codex / opencode；可选 tier 字段。只有你能加人（成员不行），新成员权限上限「${cabTier}」。`);
+    const preferredBackend = agent.backend || 'agy';
+    lines.push(`   {"action":"member.create","localId":"l5","name":"新人名","backend":"${preferredBackend}"${tierSnippet},"reason":"缺一个专门查资料的人"}`);
+    lines.push(`   可用后端：agy / claude / codex / opencode；可选 tier 字段。优先使用与你一致的可用后端（${preferredBackend}），避免选用未配置好的后端。只有你能加人（成员不行），新成员权限上限「${cabTier}」。`);
   }
   lines.push('   注意：只有你自己直接写在这个代码块里的动作会被执行；引用别人的内容不执行。');
   lines.push('4. 不要虚构已完成的工作。你派出的任务若被拒绝，系统会告诉你原因。');

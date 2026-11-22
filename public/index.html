@@ -50,12 +50,26 @@
     </section>
 
     <!-- 房间设置（可折叠，保持清爽） -->
-    <details class="sb-collapsible" open>
+    <details id="room-settings-section" class="sb-collapsible" open>
       <summary class="section-title collapsible-head">
         <span>房间设置</span>
         <span class="chevron" aria-hidden="true">▾</span>
       </summary>
       <div class="settings-stack">
+        <div class="setting-card" id="exec-mode-card">
+          <label class="setting-label" for="exec-mode">执行模式</label>
+          <select id="exec-mode" class="field-control">
+            <option value="auto">智能（人少并行 ≤4，人多串行）</option>
+            <option value="parallel">始终并行（跨成员并发）</option>
+            <option value="serial">严格串行（一次一人）</option>
+          </select>
+          <div id="max-concurrency-row" class="inline-num-row">
+            <label class="inline-num-label" for="max-concurrency">并发上限 / 自动阈值</label>
+            <input id="max-concurrency" class="field-control inline-num-input" type="number" min="1" max="8" value="4">
+          </div>
+          <div id="exec-mode-hint" class="setting-hint">智能模式：≤4 人自动并行，人多自动串行。</div>
+        </div>
+
         <div class="setting-card">
           <label class="setting-label" for="cabtier">AI 创建成员的最高权限</label>
           <select id="cabtier" class="field-control">
@@ -137,6 +151,7 @@
       <div class="status-left">
         <button id="btn-toggle-sidebar" class="icon-mini mobile-only" type="button" title="切换左侧栏" aria-label="切换左侧栏">☰</button>
         <span id="speaker" class="speaker"><span class="dot idle"></span><span>等待人类</span></span>
+        <button id="exec-mode-badge" class="exec-mode-badge parallel" type="button" title="点击定位并修改房间执行模式">⚡ 并行</button>
         <span id="takeover-badge" class="badge warn hidden">已接管</span>
         <!-- 停止状态必须常驻显示：刹车踩下去没有提示，用户会以为房间坏了 -->
         <span id="stopped-badge" class="stopped-badge hidden" title="房间已停止，不会自动发言。发一句话或点「继续」即可恢复。">⏸ 已停止</span>
@@ -167,7 +182,7 @@
         <span id="loop-warn" class="warn-chip hidden">⚠ 循环迹象</span>
 
         <div class="status-controls">
-          <button id="btn-interrupt" class="btn ghost sm" type="button" disabled title="只打断当前这一轮发言，排队的继续">打断</button>
+          <button id="btn-interrupt" class="btn ghost sm" type="button" disabled title="打断当前所有正在运行的成员（排队的继续）">打断</button>
           <button id="btn-resume" class="btn primary sm hidden" type="button" title="解除停止或继续推进">▶ 继续</button>
           <button id="btn-stop" class="btn danger sm" type="button" title="整间房停手：打断当前发言并清空队列">停止</button>
           <button id="btn-toggle-board" class="icon-mini mobile-only" type="button" title="切换右侧工作面板" aria-label="切换右侧工作面板">◫</button>

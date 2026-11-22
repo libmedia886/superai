@@ -151,7 +151,10 @@ export async function startServer({
         singleFallback: rooms.singleFallback,
         members: [], history: [], tasks: [], roster: [], registry: [], toolLog: [],
         aiCabTier: 'full', maxMembers: 8, overridden: false, stopped: false,
-        headPassiveWake: true, allowPeerMentions: true, paused: null, turnTimeoutMinutes: 20,
+        headPassiveWake: true, allowPeerMentions: true,
+        executionMode: 'auto', effectiveExecutionMode: 'parallel', maxConcurrency: 4,
+        runtime: null,
+        paused: null, turnTimeoutMinutes: 20,
         maxCapContinues: MAX_CAP_CONTINUES, seqWarning: null,
       };
     }
@@ -182,6 +185,10 @@ export async function startServer({
       stopped: Boolean(room.stopped),
       headPassiveWake: room.headPassiveWake !== false,
       allowPeerMentions: Boolean(room.allowPeerMentions),
+      executionMode: room.executionMode,
+      effectiveExecutionMode: room.effectiveExecutionMode(),
+      maxConcurrency: room.maxConcurrency,
+      runtime: room.runtimeSnapshot(),
       turnTimeoutMinutes: Math.round((room.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS) / 60_000),
       maxCapContinues: MAX_CAP_CONTINUES,
       /**
@@ -252,7 +259,14 @@ export async function startServer({
         res.write('retry: 1000\n\n');
         // 每个新连接先收完整初始化状态，刷新后不会空白
         res.write(`data: ${JSON.stringify({ id: randomUUID(), at: Date.now(), ...(await initPayload()) })}\n\n`);
-        res.write(`data: ${JSON.stringify({ id: randomUUID(), at: Date.now(), type: 'snapshot', busy: Boolean(room?.current) })}\n\n`);
+        res.write(`data: ${JSON.stringify({
+          id: randomUUID(),
+          at: Date.now(),
+          type: 'snapshot',
+          busy: Boolean(room?.current),
+          activeCount: room?.activeTurns?.size ?? 0,
+          runtime: room?.runtimeSnapshot?.() ?? null,
+        })}\n\n`);
         clients.add(res);
         const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* closed */ } }, 15000);
         req.on('close', () => { clearInterval(ping); clients.delete(res); });
@@ -268,11 +282,19 @@ export async function startServer({
          * 旧的「待续」由 `humanSay()` 内部清空（管理方 20:05 代修时挪进去的）。
          * 这里不再重复 —— 同一件事两个地方各清一次，以后改一处忘一处就会分叉。
          */
-        if (room.current) {
-          // 有人正在说：入队，界面会显示"已排队"
-          broadcast({ type: 'notice', level: 'info', text: '有人正在发言，你的消息已排队' });
-        }
         const r = await room.humanSay(text, { taskId: body.taskId ?? null });
+        const activeSize = room.activeTurns.size;
+        if (activeSize > 0 && r.targets.length > 0) {
+          const limit = room.effectiveConcurrency();
+          if (limit === 1) {
+            broadcast({ type: 'notice', level: 'info', text: '有人正在发言，你的消息已排队' });
+          } else {
+            const allTargetsBusy = r.targets.every((id) => room.activeTurns.has(id));
+            if (activeSize >= limit || allTargetsBusy) {
+              broadcast({ type: 'notice', level: 'info', text: '目标成员正忙或已达并发上限，你的消息已排队' });
+            }
+          }
+        }
         // 不 await drain：发言要立刻返回，后续由 SSE 推送
         room.drain().catch((err) => broadcast({
           type: 'failure', agentId: 'system', reason: 'crashed', detail: String(err),
@@ -383,7 +405,7 @@ export async function startServer({
       }
 
       /**
-       * 房间级设置：目标 / 单轮上限 / 头头被动唤醒 / 成员自由互 @。
+       * 房间级设置：目标 / 单轮上限 / 头头被动唤醒 / 成员自由互 @ / 执行调度模式 / 并发上限。
        * 只有人能改（agent 动作协议里没有这个动作）。
        */
       if (url.pathname === '/api/room-settings' && req.method === 'POST') {
@@ -404,6 +426,25 @@ export async function startServer({
             }
             parsedTimeout = n;
           }
+        }
+
+        let parsedExecutionMode;
+        if (body.executionMode !== undefined) {
+          const mode = String(body.executionMode ?? '').trim();
+          if (!['auto', 'parallel', 'serial'].includes(mode)) {
+            return json(res, 400, { error: 'executionMode 必须是 auto / parallel / serial' });
+          }
+          parsedExecutionMode = mode;
+        }
+
+        let parsedMaxConcurrency;
+        if (body.maxConcurrency !== undefined) {
+          const raw = typeof body.maxConcurrency === 'string' ? body.maxConcurrency.trim() : body.maxConcurrency;
+          const n = Number(raw);
+          if (raw === '' || raw === null || !Number.isInteger(n) || n < 1 || n > 8) {
+            return json(res, 400, { error: 'maxConcurrency 必须是 1~8 之间的整数' });
+          }
+          parsedMaxConcurrency = n;
         }
 
         if (body.goal !== undefined) {
@@ -432,10 +473,35 @@ export async function startServer({
           cfg.allowPeerMentions = room.allowPeerMentions;
           changed.allowPeerMentions = room.allowPeerMentions;
         }
+        if (parsedExecutionMode !== undefined) {
+          room.executionMode = parsedExecutionMode;
+          cfg.executionMode = parsedExecutionMode;
+          changed.executionMode = parsedExecutionMode;
+        }
+        if (parsedMaxConcurrency !== undefined) {
+          room.maxConcurrency = parsedMaxConcurrency;
+          cfg.maxConcurrency = parsedMaxConcurrency;
+          changed.maxConcurrency = parsedMaxConcurrency;
+        }
 
         if (Object.keys(changed).length > 0) {
           await manager.persist();
-          broadcast({ type: 'room.settings', ...changed });
+          broadcast({
+            type: 'room.settings',
+            ...changed,
+            effectiveExecutionMode: room.effectiveExecutionMode(),
+            maxConcurrency: room.maxConcurrency,
+          });
+          broadcast({ type: 'runtime.state', ...room.runtimeSnapshot() });
+          // 从串行切到并行或调高并发上限时，立即唤醒排队中的任务并发启动
+          if (room.queue.length > 0 && !room.stopped) {
+            if (room.running) room._kickScheduler();
+            else {
+              room.drain().catch((err) => broadcast({
+                type: 'failure', agentId: 'system', reason: 'crashed', detail: String(err),
+              }));
+            }
+          }
         }
         return json(res, 200, {
           ok: true,
@@ -443,6 +509,9 @@ export async function startServer({
           turnTimeoutMinutes: cfg.turnTimeoutMinutes ?? null,
           headPassiveWake: room.headPassiveWake,
           allowPeerMentions: room.allowPeerMentions,
+          executionMode: room.executionMode,
+          effectiveExecutionMode: room.effectiveExecutionMode(),
+          maxConcurrency: room.maxConcurrency,
         });
       }
 
@@ -685,6 +754,7 @@ export async function startServer({
         }
 
         await broadcastInit();
+        broadcast({ type: 'runtime.state', ...room.runtimeSnapshot() });
         return json(res, 200, { ok: true, member, role });
       }
 
@@ -800,6 +870,7 @@ export async function startServer({
 
         await broadcastInit();
         broadcast({ type: 'member.updated', member: after, changed, sessionReset: Boolean(next.sessionReset) });
+        broadcast({ type: 'runtime.state', ...room.runtimeSnapshot() });
         return json(res, 200, {
           ok: true, member: after, changed, sessionReset: Boolean(next.sessionReset),
           overridesTier: after.overridesTier,
@@ -843,12 +914,16 @@ export async function startServer({
 
         await broadcastInit();
         broadcast({ type: 'member.removed', agentId, name: before.name });
+        broadcast({ type: 'runtime.state', ...room.runtimeSnapshot() });
+        if (room.queue.length > 0 && !room.stopped) room._kickScheduler();
         return json(res, 200, { ok: true, removed: before, historyKept: true });
       }
 
       if (url.pathname === '/api/interrupt' && req.method === 'POST') {
         if (!requireRoom(res)) return;
-        return json(res, 200, { ok: room.interrupt() });
+        const body = await readJson(req).catch(() => ({}));
+        const agentId = body?.agentId ? String(body.agentId).trim() : null;
+        return json(res, 200, { ok: room.interrupt(agentId || null), agentId: agentId || null });
       }
 
       if (url.pathname === '/api/task' && req.method === 'POST') {
@@ -974,6 +1049,11 @@ export async function startServer({
           roomId: session?.id ?? null,
           members: members.length,
           busy: Boolean(room?.current),
+          activeCount: room?.activeTurns?.size ?? 0,
+          activeAgents: room ? [...room.activeTurns.keys()] : [],
+          executionMode: room?.executionMode ?? 'auto',
+          effectiveExecutionMode: room?.effectiveExecutionMode?.() ?? 'parallel',
+          maxConcurrency: room?.maxConcurrency ?? 4,
           stopped: Boolean(room?.stopped),
           pausedReason: room?.pauseReason ?? null,
           paused: Boolean(room?.overridden),

@@ -418,6 +418,8 @@ export async function createRoom(dataDir, meta, name, { now = Date.now() } = {})
       aiCabTier: 'full',
       allowPeerMentions: true,
       headPassiveWake: true,
+      executionMode: 'auto',
+      maxConcurrency: 4,
     }, null, 2),
     'utf8',
   );

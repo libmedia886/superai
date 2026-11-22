@@ -446,3 +446,24 @@ test('清单：SuperAI v2 四后端与完全开放权限档（agy / claude / cod
   const oc = createAdapter({ id: 't3', backend: 'opencode', tier: 'full' });
   assert.ok(oc.buildArgs({ cwd: '/tmp' }).includes('--auto'));
 });
+
+test('清单：SuperAI v2.1 自适应并行/串行调度、Fan-in 汇合与实时可观测性', async () => {
+  await mustMention('core/room.js', 'effectiveExecutionMode', '自适应执行模式（auto ≤4 并行 / >4 串行）');
+  await mustMention('core/room.js', 'activeTurns', '跨成员并发活跃轮次映射');
+  await mustMention('core/room.js', '_isDeferredByFanIn', '并行成员未全部完成时头头自动等待汇合');
+  await mustMention('core/room.js', 'runtimeSnapshot', '实时运行态快照（运行中/排队/汇合/失败）');
+  await mustMention('core/room.js', '_lastActionResultsByAgent', '并发轮次动作回注按成员隔离');
+  await mustMention('core/room.js', '_pendingContinueByAgent', '并发轮次 continue 按成员隔离');
+  await mustMention('server.js', 'executionMode', '房间设置支持执行模式切换');
+  await mustMention('server.js', 'maxConcurrency', '房间设置支持并发上限配置');
+
+  const { classifyTool } = await import('../src/core/room.js');
+  assert.equal(classifyTool('write_file'), 'write', 'agy write_file 必须归类为 write');
+  assert.equal(classifyTool('edit_file'), 'edit', 'agy edit_file 必须归类为 edit');
+  assert.equal(classifyTool('read_file'), 'read', 'agy read_file 必须归类为 read');
+  assert.equal(classifyTool('search_web'), 'read', 'search_web 必须归类为 read');
+
+  const ui = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.ok(ui.includes('activeTurns'), '前端必须支持多并发独立气泡');
+  assert.ok(ui.includes("case 'runtime.state'"), '前端必须消费 runtime.state 实时快照');
+});

@@ -33,12 +33,13 @@ import { createTaskWorktree, finalizeTaskWorktree, diffAgainstBase } from './wor
 /** 把工具名归类成写操作日志里的动作类型 */
 export function classifyTool(name) {
   switch (name) {
-    case 'Write': case 'write': case 'write_to_file': return 'write';
+    case 'Write': case 'write': case 'write_to_file': case 'write_file': return 'write';
     case 'Edit': case 'edit': case 'apply_patch':
-    case 'replace_file_content': case 'multi_replace_file_content': return 'edit';
+    case 'replace_file_content': case 'multi_replace_file_content': case 'edit_file': return 'edit';
     case 'Bash': case 'bash': case 'shell': case 'run_command': return 'bash';
-    case 'Read': case 'read': case 'view_file': case 'list_dir':
-    case 'grep_search': case 'find_by_name': case 'search_web': case 'read_url_content': return 'read';
+    case 'Read': case 'read': case 'read_file': case 'view_file': case 'list_dir':
+    case 'grep_search': case 'find_by_name': case 'search_web': case 'read_url_content':
+    case 'Grep': case 'Glob': case 'grep': case 'glob': case 'WebFetch': case 'WebSearch': return 'read';
     default: return 'other';
   }
 }
@@ -251,6 +252,7 @@ export class Room {
     id, name, goal = '', members, store, resolveAdapter, onEvent,
     registry = [], worktreesRoot = null, onMemberCreate = null,
     aiCabTier = DEFAULT_AI_CAB_TIER, headPassiveWake = true, allowPeerMentions = false,
+    executionMode = 'serial', maxConcurrency = 4,
     sharedDir = null, netgetPath = null, forbiddenRoots = [],
     turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS,
   }) {
@@ -260,6 +262,13 @@ export class Room {
     this.aiCabTier = aiCabTier;
     /** 房间级自由协作开关：允许成员直接 @ 其他成员 */
     this.allowPeerMentions = Boolean(allowPeerMentions);
+    /** 执行调度模式：auto（≤maxConcurrency 并行、>maxConcurrency 串行）/ parallel / serial */
+    this.executionMode = ['auto', 'parallel', 'serial'].includes(executionMode) ? executionMode : 'serial';
+    /** 并发上限（1..8），同时作为 auto 模式的人数阈值 */
+    const parsedMaxConc = Number(maxConcurrency);
+    this.maxConcurrency = Number.isInteger(parsedMaxConc) && parsedMaxConc >= 1 && parsedMaxConc <= 8
+      ? parsedMaxConc
+      : 4;
     /**
      * 头头被动唤醒：成员**不 @** 任何人的发言也会叫醒头头。
      * 老板的要求原话："任何人在群里评论，即使不 at，头头都能收到。"
@@ -320,7 +329,13 @@ export class Room {
     this.queue = [];               // [{agentId, triggerMsg, taskId, source:'human'|'agent'}]
     this.running = false;
     this.stopped = false;
-    this.current = null;           // {agentId, abort}
+    /** 当前运行中的轮次（按 agentId 隔离：同一成员永不并发，不同成员可并发） */
+    this.activeTurns = new Map();
+    /** 每个成员最近一次执行状态（failed / lastError / lastCompletedAt） */
+    this._memberStatus = new Map();
+    /** 调度器唤醒钩子（新任务入队 / 模式切换 / 轮次结束时立即唤醒等待中的 drain） */
+    this._scheduleWake = null;
+    this._woken = false;
     this._executedActions = new Set(); // 幂等键
     this.guard = new LoopGuard();
     this.health = new HealthTracker();
@@ -328,10 +343,152 @@ export class Room {
     this.autoAdvance = new AutoAdvanceGuard();
     /** 用量异常观察器（只提示，不拦截） */
     this.usage = new UsageWatcher();
-    this._pendingContinue = null;
+    /** 并发隔离：按 agentId 存放动作结果回注与待推进 continue 声明，避免并发轮次串台 */
+    this._lastActionResultsByAgent = new Map();
+    this._pendingContinueByAgent = new Map();
     /** 写操作日志（内存 + 落盘）。验收时用它回答"它到底改了什么" */
     this.toolLog = [];
     this.waitingForHuman = true;
+  }
+
+  /** 向后兼容：返回任意一个当前正在运行的轮次，没有则为 null */
+  get current() {
+    for (const v of this.activeTurns.values()) return v;
+    return null;
+  }
+
+  /** 解析当前实际生效的执行模式（auto 时按成员数 <= maxConcurrency 判定） */
+  effectiveExecutionMode() {
+    if (this.executionMode === 'serial') return 'serial';
+    if (this.executionMode === 'parallel') return 'parallel';
+    return this.members.length <= this.maxConcurrency ? 'parallel' : 'serial';
+  }
+
+  /** 解析当前实际生效的并发槽位数 */
+  effectiveConcurrency() {
+    return this.effectiveExecutionMode() === 'parallel' ? Math.max(1, this.maxConcurrency) : 1;
+  }
+
+  /** 检查除指定 agentId 外是否还有其他成员正在运行 */
+  _hasOtherActiveTurns(excludeAgentId) {
+    for (const id of this.activeTurns.keys()) {
+      if (id !== excludeAgentId) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Fan-in 汇合屏障判定（仅在并发度 > 1 时生效）：
+   * 若待执行任务属于 leader 且由 agent 触发（@lead 或被动唤醒），且此刻仍有其他非 leader 成员
+   * 正在运行或排队等待，则暂缓 leader 执行，待所有并发非 leader 成员全部完成后一次性汇总。
+   * 人类发出的 @lead（source === 'human'）永不受暂缓。
+   */
+  _isDeferredByFanIn(job) {
+    if (!job) return false;
+    if (this.effectiveConcurrency() <= 1) return false;
+    if (job.source !== 'agent') return false;
+    const member = this.members.find((m) => m.id === job.agentId);
+    if (member?.role !== 'leader') return false;
+
+    const isNonLeader = (id) => {
+      const m = this.members.find((x) => x.id === id);
+      return Boolean(m && m.role !== 'leader');
+    };
+    for (const activeId of this.activeTurns.keys()) {
+      if (isNonLeader(activeId)) return true;
+    }
+    for (const q of this.queue) {
+      if (q !== job && isNonLeader(q.agentId)) return true;
+    }
+    return false;
+  }
+
+  /** 挑选下一条满足 per-agent 锁与 Fan-in 条件的待执行任务并出队 */
+  _pickNextJob() {
+    for (let i = 0; i < this.queue.length; i += 1) {
+      const job = this.queue[i];
+      if (this.activeTurns.has(job.agentId)) continue;
+      if (this._isDeferredByFanIn(job)) continue;
+      this.queue.splice(i, 1);
+      return job;
+    }
+    return null;
+  }
+
+  /** 唤醒正在等待中的调度循环（新任务入队 / 模式切换 / 轮次结束时调用） */
+  _kickScheduler() {
+    this._woken = true;
+    const wake = this._scheduleWake;
+    if (wake) {
+      this._scheduleWake = null;
+      wake();
+    }
+  }
+
+  _setMemberStatus(agentId, patch) {
+    if (!agentId) return;
+    const prev = this._memberStatus.get(agentId) ?? { failed: false, lastError: null, lastCompletedAt: null };
+    this._memberStatus.set(agentId, { ...prev, ...patch });
+  }
+
+  /** 实时运行态快照：供 SSE runtime.state、room.init 与状态栏展示 */
+  runtimeSnapshot() {
+    const active = [...this.activeTurns.values()].map((t) => ({
+      agentId: t.agentId,
+      startedAt: t.startedAt,
+      toolCount: t.toolCount ?? 0,
+      lastTool: t.lastTool ?? null,
+      lastAction: t.lastAction ?? null,
+      lastDetail: t.lastDetail ?? null,
+      taskId: t.taskId ?? null,
+    }));
+
+    const queue = this.queue.map((q, idx) => ({
+      agentId: q.agentId,
+      position: idx + 1,
+      taskId: q.taskId ?? null,
+      source: q.source ?? 'agent',
+      waitingFanIn: this._isDeferredByFanIn(q),
+    }));
+
+    const memberStates = {};
+    for (const m of this.members) {
+      const activeTurn = this.activeTurns.get(m.id) ?? null;
+      const queueIdx = this.queue.findIndex((q) => q.agentId === m.id);
+      const queuedItem = queueIdx >= 0 ? queue[queueIdx] : null;
+      const st = this._memberStatus.get(m.id) ?? null;
+
+      let status = 'idle';
+      if (activeTurn) status = 'running';
+      else if (queuedItem) status = 'queued';
+      else if (st?.failed) status = 'failed';
+
+      memberStates[m.id] = {
+        status,
+        startedAt: activeTurn?.startedAt ?? null,
+        toolCount: activeTurn?.toolCount ?? 0,
+        lastTool: activeTurn?.lastTool ?? null,
+        lastAction: activeTurn?.lastAction ?? null,
+        lastDetail: activeTurn?.lastDetail ?? null,
+        queuePos: queuedItem?.position ?? null,
+        waitingFanIn: Boolean(queuedItem?.waitingFanIn),
+        lastError: st?.lastError ?? null,
+        lastCompletedAt: st?.lastCompletedAt ?? null,
+      };
+    }
+
+    return {
+      executionMode: this.executionMode,
+      effectiveMode: this.effectiveExecutionMode(),
+      maxConcurrency: this.maxConcurrency,
+      active,
+      queue,
+      memberStates,
+    };
+  }
+
+  _emitRuntimeState() {
+    this.onEvent({ type: 'runtime.state', ...this.runtimeSnapshot() });
   }
 
   // ---------- 输入 ----------
@@ -348,7 +505,7 @@ export class Room {
   async humanSay(body, { taskId = null } = {}) {
     // 人说话 = 打断自动推进链条，计数归零
     this.autoAdvance.reset();
-    this._pendingContinue = null;
+    this._pendingContinueByAgent.clear();
     /**
      * ★ 人的新指令作废「待续」。
      *
@@ -402,7 +559,7 @@ export class Room {
     const broadcast = !wroteMention;
     const recipients = broadcast ? this._broadcastOrder() : targets;
 
-    this.waitingForHuman = recipients.length === 0;
+    this.waitingForHuman = recipients.length === 0 && this.activeTurns.size === 0 && this.queue.length === 0;
     for (const t of recipients) {
       this._enqueue(t, { triggerMsg: msg.message, taskId, source: 'human', broadcast });
     }
@@ -422,6 +579,36 @@ export class Room {
   }
 
   _enqueue(agentId, entry) {
+    /**
+     * 并行模式下的 Fan-in 合并：多个并行非 leader 成员陆续 @ 同一个头头（或触发被动唤醒）时，
+     * 合并成队列中的同一条 leader 任务，避免头头被连续唤醒多次。
+     */
+    if (this.effectiveConcurrency() > 1 && entry.source === 'agent') {
+      const targetMember = this.members.find((m) => m.id === agentId);
+      if (targetMember?.role === 'leader') {
+        const existing = this.queue.find((q) => q.agentId === agentId && q.source === 'agent');
+        if (existing) {
+          if (existing.passive && !entry.passive) {
+            existing.passive = false;
+            existing.triggerMsg = entry.triggerMsg ?? existing.triggerMsg;
+            if (entry.taskId && !existing.taskId) existing.taskId = entry.taskId;
+          } else if (!entry.passive && entry.triggerMsg) {
+            existing.triggerMsg = entry.triggerMsg;
+          }
+          existing.mergedCount = (existing.mergedCount ?? 1) + 1;
+          this.onEvent({
+            type: 'queued',
+            agentId,
+            alreadyQueued: true,
+            merged: true,
+            mergedCount: existing.mergedCount,
+          });
+          this._emitRuntimeState();
+          return false;
+        }
+      }
+    }
+
     /**
      * 去重键用**触发消息 id**，不用 (agentId, taskId)。
      *
@@ -443,13 +630,19 @@ export class Room {
     }
     this.queue.push({ ...entry, agentId });
     this.onEvent({ type: 'queued', agentId, pending: this.queue.length });
+    this._emitRuntimeState();
+    this._kickScheduler();
     return true;
   }
 
   // ---------- 运行 ----------
 
   /**
-   * 把队列跑空。串行：一次一个。
+   * 自适应调度队列（按 executionMode / maxConcurrency 在串行与跨成员并发间自动切换）。
+   *
+   * 两条硬约束：
+   *  1. Per-Agent 锁：同一 agentId 永不并发，同一时刻最多跑一轮
+   *  2. Fan-in 汇合：并发模式下，agent 触发的头头轮次自动等待所有在跑/排队的非 leader 成员完成后一次性汇总
    *
    * ★ `_drainAgain` 是必需的：调用方在已经 `running` 时再调 drain 会被直接忽略。
    * 而「停止」之后人一说话就恢复，这条路径恰恰会撞上——stop 打断当前轮时
@@ -459,47 +652,131 @@ export class Room {
   async drain() {
     if (this.running) {
       this._drainAgain = true;
+      this._kickScheduler();
       return;
     }
     this.running = true;
+    const inFlight = new Set();
+    let firstError = null;
+
+    const launch = (job) => {
+      const ac = new AbortController();
+      const live = {
+        agentId: job.agentId,
+        startedAt: Date.now(),
+        abort: () => ac.abort('interrupted'),
+        taskId: job.taskId ?? null,
+        toolCount: 0,
+        lastTool: null,
+        lastAction: null,
+        lastDetail: null,
+      };
+      // 同步占位：杜绝微任务空窗内重复启动同一成员
+      this.activeTurns.set(job.agentId, live);
+      this.waitingForHuman = false;
+      this._emitRuntimeState();
+
+      const p = Promise.resolve()
+        .then(() => this._runTurn(job, { ac, live }))
+        .catch((err) => {
+          if (!firstError) firstError = err;
+        })
+        .finally(() => {
+          this.activeTurns.delete(job.agentId);
+          inFlight.delete(p);
+          this._emitRuntimeState();
+          this._kickScheduler();
+        });
+      inFlight.add(p);
+    };
+
     try {
       do {
         this._drainAgain = false;
-        while (this.queue.length > 0 && !this.stopped) {
-          const job = this.queue.shift();
-          await this._runTurn(job);
+        while (!this.stopped) {
+          this._woken = false;
+          const limit = this.effectiveConcurrency();
+
+          while (!this.stopped && this.activeTurns.size < limit) {
+            const job = this._pickNextJob();
+            if (!job) break;
+            launch(job);
+          }
+
+          if (inFlight.size === 0) break;
+          if (this._woken) continue;
+
+          await new Promise((resolve) => {
+            if (this._woken || inFlight.size === 0) {
+              resolve();
+              return;
+            }
+            this._scheduleWake = resolve;
+          });
+          this._scheduleWake = null;
+        }
+
+        if (inFlight.size > 0) {
+          await Promise.allSettled([...inFlight]);
         }
       } while (this._drainAgain && !this.stopped);
-      if (this.queue.length === 0 && !this.stopped) {
+
+      if (firstError) throw firstError;
+
+      if (this.activeTurns.size === 0 && this.queue.length === 0 && !this.stopped) {
         this.waitingForHuman = true;
         this.onEvent({ type: 'idle', waitingForHuman: true });
+        this._emitRuntimeState();
       }
     } finally {
+      this._scheduleWake = null;
       this.running = false;
       this._drainAgain = false;
     }
   }
 
-  /** 立即打断当前发言人：杀进程，保留已输出；队列继续（P0 #7） */
-  interrupt() {
-    if (!this.current) return false;
-    const agentId = this.current.agentId;
-    this.current.abort?.();
-    /**
-     * 落盘（CR-036）。
-     *
-     * 原来只发 SSE：事后翻 room.jsonl 只能看到某轮 status:"已中断"，
-     * 查不到是谁、因为什么中止的——「系统做了事、事后查不到」。
-     * 人工干预必须是可追责的动作，所以记一条 control 事件。
-     */
-    this.store.append({
-      kind: 'control',
-      action: 'interrupt',
-      who: 'human',
-      agentId,
-      at: Date.now(),
-    }).catch(() => {});
-    this.onEvent({ type: 'interrupted', agentId });
+  /**
+   * 立即打断当前发言人：杀进程，保留已输出；队列与其他并发成员继续（P0 #7）。
+   * 传 agentId 时只打断该成员；不传时打断全部正在运行的成员。
+   */
+  interrupt(agentId = null) {
+    if (agentId) {
+      const live = this.activeTurns.get(agentId);
+      if (!live) return false;
+      live.abort?.();
+      this.store.append({
+        kind: 'control',
+        action: 'interrupt',
+        who: 'human',
+        agentId,
+        at: Date.now(),
+      }).catch(() => {});
+      this.onEvent({ type: 'interrupted', agentId });
+      this._emitRuntimeState();
+      return true;
+    }
+
+    if (this.activeTurns.size === 0) return false;
+    const targets = [...this.activeTurns.values()];
+    for (const live of targets) {
+      live.abort?.();
+      /**
+       * 落盘（CR-036）。
+       *
+       * 原来只发 SSE：事后翻 room.jsonl 只能看到某轮 status:"已中断"，
+       * 查不到是谁、因为什么中止的——「系统做了事、事后查不到」。
+       * 人工干预必须是可追责的动作，所以记一条 control 事件。
+       */
+      this.store.append({
+        kind: 'control',
+        action: 'interrupt',
+        who: 'human',
+        agentId: live.agentId,
+        at: Date.now(),
+      }).catch(() => {});
+      this.onEvent({ type: 'interrupted', agentId: live.agentId });
+    }
+    this._emitRuntimeState();
     return true;
   }
 
@@ -529,7 +806,7 @@ export class Room {
    * 一键停止整个房间（唯一的硬闸）。
    *
    * 语义（和人点「打断」区分开，别混）：
-   *   - 打断(interrupt)：只掐当前这一轮，队列继续
+   *   - 打断(interrupt)：只掐指定或当前正在运行的轮次，队列继续
    *   - 停止(stop)：整间房停手，清空队列，人不说话就不动
    *
    * 这是个"刹车"：必须有反馈（事件里说清楚丢了什么）、必须可松开
@@ -538,10 +815,13 @@ export class Room {
   stop() {
     this.stopped = true;
     const dropped = this.queue.length;
-    const wasRunning = Boolean(this.current);
+    const wasRunning = this.activeTurns.size > 0;
     this.queue = [];
-    this._pendingContinue = null;
-    if (this.current) this.current.abort?.();
+    this._pendingContinueByAgent.clear();
+    for (const live of this.activeTurns.values()) {
+      live.abort?.();
+    }
+    this._kickScheduler();
     this._pause('stopped', '房间已停止');
     // 落盘（CR-036）：事后要能回答"谁在什么时候停了房间、丢了几条"
     this.store.append({
@@ -560,15 +840,16 @@ export class Room {
         + `${dropped ? `，丢弃 ${dropped} 条排队发言` : ''}。`
         + '再发一句话或点「继续」即可恢复。',
     });
+    this._emitRuntimeState();
     return { dropped, interrupted: wasRunning };
   }
 
   /**
-   * 切换房间前把这一轮**真正停下来**。
+   * 切换房间前把所有正在运行的轮次**真正停下来**。
    *
    * `stop()` 只是把 abort 信号发出去——本项目历史上出过「interrupt 只 reject promise、
-   * 子进程还在烧 token」的事故。所以这里额外等 `current` 被清空（_runTurn 的 finally
-   * 里做的），超时了就如实说没停干净，而不是假装停好了。
+   * 子进程还在烧 token」的事故。所以这里额外等 `activeTurns` 全部清空，
+   * 超时了就如实说没停干净，而不是假装停好了。
    *
    * @param {{timeoutMs?:number}} [o]
    * @returns {Promise<{killed:boolean, dropped:number, waitMs:number}>}
@@ -577,22 +858,28 @@ export class Room {
     this.stopped = true;
     const dropped = this.queue.length;
     this.queue = [];
-    this._pendingContinue = null;
+    this._pendingContinueByAgent.clear();
 
-    if (!this.current) {
+    if (this.activeTurns.size === 0) {
+      this._kickScheduler();
       this.onEvent({ type: 'halted', dropped, killed: true, waitMs: 0 });
+      this._emitRuntimeState();
       return { killed: true, dropped, waitMs: 0 };
     }
 
-    this.current.abort?.();
+    for (const live of this.activeTurns.values()) {
+      live.abort?.();
+    }
+    this._kickScheduler();
     const startedAt = Date.now();
-    // 等 _runTurn 的 finally 把 this.current 置空——那才代表子进程的收尾逻辑跑完
-    while (this.current && Date.now() - startedAt < timeoutMs) {
+    // 等全部活跃轮次跑完收尾逻辑并从 activeTurns 中移除
+    while (this.activeTurns.size > 0 && Date.now() - startedAt < timeoutMs) {
       await new Promise((r) => setTimeout(r, 50));
     }
     const waitMs = Date.now() - startedAt;
-    const killed = !this.current;
+    const killed = this.activeTurns.size === 0;
     this.onEvent({ type: 'halted', dropped, killed, waitMs });
+    this._emitRuntimeState();
     return { killed, dropped, waitMs };
   }
 
@@ -921,7 +1208,7 @@ export class Room {
 
   // ---------- 单轮 ----------
 
-  async _runTurn(job) {
+  async _runTurn(job, ctx = null) {
     const agent = this.members.find((m) => m.id === job.agentId);
     if (!agent) return;
     if (this.overridden && agent.role === 'leader') {
@@ -937,13 +1224,34 @@ export class Room {
     }
     if (gate.probe) this.onEvent({ type: 'health.probe', agentId: agent.id, reason: gate.reason });
 
+    const ac = ctx?.ac ?? new AbortController();
+    const live = ctx?.live ?? {
+      agentId: agent.id,
+      startedAt: Date.now(),
+      abort: () => ac.abort('interrupted'),
+      taskId: job.taskId ?? null,
+      toolCount: 0,
+      lastTool: null,
+      lastAction: null,
+      lastDetail: null,
+    };
+    const ownsActiveTurn = !ctx;
+    if (ownsActiveTurn) {
+      this.activeTurns.set(agent.id, live);
+      this._emitRuntimeState();
+    }
+
+    const othersBusy = () => this._hasOtherActiveTurns(agent.id) || this.queue.length > 0;
+
+    try {
     const adapter = this.resolveAdapter(agent);
-    const startedAt = Date.now();
+    const startedAt = live.startedAt || Date.now();
     const delivery = agent.role === 'leader' ? DELIVERY.SUMMARY : DELIVERY.SINCE_LAST;
 
-    // 上一个轮次的动作结果回注
-    const actionResults = this._lastActionResults ?? [];
-    this._lastActionResults = [];
+    // 上一个轮次的动作结果回注（按 agentId 隔离，避免并发轮次串台）
+    const actionResults = this._lastActionResultsByAgent.get(agent.id) ?? [];
+    this._lastActionResultsByAgent.delete(agent.id);
+    this._pendingContinueByAgent.delete(agent.id);
 
     // 到达阈值只要「开始握手」——先把要交接这件事挂上，本轮在正常回复末尾请它交接。
     // 真正的轮换要等它交上来（CR-006：没拿到交接绝不轮换，否则丢工作）。
@@ -1073,7 +1381,10 @@ export class Room {
      * /api/health 仍显示那条假 timeout。所以这里必须清。
      */
     this._clearPause();
+    // 新一轮开始时清理该成员上次的失败标记
+    this._setMemberStatus(agent.id, { failed: false, lastError: null });
     this.onEvent({ type: 'turn.start', agentId: agent.id, pending: this.queue.length });
+    this._emitRuntimeState();
 
     let aborted = false;
     let acc = '';
@@ -1135,9 +1446,14 @@ export class Room {
             detail: ev.detail ?? '',
             at: Date.now(),
           };
+          live.toolCount = (live.toolCount ?? 0) + 1;
+          live.lastTool = entry.tool;
+          live.lastAction = entry.action;
+          live.lastDetail = entry.detail || entry.command || entry.path || '';
           this.toolLog.push(entry);
           this.store.append({ kind: 'tool', ...entry }).catch(() => {});
           this.onEvent({ type: 'tool', ...entry });
+          this._emitRuntimeState();
         }
         // 有输出就说明没卡死：刷新健康计时
         if (ev.type === 'text' || ev.type === 'thinking' || ev.type === 'tool' || ev.type === 'activity') {
@@ -1171,9 +1487,7 @@ export class Room {
     this._toolFlight?.delete(agent.id);
     // 用 AbortController：中断必须**真的杀死子进程**。
     // 只 reject Promise 的话进程会变孤儿继续跑、继续占额度。
-    const ac = new AbortController();
-    const live = { agentId: agent.id, abort: () => ac.abort('interrupted') };
-    this.current = live;
+    // ac 与 live 已在 drain() 占位或函数入口处创建并登记进 activeTurns。
 
     // 卡死看门狗：进程活着但长时间没输出，主动判死并杀掉。
     // 先 touch 一次作为"本轮起点"——否则一个从头到尾不输出的进程
@@ -1227,23 +1541,32 @@ export class Room {
     }, slowStartMs);
 
     try {
-      adapterResult = await adapter.run({ ...runInput, signal: ac.signal });
       if (ac.signal.aborted) {
-        // 看门狗判死 → 算失败（进熔断）；人为打断 → 不算 agent 的锅
         aborted = !stalledOut;
         adapterResult = {
-          ...adapterResult,
           aborted: true,
-          text: adapterResult?.text || acc,
+          text: acc,
           reason: stalledOut ? EXIT.TIMEOUT : 'interrupted',
         };
+      } else {
+        adapterResult = await adapter.run({ ...runInput, signal: ac.signal });
+        if (ac.signal.aborted) {
+          // 看门狗判死 → 算失败（进熔断）；人为打断 → 不算 agent 的锅
+          aborted = !stalledOut;
+          adapterResult = {
+            ...adapterResult,
+            aborted: true,
+            text: adapterResult?.text || acc,
+            reason: stalledOut ? EXIT.TIMEOUT : 'interrupted',
+          };
+        }
       }
     } catch (err) {
       adapterResult = { text: acc, reason: EXIT.CRASHED, error: String(err?.message ?? err) };
     } finally {
       clearInterval(stallTimer);
       clearTimeout(slowTimer);
-      this.current = null;
+      this._toolFlight?.delete(agent.id);
     }
 
     const durationMs = Date.now() - startedAt;
@@ -1296,13 +1619,13 @@ export class Room {
       passed: passivePass || undefined,
     });
     // 带上队列剩余数：界面据此区分"还要继续说"和"真的在等人"。
-    // 不带的话，一轮说完就显示"等待人类"，而队列里可能还排着两三个人。
+    // 不带的话，一轮说完就显示"等待人类"，而队列里可能还排着两三个人或有其他并发成员。
     this.onEvent({
       type: 'message',
       message: msg.message,
       durationMs,
       pending: this.queue.length,
-      waitingForHuman: this.queue.length === 0,
+      waitingForHuman: !othersBusy(),
     });
 
     // 2) 动作：只在轮结束后解析，且只认本人输出
@@ -1326,7 +1649,11 @@ export class Room {
         : (e.action ? e.action : '未识别动作');
       results.push({ ok: false, label, reason: e.reason });
     }
-    this._lastActionResults = results;
+    if (results.length) {
+      this._lastActionResultsByAgent.set(agent.id, results);
+    } else {
+      this._lastActionResultsByAgent.delete(agent.id);
+    }
     if (results.length) {
       // 动作结果也要落盘：出事之后能不能查，全看这一条。
       // 内存里的事件流重启就没了，而"它到底派没派成这个活"必须能追溯。
@@ -1464,18 +1791,26 @@ export class Room {
         // 文案与按钮共用同一个布尔值，两边不可能再分叉
         const canResume = Boolean(this.resumeTarget) && !willRetry;
 
-        if (!willRetry) this._pause('timeout', timeoutPauseText({
-          name: agent.name,
-          stalledOut,
-          durationMs,          // 实际耗时，不是配置上限
-          timeoutMs,
-          toolCalls: rowToolsInTurn,
-          textChars,
-          capContinues,
-          maxCapContinues: MAX_CAP_CONTINUES,
-          stallMs: stalledOut ? stalledWindowMs : stallThreshold(timeoutMs),
-          canResume,
-        }));
+        if (!willRetry) {
+          this._setMemberStatus(agent.id, {
+            failed: true,
+            lastError: stalledOut ? '静默超时（看门狗判死）' : '单轮超时被中止',
+          });
+          if (!othersBusy()) {
+            this._pause('timeout', timeoutPauseText({
+              name: agent.name,
+              stalledOut,
+              durationMs,          // 实际耗时，不是配置上限
+              timeoutMs,
+              toolCalls: rowToolsInTurn,
+              textChars,
+              capContinues,
+              maxCapContinues: MAX_CAP_CONTINUES,
+              stallMs: stalledOut ? stalledWindowMs : stallThreshold(timeoutMs),
+              canResume,
+            }));
+          }
+        }
       }
     }
 
@@ -1483,6 +1818,7 @@ export class Room {
     if (aborted) {
       // 人为打断不算 agent 的失败，不该计进熔断
       this.health.touch(agent.id);
+      this._setMemberStatus(agent.id, { failed: false, lastError: null });
       /**
        * ★ 打断必须留下「没做完」的痕迹（CR-036 的真实事故）。
        *
@@ -1503,7 +1839,7 @@ export class Room {
           at: new Date().toISOString(),
           partialChars: String(body).length,
         };
-        if (this.queue.length === 0) {
+        if (!othersBusy()) {
           this._pause('interrupted',
             `${agent.name} 的这一轮被打断（已输出 ${String(body).length} 字，未完成）。`
             + '点「接着做完」让它继续——会话还在，不会重做已完成的部分。');
@@ -1512,14 +1848,26 @@ export class Room {
         this.resumeTarget = null;
       }
     } else if (adapterResult?.reason === EXIT.COMPLETED) {
-      this.resumeTarget = null;
+      if (!this.resumeTarget || this.resumeTarget.agentId === agent.id) {
+        this.resumeTarget = null;
+      }
       this.health.success(agent.id);
+      this._setMemberStatus(agent.id, { failed: false, lastError: null, lastCompletedAt: Date.now() });
     } else {
       const reason = adapterResult?.reason ?? 'failed';
       const stalled = stalledOut || isStall(adapterResult, durationMs);
+      const errDetail = cleanStderr(adapterResult?.error ?? adapterResult?.stderr ?? '');
 
       const tripped = this.health.failure(agent.id, { stall: stalled });
-      if (tripped.tripped) this._pause('breaker', `${agent.name} 连续失败，已暂停`);
+      if (!capAutoContinued) {
+        this._setMemberStatus(agent.id, {
+          failed: true,
+          lastError: (errDetail || reason).slice(0, 240),
+        });
+      }
+      if (tripped.tripped && !othersBusy()) {
+        this._pause('breaker', `${agent.name} 连续失败，已暂停`);
+      }
 
       /**
        * 看门狗在判死那一刻已经发过一条 failure（带"超过 X 秒没有输出"的具体说明）。
@@ -1532,7 +1880,7 @@ export class Room {
           agentId: agent.id,
           reason,
           stalled,
-          detail: cleanStderr(adapterResult?.error ?? adapterResult?.stderr ?? ''),
+          detail: errDetail,
           health: this.health.snapshot(agent.id),
         });
       }
@@ -1567,6 +1915,8 @@ export class Room {
       if (decision.retry) {
         this.onEvent({ type: 'retry', agentId: agent.id, reason: decision.reason });
         this.queue.unshift({ ...job, attempt: (job.attempt ?? 0) + 1 });
+        this._emitRuntimeState();
+        this._kickScheduler();
       } else if (job.attempt) {
         this.onEvent({ type: 'retry.given-up', agentId: agent.id, reason: decision.reason });
       }
@@ -1659,11 +2009,13 @@ export class Room {
      */
     // 超时已经有更精确的原因了（"跑满 N 秒" vs 泛泛的"失败"），不要覆盖成 error
     if (failedTurn && !job.passive && !capAutoContinued && !timedOut) {
-      // 失败也要有原因，且把 CLI 返回的具体错误（如缺环境变量 / 400 模型不可用）带上，避免用户盲猜
-      const errDetail = cleanStderr(adapterResult?.error ?? adapterResult?.stderr ?? '');
-      const whyPart = errDetail ? `：${errDetail.slice(0, 240)}` : '。没有产出可交接的内容，所以没有把话往下传。';
-      this._pause('error', `${agent.name} 本轮失败（${adapterResult?.reason ?? 'unknown'}）`
-        + `，耗时 ${Math.round(durationMs / 1000)} 秒、工具调用 ${rowToolsInTurn} 次${whyPart}`);
+      if (!othersBusy()) {
+        // 失败也要有原因，且把 CLI 返回的具体错误（如缺环境变量 / 400 模型不可用）带上，避免用户盲猜
+        const errDetail = cleanStderr(adapterResult?.error ?? adapterResult?.stderr ?? '');
+        const whyPart = errDetail ? `：${errDetail.slice(0, 240)}` : '。没有产出可交接的内容，所以没有把话往下传。';
+        this._pause('error', `${agent.name} 本轮失败（${adapterResult?.reason ?? 'unknown'}）`
+          + `，耗时 ${Math.round(durationMs / 1000)} 秒、工具调用 ${rowToolsInTurn} 次${whyPart}`);
+      }
     }
 
     // 5) 接力：解析它 @ 了谁
@@ -1702,7 +2054,7 @@ export class Room {
       // 总结不进入接力：它 @ 了谁也不继续，说完就停。
       if (job.isSummary) {
         this.summarizing = null;
-        this.waitingForHuman = true;
+        if (!othersBusy()) this.waitingForHuman = true;
         this.onEvent({ type: 'summary.done', agentId: agent.id });
         return;
       }
@@ -1719,17 +2071,16 @@ export class Room {
       // 没有人被 @，但它声明了 continue → 按 roster 顺序唤下一个人。
       // 只在"没 @ 任何人"时生效：@ 了谁就听 @ 的，不要两条路径打架。
       let continued = false;
-      // 无论走不走自动推进，本轮的 continue 声明都要消费掉——
-      // 否则它会残留到下一轮，被别人（甚至是完全不同的话题）误用。
-      const pending = this._pendingContinue;
-      this._pendingContinue = null;
+      // 无论走不走自动推进，本轮的 continue 声明都要消费掉（按 agentId 隔离）
+      const pending = this._pendingContinueByAgent.get(agent.id) ?? null;
+      this._pendingContinueByAgent.delete(agent.id);
 
       if (allowed.length === 0 && pending) {
         // 真正要推进了，这时才计入护栏
         const check = this.autoAdvance.note(agent.id, pending.reason);
         if (!check.ok) {
           this.onEvent({ type: 'notice', level: 'warn', text: check.reason });
-          this.waitingForHuman = true;
+          if (!othersBusy()) this.waitingForHuman = true;
           return;
         }
 
@@ -1778,16 +2129,18 @@ export class Room {
       // 超时的轮次已经有明确原因了，不能再被覆盖成"说完了"（那正是界面撒谎）
       if (!hasAgentTarget && !continued && !job.isSummary && !timedOut && !dispatchedAny) {
         if (toHuman) {
-          // 只 @ 了老板：等人类，不需要叫任何人
-          this._pause('only_human', `${agent.name} 把话交回给老板，等你的回复`);
+          // 只 @ 了老板：仅当无其他并发成员或排队任务时才将整间房标为等待老板
+          if (!othersBusy()) {
+            this._pause('only_human', `${agent.name} 把话交回给老板，等你的回复`);
+          }
         } else if (agent.role === 'member') {
           woken = this._passiveWake(agent, msg.message, job);
-          if (!woken) {
-            // 叫不醒（被上限拦下 / 没有头头 / 接管中）
+          if (!woken && !othersBusy()) {
+            // 叫不醒（被上限拦下 / 没有头头 / 接管中）且无其他并发任务
             this._pause(this._passiveWakeBlocked?.reason ?? 'no_target',
               this._passiveWakeBlocked?.detail ?? `${agent.name} 说完了，没有下一位`);
           }
-        } else {
+        } else if (!othersBusy()) {
           // 头头无 @ 且无 continue：这是"向你汇报完，停住"，属于正常收尾
           this._pause('no_target', `${agent.name} 说完了，没有点名下一位`);
         }
@@ -1799,8 +2152,14 @@ export class Room {
 
       // 注意：不在这里发 idle 事件。队列可能还有别人在等（比如人同时 @ 了两位），
       // 真正的「等待人类」由 drain() 在队列跑空时统一发出，避免重复提示。
-      if (!hasAgentTarget && !continued && !woken && !dispatchedAny && !this.pauseReason) {
+      if (!hasAgentTarget && !continued && !woken && !dispatchedAny && !this.pauseReason && !othersBusy()) {
         this.waitingForHuman = true;
+      }
+    }
+    } finally {
+      if (ownsActiveTurn) {
+        this.activeTurns.delete(agent.id);
+        this._emitRuntimeState();
       }
     }
   }
@@ -1864,13 +2223,18 @@ export class Room {
      *
      * 用 autoAdvance 计数（它不是 LoopGuard，因此不会污染"循环迹象"警告）：
      * 连续 3 次「成员说完 → 头头接」而没有人类介入，就该停下来问人。
-     * 没有上限的话，一个爱说话的头头 + 一个爱回应的成员能自己聊到天亮。
+     * 同一批并发成员合入已在队列中等待的头头轮次时不重复消耗上限额度。
      */
-    const check = this.autoAdvance.note(agent.id, `无 @ 交回头头（${agent.name}）`);
-    if (!check.ok) {
-      this._passiveWakeBlocked = { reason: 'continue_cap', detail: check.reason };
-      this.onEvent({ type: 'notice', level: 'warn', text: check.reason });
-      return false;
+    const allAlreadyQueued = leaders.every((leader) => this.queue.some(
+      (q) => q.agentId === leader.id && (q.passive || (this.effectiveConcurrency() > 1 && q.source === 'agent')),
+    ));
+    if (!allAlreadyQueued) {
+      const check = this.autoAdvance.note(agent.id, `无 @ 交回头头（${agent.name}）`);
+      if (!check.ok) {
+        this._passiveWakeBlocked = { reason: 'continue_cap', detail: check.reason };
+        this.onEvent({ type: 'notice', level: 'warn', text: check.reason });
+        return false;
+      }
     }
 
     // 批次：同一批消息合并到头头的一轮里
@@ -1882,9 +2246,15 @@ export class Room {
 
     let woke = false;
     for (const leader of leaders) {
-      // 已经有一个被动唤醒的轮次排着 → 不再排新的，它开始时会看到最新批次
-      const already = this.queue.find((q) => q.agentId === leader.id && q.passive);
-      if (already) { woke = true; continue; }
+      // 已经有一个被动唤醒或并发 Fan-in 待汇总的头头轮次排着 → 不再排新的，它开始时会看到最新批次
+      const already = this.queue.find(
+        (q) => q.agentId === leader.id && (q.passive || (this.effectiveConcurrency() > 1 && q.source === 'agent')),
+      );
+      if (already) {
+        already.mergedCount = (already.mergedCount ?? 1) + 1;
+        woke = true;
+        continue;
+      }
       this._enqueue(leader.id, {
         triggerMsg: message,
         taskId: job.taskId,
@@ -1971,6 +2341,7 @@ export class Room {
       // 而"这个人是谁加的、为什么加"是事后要能查的东西。
       this.store.append({ kind: 'member.created', ...payload, at: Date.now() }).catch(() => {});
       this.onEvent({ type: 'member.created', ...payload });
+      this._emitRuntimeState();
       return { ok: true, member: added };
     } catch (err) {
       return { ok: false, reason: String(err?.message ?? err) };
@@ -2271,7 +2642,7 @@ export class Room {
       // 注意：**护栏计数不在这里做**。如果这次 continue 最后被 @ 覆盖掉、
       // 根本没发生自动推进，它不该占用额度——否则模型多写一句 continue
       // 就把后面真正需要的推进额度耗掉了。
-      this._pendingContinue = { from: a.actor, reason: a.reason };
+      this._pendingContinueByAgent.set(agent.id, { from: a.actor, reason: a.reason });
       return { ok: true, label: 'continue', detail: `待推进：${a.reason}` };
     }
 

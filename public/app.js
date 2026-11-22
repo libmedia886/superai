@@ -58,7 +58,8 @@ const state = {
   roster: new Map(),
   registry: [],
   toolLog: [],
-  current: null,        // { agentId, el, textEl, thinking, actions, head, text, thinkText, startedAt }
+  activeTurns: new Map(),      // agentId -> { agentId, el, head, timerEl, interruptBtn, thinking, toolFeed, toolStripEl, toolListEl, textEl, actions, text, thinkText, startedAt, tools, toolCount, lastToolMeta }
+  lastTurnByAgent: new Map(),  // agentId -> 最近刚结束的气泡（供轮后 action.results 挂载）
   turnCount: 0,
   usage: 0,
   busy: false,
@@ -70,6 +71,10 @@ const state = {
   stopped: false,
   allowPeerMentions: true,
   headPassiveWake: true,
+  executionMode: 'auto',       // 'auto' | 'parallel' | 'serial'
+  effectiveMode: 'parallel',   // 'parallel' | 'serial'
+  maxConcurrency: 4,
+  runtime: null,               // { executionMode, effectiveMode, maxConcurrency, active, queue, memberStates }
   resumeTarget: null,   // 有可续轮次时，「继续」按钮变成「接着做完」
   paused: null,         // { reason, detail, at }
   // ---- 多房间 ----
@@ -138,6 +143,144 @@ function fmtAgo(iso) {
   const h = Math.floor(min / 60);
   if (h < 24) return `${h} 小时前`;
   return `${Math.floor(h / 24)} 天前`;
+}
+
+function parseTs(ts) {
+  if (typeof ts === 'number' && Number.isFinite(ts)) return ts;
+  if (typeof ts === 'string' && ts) {
+    const parsed = Date.parse(ts);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return Date.now();
+}
+
+function fmtElapsed(startedAt) {
+  const sec = Math.max(0, Math.floor((Date.now() - parseTs(startedAt)) / 1000));
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  const mm = String(m).padStart(2, '0');
+  const ss = String(s).padStart(2, '0');
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+/** 统一工具展示信息：覆盖搜索/读/写/改/命令等全部工具 */
+function describeTool({ tool = '', action = '', path = null, command = null, detail = '' } = {}) {
+  const rawName = String(tool ?? '').trim();
+  const lower = rawName.toLowerCase();
+  const act = String(action ?? '').toLowerCase();
+
+  let icon = '🔧';
+  let label = rawName || '调用工具';
+
+  if (/web_?search|search_web|websearch|google|bing/.test(lower)) {
+    icon = '🔍';
+    label = '检索网页';
+  } else if (/web_?fetch|fetch_url|read_url|netget|curl/.test(lower)) {
+    icon = '🌐';
+    label = '抓取网页';
+  } else if (act === 'write' || /^(write|write_file|write_to_file|create_file)$/.test(lower)) {
+    icon = '✏️';
+    label = '写入文件';
+  } else if (act === 'edit' || /^(edit|edit_file|replace_file_content|multi_replace_file_content|apply_patch|patch)$/.test(lower)) {
+    icon = '🛠';
+    label = '编辑文件';
+  } else if (act === 'bash' || /^(bash|shell|run_command|execute|terminal)$/.test(lower)) {
+    icon = '⚙';
+    label = '执行命令';
+  } else if (/grep|glob|find|search|list_dir/.test(lower)) {
+    icon = '🔎';
+    label = '检索文件';
+  } else if (act === 'read' || /^(read|read_file|view_file|cat)$/.test(lower)) {
+    icon = '📖';
+    label = '读取文件';
+  }
+
+  const rawDetail = String(
+    detail
+    || (act === 'bash' ? command : path)
+    || command
+    || path
+    || '',
+  ).trim();
+
+  // 若详情是冗长绝对路径，展示简洁尾部（完整内容放在 title）
+  let compactDetail = rawDetail;
+  if (compactDetail.startsWith('/') && compactDetail.length > 54 && !/\s/.test(compactDetail)) {
+    const segs = compactDetail.split('/').filter(Boolean);
+    compactDetail = segs.length > 2 ? `…/${segs.slice(-2).join('/')}` : compactDetail;
+  }
+  if (compactDetail.length > 96) compactDetail = `${compactDetail.slice(0, 95)}…`;
+
+  return {
+    icon,
+    label,
+    shortTool: rawName || label,
+    detail: rawDetail,
+    compactDetail,
+  };
+}
+
+let liveTimerInterval = null;
+
+function hasAnyLiveRunner() {
+  if (state.activeTurns.size > 0) return true;
+  if ((state.runtime?.active?.length ?? 0) > 0) return true;
+  return false;
+}
+
+function tickLiveTimers() {
+  for (const turn of state.activeTurns.values()) {
+    if (turn.timerEl) turn.timerEl.textContent = fmtElapsed(turn.startedAt);
+  }
+  document.querySelectorAll('[data-member-timer="1"]').forEach((el) => {
+    const ts = Number(el.dataset.startedAt);
+    if (Number.isFinite(ts)) el.textContent = fmtElapsed(ts);
+  });
+  if (!hasAnyLiveRunner() && liveTimerInterval) {
+    clearInterval(liveTimerInterval);
+    liveTimerInterval = null;
+  }
+}
+
+function ensureTicker() {
+  if (hasAnyLiveRunner()) {
+    if (!liveTimerInterval) {
+      liveTimerInterval = setInterval(tickLiveTimers, 1000);
+    }
+    tickLiveTimers();
+  } else if (liveTimerInterval) {
+    clearInterval(liveTimerInterval);
+    liveTimerInterval = null;
+  }
+}
+
+async function interruptAgent(agentId = null) {
+  const payload = agentId ? { agentId } : {};
+  const res = await fetch('/api/interrupt', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok && !data.ok) {
+    appendSystemNote(agentId ? `@${nameOf(agentId)} 当前没有在发言` : '当前没有正在发言的人', 'warn');
+  }
+}
+
+function recallMember(name) {
+  const input = $('input');
+  const tag = `@${name} `;
+  const cur = input.value;
+  if (!cur.includes(`@${name}`)) {
+    input.value = cur.trim() ? `${tag}${cur}` : tag;
+  }
+  closeMobileDrawers();
+  autoGrow(input);
+  updateMentionHint();
+  input.focus();
+  const len = input.value.length;
+  input.setSelectionRange(len, len);
 }
 
 function escapeHtml(s) {
@@ -448,6 +591,90 @@ function approvalNote(member) {
     + '<span class="cmd-risk">自定义命令不受目录限制</span></div>';
 }
 
+function memberLiveState(m) {
+  const rtState = state.runtime?.memberStates?.[m.id] ?? null;
+  const activeTurn = state.activeTurns.get(m.id) ?? null;
+
+  if (rtState?.status === 'running' || activeTurn) {
+    const startedAt = parseTs(rtState?.startedAt ?? activeTurn?.startedAt ?? Date.now());
+    const toolCount = Math.max(Number(rtState?.toolCount ?? 0), Number(activeTurn?.toolCount ?? 0));
+    const lastTool = rtState?.lastTool ?? activeTurn?.lastToolMeta?.shortTool ?? '';
+    const lastAction = rtState?.lastAction ?? activeTurn?.lastToolMeta?.action ?? '';
+    const lastDetail = rtState?.lastDetail ?? activeTurn?.lastToolMeta?.detail ?? '';
+    return {
+      status: 'running',
+      startedAt,
+      toolCount,
+      lastTool,
+      lastAction,
+      lastDetail,
+    };
+  }
+  if (rtState?.status === 'queued') {
+    return {
+      status: 'queued',
+      queuePos: rtState.queuePos ?? 1,
+      waitingFanIn: Boolean(rtState.waitingFanIn),
+    };
+  }
+  if (rtState?.status === 'failed') {
+    return {
+      status: 'failed',
+      lastError: rtState.lastError ?? '上轮执行失败',
+    };
+  }
+  return { status: 'idle' };
+}
+
+function renderMemberLiveBar(m, ms) {
+  if (ms.status === 'running') {
+    let toolLine = '思考 / 生成中…';
+    let toolTitle = '正在思考或生成回复';
+    if (ms.toolCount > 0 || ms.lastTool) {
+      const info = describeTool({
+        tool: ms.lastTool,
+        action: ms.lastAction,
+        detail: ms.lastDetail,
+      });
+      const stepPart = ms.toolCount > 0 ? ` · 第 ${ms.toolCount} 步` : '';
+      toolLine = `${info.icon} ${info.shortTool}${stepPart}`;
+      toolTitle = `${info.label}${stepPart}${info.detail ? `：${info.detail}` : ''}`;
+    }
+    return `
+      <div class="member-live-bar">
+        <div class="member-live-top">
+          <span class="ml-dot-run" aria-hidden="true"></span>
+          <span class="ml-state-run">运行中</span>
+          <span class="ml-timer" data-member-timer="1" data-started-at="${ms.startedAt}">${escapeHtml(fmtElapsed(ms.startedAt))}</span>
+          <button class="member-act-btn stop-one" type="button" title="仅打断 @${escapeHtml(m.name)}">⏹</button>
+        </div>
+        <div class="member-live-tool" title="${escapeHtml(toolTitle)}">${escapeHtml(toolLine)}</div>
+      </div>`;
+  }
+
+  if (ms.status === 'queued') {
+    const text = ms.waitingFanIn
+      ? '⏳ 等待并行成员全部完成后汇总'
+      : `◷ 排队第 ${ms.queuePos} 位`;
+    return `
+      <div class="member-live-bar">
+        <span class="ml-queue${ms.waitingFanIn ? ' fanin' : ''}" title="${escapeHtml(text)}">${escapeHtml(text)}</span>
+      </div>`;
+  }
+
+  if (ms.status === 'failed') {
+    return `
+      <div class="member-live-bar">
+        <div class="member-live-top">
+          <span class="ml-fail" title="${escapeHtml(ms.lastError)}">⚠ 上轮失败</span>
+          <button class="member-act-btn recall-one" type="button" title="在输入框填入 @${escapeHtml(m.name)} 以便重叫">↻ 重叫</button>
+        </div>
+      </div>`;
+  }
+
+  return '';
+}
+
 function renderMemberList() {
   const ul = $('member-list');
   ul.innerHTML = '';
@@ -455,8 +682,9 @@ function renderMemberList() {
   $('btn-first-member').classList.toggle('hidden', state.members.length > 0);
 
   for (const m of state.members) {
+    const ms = memberLiveState(m);
     const li = document.createElement('li');
-    li.className = 'member';
+    li.className = `member${ms.status !== 'idle' ? ` is-${ms.status}` : ''}`;
     li.title = '点击编辑：后端 / 档位 / 模型 / 思考等级 / 人设';
     const modelInfo = [m.model, m.effort].filter(Boolean).join(' · ');
     li.innerHTML = `
@@ -471,13 +699,23 @@ function renderMemberList() {
         ${modelInfo ? `<span class="member-model" title="${escapeHtml(modelInfo)}">${escapeHtml(modelInfo)}</span>` : ''}
         ${m.overridesTier ? '<span class="member-flag" title="启动参数里有覆盖档位的项">档位被参数覆盖</span>' : ''}
       </div>
+      ${renderMemberLiveBar(m, ms)}
       ${m.sessionResetReason && m.role === 'leader' ? `<div class="session-reset" title="${escapeHtml(m.sessionResetReason)}">上下文已重置</div>` : ''}
       ${m.timeoutSource === 'legacy' ? `<div class="timeout-legacy" title="room.json 里手写了 timeoutMs，界面上的单轮上限对它不生效">上限来自配置手写 · 实际 ${escapeHtml(String(m.effectiveTimeoutMinutes))} 分钟</div>` : ''}
       ${approvalNote(m)}`;
     li.querySelector('.member-top').prepend(avatarEl(m.name));
+    li.querySelector('.stop-one')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      interruptAgent(m.id);
+    });
+    li.querySelector('.recall-one')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      recallMember(m.name);
+    });
     li.onclick = () => openMemberSettings(m.id);
     ul.appendChild(li);
   }
+  ensureTicker();
 }
 
 function renderRoster() {
@@ -966,28 +1204,163 @@ async function saveGoal(e) {
   closeGoalEditor();
 }
 
+function computeEffectiveMode() {
+  if (state.runtime?.effectiveMode === 'parallel' || state.runtime?.effectiveMode === 'serial') {
+    return state.runtime.effectiveMode;
+  }
+  if (state.effectiveMode === 'parallel' || state.effectiveMode === 'serial') {
+    return state.effectiveMode;
+  }
+  if (state.executionMode === 'serial') return 'serial';
+  if (state.executionMode === 'parallel') return 'parallel';
+  return state.members.length <= state.maxConcurrency ? 'parallel' : 'serial';
+}
+
+function renderExecModeControls() {
+  const mode = state.executionMode ?? 'auto';
+  const maxC = Number(state.maxConcurrency) || 4;
+  const effective = computeEffectiveMode();
+  const count = state.members.length;
+
+  const sel = $('exec-mode');
+  if (sel) sel.value = mode;
+
+  const maxRow = $('max-concurrency-row');
+  if (maxRow) maxRow.classList.toggle('hidden', mode === 'serial');
+  const maxInp = $('max-concurrency');
+  if (maxInp && document.activeElement !== maxInp) maxInp.value = String(maxC);
+
+  const hint = $('exec-mode-hint');
+  if (hint) {
+    if (mode === 'auto') {
+      hint.textContent = effective === 'parallel'
+        ? `当前 ${count} 人 → 并行中（最多 ${maxC} 并发，头头等待汇合）`
+        : `当前 ${count} 人 → 人多已自动切为串行（阈值 ≤${maxC} 人）`;
+    } else if (mode === 'parallel') {
+      hint.textContent = `始终并行：最多 ${maxC} 并发（跨成员同时运行，头头等待汇合）`;
+    } else {
+      hint.textContent = '严格串行：每次仅 1 位成员发言，顺序稳定可控。';
+    }
+  }
+
+  const badge = $('exec-mode-badge');
+  if (badge) {
+    badge.className = `exec-mode-badge ${effective === 'parallel' ? 'parallel' : 'serial'}`;
+    badge.textContent = effective === 'parallel' ? '⚡ 并行' : '⛓ 串行';
+    const modeName = { auto: '智能', parallel: '始终并行', serial: '严格串行' }[mode] ?? mode;
+    badge.title = `当前生效：${effective === 'parallel' ? `并行（最多 ${maxC} 并发）` : '串行'} · 配置模式：${modeName}（点击调整）`;
+  }
+}
+
+function applyRuntime(rt, { hydrateTurns = false } = {}) {
+  if (!rt || typeof rt !== 'object') return;
+  state.runtime = rt;
+  if (rt.executionMode) state.executionMode = rt.executionMode;
+  if (rt.effectiveMode) state.effectiveMode = rt.effectiveMode;
+  if (rt.maxConcurrency != null) state.maxConcurrency = Number(rt.maxConcurrency) || 4;
+
+  const activeList = Array.isArray(rt.active) ? rt.active : [];
+  const queueList = Array.isArray(rt.queue) ? rt.queue : [];
+
+  state.pending = queueList.length;
+  state.busy = activeList.length > 0 || state.activeTurns.size > 0 || queueList.length > 0;
+
+  for (const a of activeList) {
+    if (!a?.agentId) continue;
+    const existing = state.activeTurns.get(a.agentId);
+    if (existing) {
+      if (a.startedAt) existing.startedAt = parseTs(a.startedAt);
+      if (a.toolCount > existing.toolCount || (a.lastTool && !existing.lastToolMeta)) {
+        syncTurnFromRuntime(existing, a);
+      }
+    } else if (hydrateTurns) {
+      ensureTurnEl(a.agentId, {
+        startedAt: a.startedAt,
+        toolCount: a.toolCount ?? 0,
+        lastTool: a.lastTool ?? '',
+        lastAction: a.lastAction ?? '',
+        lastDetail: a.lastDetail ?? '',
+      });
+    }
+  }
+
+  renderExecModeControls();
+  renderMemberList();
+  renderStatus();
+  ensureTicker();
+}
+
+function collectActiveAgentIds() {
+  const seen = new Set();
+  const ordered = [];
+  for (const a of (state.runtime?.active ?? [])) {
+    if (a?.agentId && !seen.has(a.agentId)) {
+      seen.add(a.agentId);
+      ordered.push(a.agentId);
+    }
+  }
+  for (const agentId of state.activeTurns.keys()) {
+    if (!seen.has(agentId)) {
+      seen.add(agentId);
+      ordered.push(agentId);
+    }
+  }
+  return ordered;
+}
+
 function renderStatus() {
   const sp = $('speaker');
-  if (state.current) {
-    sp.innerHTML = `<span class="dot busy"></span><span><b>${escapeHtml(nameOf(state.current.agentId))}</b> 正在发言</span>`;
+  const activeIds = collectActiveAgentIds();
+  const queueList = Array.isArray(state.runtime?.queue) ? state.runtime.queue : [];
+  const hasActive = activeIds.length > 0;
+
+  if (activeIds.length > 1) {
+    const namesAll = activeIds.map((id) => `@${nameOf(id)}`);
+    const preview = namesAll.length <= 3
+      ? namesAll.join('、')
+      : `${namesAll.slice(0, 3).join('、')} 等`;
+    sp.innerHTML = `<span class="dot busy"></span><span><b>${activeIds.length} 人并行中</b>：${escapeHtml(preview)}</span>`;
+    sp.title = `正在并行运行：${namesAll.join('、')}`;
+  } else if (activeIds.length === 1) {
+    const who = nameOf(activeIds[0]);
+    sp.innerHTML = `<span class="dot busy"></span><span><b>@${escapeHtml(who)}</b> 正在发言</span>`;
+    sp.title = `@${who} 正在运行`;
+  } else if (queueList.length > 0) {
+    const qNames = queueList.map((q) => `${q.waitingFanIn ? '⏳' : ''}@${nameOf(q.agentId)}`);
+    sp.innerHTML = `<span class="dot busy"></span><span>待发言：${escapeHtml(qNames.slice(0, 3).join('、'))}</span>`;
+    sp.title = `排队中：${qNames.join('、')}`;
   } else if (state.busy) {
     sp.innerHTML = `<span class="dot busy"></span><span>执行中…</span>`;
+    sp.title = '';
   } else if (state.pending > 0) {
     sp.innerHTML = `<span class="dot busy"></span><span>还有 <b>${state.pending}</b> 人待发言</span>`;
+    sp.title = '';
   } else if (state.currentSpeakerLast) {
     sp.innerHTML = `<span class="dot idle"></span><span>已停手，等你指示</span>`;
+    sp.title = '';
   } else {
     sp.innerHTML = `<span class="dot idle"></span><span>等待人类</span>`;
+    sp.title = '';
   }
 
   $('turn-count').textContent = String(state.turnCount);
   $('usage').textContent = fmtTokens(state.usage);
-  $('btn-interrupt').disabled = !state.current;
+  $('btn-interrupt').disabled = !hasActive;
+  $('btn-interrupt').textContent = activeIds.length > 1 ? `打断 (${activeIds.length})` : '打断';
   $('stopped-badge').classList.toggle('hidden', !state.stopped);
 
   const qEl = $('queue');
-  if (state.pending > 0 && state.current) {
+  if (queueList.length > 0) {
+    const tags = queueList.map((q) => `${q.waitingFanIn ? '⏳' : ''}@${nameOf(q.agentId)}`);
+    qEl.textContent = `排队 ${queueList.length}：${tags.join('、')}`;
+    const details = queueList.map((q, idx) => (
+      `${idx + 1}. @${nameOf(q.agentId)}${q.waitingFanIn ? '（等待并行成员全部完成后汇总）' : ''}`
+    ));
+    qEl.title = details.join('\n');
+    qEl.classList.remove('hidden');
+  } else if (state.pending > 0 && hasActive) {
     qEl.textContent = `排队 ${state.pending}`;
+    qEl.title = `当前有 ${state.pending} 人排队等待发言`;
     qEl.classList.remove('hidden');
   } else {
     qEl.classList.add('hidden');
@@ -995,7 +1368,7 @@ function renderStatus() {
 
   // 停顿原因：停下/思考/坏了必须可分
   const pausedEl = $('paused-badge');
-  if (state.paused && !state.stopped && !state.current && !state.busy) {
+  if (state.paused && !state.stopped && !hasActive && !state.busy) {
     pausedEl.classList.remove('hidden');
     pausedEl.innerHTML = `停在：<strong>${escapeHtml(PAUSE_LABEL[state.paused.reason] ?? state.paused.reason)}</strong>`
       + (state.paused.detail ? ` · ${escapeHtml(state.paused.detail.slice(0, 72))}` : '');
@@ -1005,7 +1378,7 @@ function renderStatus() {
   }
 
   // 「继续」在停止时用来松刹车，在停住时用来接着往下走（保持不变量表达式）
-  const canContinue = state.stopped || (Boolean(state.paused) && !state.busy && !state.current);
+  const canContinue = state.stopped || (Boolean(state.paused) && !state.busy && !hasActive);
   $('btn-resume').classList.toggle('hidden', !canContinue);
   $('btn-resume').textContent = state.stopped
     ? '▶ 继续'
@@ -1446,7 +1819,9 @@ function resetRoomView() {
   state.toolLog = [];
   state.filesData = null;
   state.filesError = null;
-  state.current = null;
+  state.activeTurns = new Map();
+  state.lastTurnByAgent = new Map();
+  state.runtime = null;
   state.turnCount = 0;
   state.usage = 0;
   state.busy = false;
@@ -1456,6 +1831,7 @@ function resetRoomView() {
   state.paused = null;
   state.resumeTarget = null;
   state.lastFailureBanner = null;
+  ensureTicker();
   seqWarningDismissed = false;
   $('seq-warn')?.classList.add('hidden');
   $('stream').innerHTML = '';
@@ -1511,13 +1887,98 @@ function scrollToBottom({ force = false } = {}) {
   }
 }
 
-function ensureTurnEl(agentId) {
-  if (state.current?.agentId === agentId) return state.current;
+function renderToolStripSummary(turn, { done = false } = {}) {
+  const info = turn.lastToolMeta;
+  const count = turn.toolCount;
+  if (!info && count <= 0) return;
+
+  turn.toolFeed.classList.remove('hidden');
+  turn.toolFeed.classList.toggle('live', !done);
+  turn.toolFeed.classList.toggle('done', done);
+
+  const icon = info?.icon ?? '🔧';
+  const label = info?.label ?? '执行工具';
+  const detail = info?.compactDetail ?? '';
+  const fullDetail = info?.detail ?? '';
+
+  if (done) {
+    turn.toolStripEl.title = fullDetail ? `最后一步：${label} — ${fullDetail}` : `共执行 ${count} 步工具调用`;
+    turn.toolStripEl.innerHTML = `
+      <span class="tts-done-icon" aria-hidden="true">✓</span>
+      <span class="tts-label">共执行工具</span>
+      <span class="tts-step">${count} 步</span>
+      <span class="tts-detail">${escapeHtml(detail ? `最后：${label} · ${detail}` : `最后：${label}`)}</span>
+      <span class="tts-chevron" aria-hidden="true">▸</span>`;
+  } else {
+    turn.toolStripEl.title = fullDetail ? `${label}（第 ${count} 步）：${fullDetail}` : `${label}（第 ${count} 步）`;
+    turn.toolStripEl.innerHTML = `
+      <span class="tts-pulse" aria-hidden="true"></span>
+      <span class="tts-icon" aria-hidden="true">${icon}</span>
+      <span class="tts-label">${escapeHtml(label)}</span>
+      <span class="tts-step">第 ${count} 步</span>
+      ${detail ? `<span class="tts-detail">${escapeHtml(detail)}</span>` : '<span class="tts-detail">执行中…</span>'}
+      <span class="tts-chevron" aria-hidden="true">▸</span>`;
+  }
+}
+
+function syncTurnFromRuntime(turn, activeInfo) {
+  if (!turn || !activeInfo) return;
+  const count = Number(activeInfo.toolCount ?? 0);
+  if (count > turn.toolCount) turn.toolCount = count;
+  if (activeInfo.lastTool || activeInfo.lastAction || activeInfo.lastDetail) {
+    turn.lastToolMeta = describeTool({
+      tool: activeInfo.lastTool ?? '',
+      action: activeInfo.lastAction ?? '',
+      detail: activeInfo.lastDetail ?? '',
+    });
+    turn.lastToolMeta.action = activeInfo.lastAction ?? '';
+  }
+  if (turn.toolCount > 0 || turn.lastToolMeta) {
+    if (turn.toolCount <= 0) turn.toolCount = 1;
+    renderToolStripSummary(turn, { done: false });
+  }
+}
+
+function recordTurnTool(agentId, ev) {
+  if (!agentId) return;
+  const turn = ensureTurnEl(agentId);
+  const info = describeTool(ev);
+  info.action = ev.action ?? '';
+  turn.toolCount += 1;
+  turn.lastToolMeta = info;
+
+  const step = turn.toolCount;
+  const row = document.createElement('div');
+  row.className = 'tool-feed-row';
+  row.title = info.detail || info.label;
+  row.innerHTML = `
+    <span class="tfr-num">#${step}</span>
+    <span class="tfr-icon" aria-hidden="true">${info.icon}</span>
+    <span class="tfr-label">${escapeHtml(info.label)}</span>
+    <span class="tfr-detail">${escapeHtml(info.compactDetail || info.shortTool)}</span>
+    <span class="tfr-time">${escapeHtml(fmtTime(ev.at ?? Date.now()))}</span>`;
+  turn.toolListEl.appendChild(row);
+  turn.toolListEl.scrollTop = turn.toolListEl.scrollHeight;
+  turn.tools.push({ step, ...info, at: ev.at ?? Date.now() });
+
+  renderToolStripSummary(turn, { done: false });
+  scrollToBottom();
+}
+
+function ensureTurnEl(agentId, init = {}) {
+  const existing = state.activeTurns.get(agentId);
+  if (existing) {
+    if (init.startedAt) existing.startedAt = Math.min(existing.startedAt, parseTs(init.startedAt));
+    if (init.toolCount || init.lastTool || init.lastDetail) syncTurnFromRuntime(existing, init);
+    return existing;
+  }
   clearWelcomeCard();
 
+  const startedAt = parseTs(init.startedAt ?? Date.now());
   const member = memberById(agentId);
   const wrap = document.createElement('div');
   wrap.className = 'msg agent streaming';
+  wrap.dataset.agentId = agentId;
 
   const av = avatarEl(nameOf(agentId));
   const content = document.createElement('div');
@@ -1528,11 +1989,23 @@ function ensureTurnEl(agentId) {
     <span class="msg-who" style="color:${colorFor(nameOf(agentId))}">${escapeHtml(nameOf(agentId))}</span>
     <span class="msg-role">${member?.role === 'leader' ? '头头' : '成员'}</span>
     ${member?.backend ? backendPillHtml(member.backend) : ''}
-    <span class="msg-time"></span>`;
+    <span class="turn-timer" title="本轮已运行时长">${escapeHtml(fmtElapsed(startedAt))}</span>
+    <span class="msg-time"></span>
+    <button class="turn-interrupt-btn" type="button" title="仅打断 @${escapeHtml(nameOf(agentId))} 当前这一轮">⏹ 打断</button>`;
+
+  const timerEl = head.querySelector('.turn-timer');
+  const interruptBtn = head.querySelector('.turn-interrupt-btn');
+  interruptBtn.onclick = () => interruptAgent(agentId);
 
   const thinking = document.createElement('details');
   thinking.className = 'thinking hidden';
   thinking.innerHTML = '<summary>思考了 0.0 秒</summary><div class="thinking-body"></div>';
+
+  const toolFeed = document.createElement('details');
+  toolFeed.className = 'tool-feed live hidden';
+  toolFeed.innerHTML = '<summary class="turn-tool-strip"></summary><div class="tool-feed-list"></div>';
+  const toolStripEl = toolFeed.querySelector('.turn-tool-strip');
+  const toolListEl = toolFeed.querySelector('.tool-feed-list');
 
   const textEl = document.createElement('div');
   textEl.className = 'msg-body md-body';
@@ -1540,26 +2013,77 @@ function ensureTurnEl(agentId) {
   const actions = document.createElement('div');
   actions.className = 'action-area';
 
-  content.append(head, thinking, textEl, actions);
+  content.append(head, thinking, toolFeed, textEl, actions);
   wrap.append(av, content);
   $('stream').appendChild(wrap);
   scrollToBottom();
 
-  state.current = { agentId, el: wrap, textEl, thinking, actions, head, text: '', thinkText: '', startedAt: Date.now() };
-  return state.current;
+  const turn = {
+    agentId,
+    el: wrap,
+    head,
+    timerEl,
+    interruptBtn,
+    thinking,
+    toolFeed,
+    toolStripEl,
+    toolListEl,
+    textEl,
+    actions,
+    text: '',
+    thinkText: '',
+    startedAt,
+    tools: [],
+    toolCount: 0,
+    lastToolMeta: null,
+  };
+  state.activeTurns.set(agentId, turn);
+
+  if (init.toolCount || init.lastTool || init.lastDetail) {
+    syncTurnFromRuntime(turn, init);
+  }
+  ensureTicker();
+  return turn;
 }
 
-function finishTurn(durationMs) {
-  const cur = state.current;
-  if (!cur) return;
-  cur.el.classList.remove('streaming');
-  const timeEl = cur.head.querySelector('.msg-time');
-  if (timeEl && durationMs) timeEl.textContent = `${(durationMs / 1000).toFixed(1)}s`;
+function finishSingleTurn(turn, durationMs, { fromFailure = false } = {}) {
+  if (!turn) return;
+  turn.el.classList.remove('streaming');
+  turn.timerEl?.remove();
+  turn.interruptBtn?.remove();
+
+  const timeEl = turn.head.querySelector('.msg-time');
+  const ms = durationMs ?? (Date.now() - turn.startedAt);
+  if (timeEl && ms > 0) timeEl.textContent = `${(ms / 1000).toFixed(1)}s`;
   else if (timeEl) timeEl.textContent = '';
-  if (cur.text) cur.textEl.innerHTML = renderBody(cur.text);
-  if (cur.thinking.classList.contains('hidden')) cur.thinking.remove();
-  state.current = null;
+
+  if (turn.text) turn.textEl.innerHTML = renderBody(turn.text);
+  if (turn.thinking.classList.contains('hidden')) turn.thinking.remove();
+
+  if (turn.toolCount > 0) {
+    renderToolStripSummary(turn, { done: true });
+  } else {
+    turn.toolFeed.remove();
+  }
+
+  turn.finishedByFailure = fromFailure;
+  turn.finishedAt = Date.now();
+  state.activeTurns.delete(turn.agentId);
+  state.lastTurnByAgent.set(turn.agentId, turn);
   state.turnCount += 1;
+}
+
+function finishTurn(agentId = null, durationMs = null, opts = {}) {
+  if (agentId != null) {
+    const turn = state.activeTurns.get(agentId);
+    if (!turn) return;
+    finishSingleTurn(turn, durationMs, opts);
+  } else {
+    for (const turn of [...state.activeTurns.values()]) {
+      finishSingleTurn(turn, durationMs, opts);
+    }
+  }
+  ensureTicker();
   renderStatus();
 }
 
@@ -1608,6 +2132,7 @@ function appendHistoryAgentMessage(m) {
   const member = memberById(m.senderId);
   const wrap = document.createElement('div');
   wrap.className = 'msg agent';
+  wrap.dataset.agentId = m.senderId;
   if (m.isSummary) wrap.classList.add('summary');
   const av = avatarEl(nameOf(m.senderId));
   const content = document.createElement('div');
@@ -1625,12 +2150,17 @@ function appendHistoryAgentMessage(m) {
   if (failText) appendSystemNote(`${nameOf(m.senderId)} ${failText}`, 'warn');
 }
 
-function markAsSummary() {
-  const msgs = $('stream').querySelectorAll('.msg.agent');
-  const last = msgs[msgs.length - 1];
-  if (!last) return;
-  last.classList.add('summary');
-  const head = last.querySelector('.msg-head');
+function markAsSummary(agentId = null) {
+  let targetEl = agentId ? state.lastTurnByAgent.get(agentId)?.el : null;
+  if (!targetEl) {
+    const msgs = agentId
+      ? $('stream').querySelectorAll(`.msg.agent[data-agent-id="${CSS.escape(agentId)}"]`)
+      : $('stream').querySelectorAll('.msg.agent');
+    targetEl = msgs[msgs.length - 1] ?? null;
+  }
+  if (!targetEl) return;
+  targetEl.classList.add('summary');
+  const head = targetEl.querySelector('.msg-head');
   if (head && !head.querySelector('.summary-tag')) {
     const tag = document.createElement('span');
     tag.className = 'summary-tag';
@@ -1667,7 +2197,7 @@ function appendFailureBanner({ agentId = null, title, detail = '' }) {
 }
 
 function appendToolNote(ev) {
-  const host = state.current?.actions ?? $('stream');
+  const host = (ev.agentId ? state.activeTurns.get(ev.agentId)?.actions : null) ?? $('stream');
   const label = { write: '写入', edit: '编辑', bash: '执行命令', read: '读取' }[ev.action] ?? ev.action;
   const target = ev.action === 'bash' ? ev.command : ev.path;
   const el = document.createElement('div');
@@ -1728,8 +2258,10 @@ function appendSystemNote(text, level = 'info') {
   scrollToBottom();
 }
 
-function appendActionCard(results) {
-  const host = state.current?.actions ?? $('stream');
+function appendActionCard(results, agentId = null) {
+  const host = (agentId
+    ? (state.activeTurns.get(agentId)?.actions ?? state.lastTurnByAgent.get(agentId)?.actions)
+    : null) ?? $('stream');
   for (const r of results) {
     const card = document.createElement('div');
     card.className = `action-card ${r.ok ? 'ok' : 'fail'}`;
@@ -1794,9 +2326,17 @@ function handle(ev) {
       $('passive-wake').checked = state.headPassiveWake;
       $('room-timeout').value = ev.turnTimeoutMinutes != null ? String(ev.turnTimeoutMinutes) : '';
 
+      state.executionMode = ev.executionMode ?? ev.runtime?.executionMode ?? 'auto';
+      state.effectiveMode = ev.effectiveExecutionMode ?? ev.runtime?.effectiveMode ?? computeEffectiveMode();
+      state.maxConcurrency = Number(ev.maxConcurrency ?? ev.runtime?.maxConcurrency ?? 4) || 4;
+      state.runtime = ev.runtime ?? null;
+      state.activeTurns = new Map();
+      state.lastTurnByAgent = new Map();
+
       $('room-name').textContent = ev.room.name;
       document.title = `${ev.room.name} · SuperAI`;
       renderGoalBar();
+      renderExecModeControls();
 
       state.tasks = new Map();
       for (const t of (ev.tasks ?? [])) state.tasks.set(t.id, t);
@@ -1825,6 +2365,11 @@ function handle(ev) {
         else appendHistoryAgentMessage(m);
       }
       renderHistoricalTools(state.toolLog);
+
+      // 刷新恢复：若当前已有成员正在运行，立刻恢复其进行中气泡与最新工具进度
+      if (ev.runtime) {
+        applyRuntime(ev.runtime, { hydrateTurns: true });
+      }
       maybeRenderWelcomeCard();
 
       renderSidebarRooms();
@@ -1836,6 +2381,10 @@ function handle(ev) {
       decideView(previousRoomId);
       break;
     }
+
+    case 'runtime.state':
+      applyRuntime(ev, { hydrateTurns: false });
+      break;
 
     case 'room.paused': {
       state.paused = { reason: ev.reason, detail: ev.detail ?? '', at: new Date().toISOString() };
@@ -1915,6 +2464,7 @@ function handle(ev) {
       state.members = state.members.filter((x) => x.id !== ev.agentId);
       renderMemberList();
       renderRoster();
+      renderExecModeControls();
       break;
 
     case 'rooms.updated':
@@ -1954,6 +2504,20 @@ function handle(ev) {
         $('room-timeout').value = ev.turnTimeoutMinutes != null ? String(ev.turnTimeoutMinutes) : '';
         notes.push(ev.turnTimeoutMinutes ? `单轮上限已改为 ${ev.turnTimeoutMinutes} 分钟` : '单轮上限已恢复默认（20 分钟）');
       }
+      if (ev.executionMode !== undefined || ev.effectiveExecutionMode !== undefined || ev.maxConcurrency !== undefined) {
+        if (ev.executionMode !== undefined) state.executionMode = ev.executionMode;
+        if (ev.effectiveExecutionMode !== undefined) state.effectiveMode = ev.effectiveExecutionMode;
+        if (ev.maxConcurrency !== undefined) state.maxConcurrency = Number(ev.maxConcurrency) || 4;
+        if (state.runtime) {
+          if (ev.executionMode !== undefined) state.runtime.executionMode = state.executionMode;
+          if (ev.effectiveExecutionMode !== undefined) state.runtime.effectiveMode = state.effectiveMode;
+          if (ev.maxConcurrency !== undefined) state.runtime.maxConcurrency = state.maxConcurrency;
+        }
+        renderExecModeControls();
+        const modeCn = { auto: '智能模式', parallel: '始终并行', serial: '严格串行' }[state.executionMode] ?? state.executionMode;
+        const effCn = computeEffectiveMode() === 'parallel' ? `当前并行（最多 ${state.maxConcurrency} 并发）` : '当前串行';
+        notes.push(`执行模式：${modeCn}（${effCn}）`);
+      }
       if (notes.length) appendSystemNote(notes.join('；'));
       break;
     }
@@ -1979,6 +2543,9 @@ function handle(ev) {
         for (const [k, v] of ev.roster) state.roster.set(k, v);
         renderRoster();
       }
+      if (ev.runtime) {
+        applyRuntime(ev.runtime, { hydrateTurns: false });
+      }
       state.busy = Boolean(ev.busy);
       renderStatus();
       break;
@@ -1986,8 +2553,9 @@ function handle(ev) {
     case 'turn.start':
       state.busy = true;
       state.paused = null;
-      state.pending = ev.pending ?? 0;
-      ensureTurnEl(ev.agentId);
+      if (ev.pending != null) state.pending = ev.pending;
+      ensureTurnEl(ev.agentId, { startedAt: ev.startedAt ?? Date.now() });
+      renderMemberList();
       renderStatus();
       break;
 
@@ -1997,7 +2565,7 @@ function handle(ev) {
       break;
 
     case 'text': {
-      const cur = state.current ?? ensureTurnEl(ev.agentId);
+      const cur = state.activeTurns.get(ev.agentId) ?? ensureTurnEl(ev.agentId);
       if (!ev.text) break;
       cur.text += ev.text;
       cur.textEl.textContent = /```actions?\b/.test(cur.text)
@@ -2008,7 +2576,7 @@ function handle(ev) {
     }
 
     case 'thinking': {
-      const cur = state.current ?? ensureTurnEl(ev.agentId);
+      const cur = state.activeTurns.get(ev.agentId) ?? ensureTurnEl(ev.agentId);
       cur.thinkText += ev.text;
       cur.thinking.classList.remove('hidden');
       cur.thinking.querySelector('.thinking-body').textContent = cur.thinkText;
@@ -2031,49 +2599,66 @@ function handle(ev) {
         break;
       }
       if (m.passed) {
-        finishTurn(m.durationMs);
-        if (state.current?.agentId === m.senderId) state.current = null;
+        finishTurn(m.senderId, m.durationMs);
         appendPassedNote(m.senderId);
-        state.pending = ev.pending ?? 0;
-        state.busy = state.pending > 0;
+        state.pending = ev.pending ?? state.pending;
+        state.busy = state.activeTurns.size > 0 || state.pending > 0;
+        renderMemberList();
         renderStatus();
         break;
       }
-      if (state.current?.agentId === m.senderId) {
-        state.current.text = m.body;
-        state.current.textEl.innerHTML = renderBody(m.body, { live: true });
+      const activeTurn = state.activeTurns.get(m.senderId);
+      const recentFailTurn = state.lastTurnByAgent.get(m.senderId);
+      if (activeTurn) {
+        activeTurn.text = m.body;
+        activeTurn.textEl.innerHTML = renderBody(m.body, { live: true });
+        finishTurn(m.senderId, m.durationMs);
+      } else if (recentFailTurn?.finishedByFailure && (Date.now() - recentFailTurn.finishedAt < 5000)) {
+        recentFailTurn.finishedByFailure = false;
+        if (m.body) {
+          recentFailTurn.text = m.body;
+          recentFailTurn.textEl.innerHTML = renderBody(m.body, { live: true });
+        }
       } else if (m.body) {
         appendHistoryAgentMessage(m);
       }
-      finishTurn(m.durationMs);
-      if (m.isSummary) markAsSummary();
+      if (m.isSummary) markAsSummary(m.senderId);
       const failText = turnFailureText(m);
       if (failText) appendSystemNote(`${nameOf(m.senderId)} ${failText}`, 'warn');
       state.currentSpeakerLast = m.senderId;
       state.pending = ev.pending ?? 0;
-      state.busy = state.pending > 0;
+      state.busy = state.activeTurns.size > 0 || state.pending > 0;
+      renderMemberList();
       renderStatus();
       scheduleFilesRefresh();
       break;
     }
 
     case 'action.results':
-      appendActionCard(ev.results ?? []);
+      appendActionCard(ev.results ?? [], ev.agentId ?? null);
       break;
 
     case 'task.created':
       state.tasks.set(ev.task.id, ev.task);
       renderBoard();
-      appendActionCard([{ ok: true, label: '新任务', detail: `${ev.task.id} ${ev.task.title}` }]);
+      appendActionCard(
+        [{ ok: true, label: '新任务', detail: `${ev.task.id} ${ev.task.title}` }],
+        ev.agentId ?? ev.task?.createdBy ?? null,
+      );
       break;
 
     case 'tool': {
+      // 全量工具（read / write / edit / bash / other）均实时更新聊天气泡工具进度条
+      if (ev.agentId) {
+        recordTurnTool(ev.agentId, ev);
+      }
       if (ev.action === 'write' || ev.action === 'edit' || ev.action === 'bash') {
         appendToolNote(ev);
         scheduleFilesRefresh();
       }
       state.toolLog.push({ ...ev, at: ev.at ?? new Date().toISOString() });
       renderActivity();
+      renderMemberList();
       break;
     }
 
@@ -2089,9 +2674,12 @@ function handle(ev) {
       renderRoster();
       break;
 
-    case 'broadcast':
-      appendSystemNote(`广播：${ev.recipients.length} 人将依次回应（${ev.recipients.map((r) => '@' + nameOf(r)).join(' → ')}）`);
+    case 'broadcast': {
+      const isPar = computeEffectiveMode() === 'parallel';
+      const sep = isPar ? '、' : ' → ';
+      appendSystemNote(`广播：${ev.recipients.length} 人将${isPar ? '并行' : '依次'}回应（${ev.recipients.map((r) => '@' + nameOf(r)).join(sep)}）`);
       break;
+    }
 
     case 'cabtier.updated':
       state.aiCabTier = ev.tier;
@@ -2104,6 +2692,7 @@ function handle(ev) {
         state.members.push(ev.member);
         renderMemberList();
         renderRoster();
+        renderExecModeControls();
       }
       appendSystemNote(
         `@${ev.member.name} 已加入（${ev.member.backend} · ${tierLabel(ev.member.tier)}）`
@@ -2176,8 +2765,9 @@ function handle(ev) {
       const detail = String(ev.detail ?? '').trim();
       state.lastFailureBanner = { agentId: ev.agentId, detail, at: Date.now() };
       appendFailureBanner({ agentId: ev.agentId, title, detail });
-      finishTurn();
-      state.busy = false;
+      if (ev.agentId && ev.agentId !== 'system') finishTurn(ev.agentId, null, { fromFailure: true });
+      state.busy = state.activeTurns.size > 0 || state.pending > 0;
+      renderMemberList();
       renderStatus();
       break;
     }
@@ -2195,8 +2785,10 @@ function handle(ev) {
       break;
 
     case 'idle':
+      if (state.activeTurns.size > 0) finishTurn(null);
       state.busy = false;
       state.pending = 0;
+      renderMemberList();
       renderStatus();
       break;
 
@@ -2205,7 +2797,8 @@ function handle(ev) {
       state.busy = false;
       state.pending = 0;
       appendSystemNote(ev.text ?? '房间已停止', 'warn');
-      finishTurn();
+      finishTurn(null);
+      renderMemberList();
       renderStatus();
       break;
 
@@ -2351,7 +2944,10 @@ function updateMentionHint() {
   const mentionsAnyone = /[@＠]\s*[\w一-鿿]/.test(v);
   if (v.trim() && !mentionsAnyone && state.members.length > 0) {
     const order = broadcastOrder();
-    hint.textContent = `未点名 → 将依次通知 ${order.length} 人：${order.map((n) => '@' + n).join(' → ')}`;
+    const isPar = computeEffectiveMode() === 'parallel';
+    hint.textContent = isPar
+      ? `未点名 → 将并行通知 ${order.length} 人：${order.map((n) => '@' + n).join('、')}`
+      : `未点名 → 将依次通知 ${order.length} 人：${order.map((n) => '@' + n).join(' → ')}`;
     hint.className = 'mention-hint warn';
     return;
   }
@@ -3052,6 +3648,67 @@ $('goal-shared-btn').onclick = () => {
   if (window.innerWidth <= 960) $('right-panel').classList.add('open');
 };
 
+// 房间设置控件：执行模式与并发上限
+$('exec-mode').onchange = async (e) => {
+  const mode = e.target.value;
+  const prev = state.executionMode;
+  state.executionMode = mode;
+  renderExecModeControls();
+  const res = await fetch('/api/room-settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ executionMode: mode }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    state.executionMode = prev;
+    renderExecModeControls();
+    return appendSystemNote(`修改执行模式失败：${data.error ?? res.status}`, 'warn');
+  }
+  if (data.effectiveExecutionMode) state.effectiveMode = data.effectiveExecutionMode;
+  renderExecModeControls();
+};
+
+$('max-concurrency').onchange = async (e) => {
+  const raw = Number(e.target.value);
+  const prev = state.maxConcurrency;
+  if (!Number.isInteger(raw) || raw < 1 || raw > 8) {
+    e.target.value = String(prev);
+    return appendSystemNote('并发上限必须是 1~8 之间的整数', 'warn');
+  }
+  state.maxConcurrency = raw;
+  renderExecModeControls();
+  const res = await fetch('/api/room-settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ maxConcurrency: raw }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    state.maxConcurrency = prev;
+    renderExecModeControls();
+    return appendSystemNote(`修改并发上限失败：${data.error ?? res.status}`, 'warn');
+  }
+  if (data.effectiveExecutionMode) state.effectiveMode = data.effectiveExecutionMode;
+  renderExecModeControls();
+};
+
+$('exec-mode-badge').onclick = () => {
+  if (window.innerWidth <= 960) {
+    $('right-panel').classList.remove('open');
+    $('sidebar').classList.add('open');
+  }
+  const sec = $('room-settings-section');
+  if (sec) sec.open = true;
+  const card = $('exec-mode-card');
+  if (card) {
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.classList.add('flash-focus');
+    setTimeout(() => card.classList.remove('flash-focus'), 1200);
+  }
+  $('exec-mode')?.focus();
+};
+
 // 房间设置控件
 $('cabtier').onchange = async (e) => {
   const tier = e.target.value;
@@ -3302,11 +3959,7 @@ $('btn-resume').onclick = async () => {
   if (!res.ok) return appendSystemNote(`恢复失败：${data.error ?? res.status}`, 'warn');
 };
 
-$('btn-interrupt').onclick = async () => {
-  const res = await fetch('/api/interrupt', { method: 'POST' });
-  const data = await res.json().catch(() => ({}));
-  if (res.ok && !data.ok) appendSystemNote('当前没有正在发言的人', 'warn');
-};
+$('btn-interrupt').onclick = () => interruptAgent(null);
 
 // 抽屉与滚动
 $('drawer-close').onclick = closeDrawer;
@@ -3366,6 +4019,7 @@ $('input').addEventListener('keyup', (e) => {
 });
 
 // 启动初始化
+renderExecModeControls();
 renderStatus();
 renderBackendPills();
 fetchBackends({ silent: true });

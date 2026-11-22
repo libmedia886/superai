@@ -177,6 +177,10 @@ export async function buildRoom({
     headPassiveWake: cfg.headPassiveWake !== false,
     /** 成员互 @ 自由协作（房间级开关，默认开） */
     allowPeerMentions: cfg.allowPeerMentions !== false,
+    /** 执行调度模式（auto: ≤maxConcurrency 并行、>maxConcurrency 串行；parallel；serial） */
+    executionMode: cfg.executionMode ?? 'auto',
+    /** 并发上限（1..8），同时作为 auto 模式的人数阈值 */
+    maxConcurrency: cfg.maxConcurrency ?? 4,
     /**
      * 房间级单轮上限（分钟）。改完经 /api/room-settings 直接改 Room 实例，
      * 下一轮就生效——不能在磁盘上改了却要重启（CR-027 同一条教训）。
