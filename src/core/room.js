@@ -252,6 +252,7 @@ export class Room {
     id, name, goal = '', members, store, resolveAdapter, onEvent,
     registry = [], worktreesRoot = null, onMemberCreate = null,
     aiCabTier = DEFAULT_AI_CAB_TIER, headPassiveWake = true, allowPeerMentions = false,
+    collaborationStyle = 'deliver',
     executionMode = 'serial', maxConcurrency = 4,
     sharedDir = null, netgetPath = null, forbiddenRoots = [],
     turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS,
@@ -262,6 +263,8 @@ export class Room {
     this.aiCabTier = aiCabTier;
     /** 房间级自由协作开关：允许成员直接 @ 其他成员 */
     this.allowPeerMentions = Boolean(allowPeerMentions);
+    /** 协作风格：discuss（深度讨论·交叉质询）| deliver（高效交付） */
+    this.collaborationStyle = ['discuss', 'deliver'].includes(collaborationStyle) ? collaborationStyle : 'deliver';
     /** 执行调度模式：auto（≤maxConcurrency 并行、>maxConcurrency 串行）/ parallel / serial */
     this.executionMode = ['auto', 'parallel', 'serial'].includes(executionMode) ? executionMode : 'serial';
     /** 并发上限（1..8），同时作为 auto 模式的人数阈值 */

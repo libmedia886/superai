@@ -177,6 +177,8 @@ export async function buildRoom({
     headPassiveWake: cfg.headPassiveWake !== false,
     /** 成员互 @ 自由协作（房间级开关，默认开） */
     allowPeerMentions: cfg.allowPeerMentions !== false,
+    /** 协作风格：discuss（深度讨论·交叉质询）| deliver（高效交付·快速收敛） */
+    collaborationStyle: cfg.collaborationStyle ?? 'discuss',
     /** 执行调度模式（auto: ≤maxConcurrency 并行、>maxConcurrency 串行；parallel；serial） */
     executionMode: cfg.executionMode ?? 'auto',
     /** 并发上限（1..8），同时作为 auto 模式的人数阈值 */

@@ -466,4 +466,6 @@ test('清单：SuperAI v2.1 自适应并行/串行调度、Fan-in 汇合与实�
   const ui = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.ok(ui.includes('activeTurns'), '前端必须支持多并发独立气泡');
   assert.ok(ui.includes("case 'runtime.state'"), '前端必须消费 runtime.state 实时快照');
+  await mustMention('core/prompt.js', 'collaborationStyle', '协作风格（深度讨论交叉质询 vs 高效交付）');
+  await mustMention('server.js', 'collaborationStyle', '房间设置支持切换协作风格');
 });

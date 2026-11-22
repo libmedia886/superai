@@ -151,7 +151,7 @@ export async function startServer({
         singleFallback: rooms.singleFallback,
         members: [], history: [], tasks: [], roster: [], registry: [], toolLog: [],
         aiCabTier: 'full', maxMembers: 8, overridden: false, stopped: false,
-        headPassiveWake: true, allowPeerMentions: true,
+        headPassiveWake: true, allowPeerMentions: true, collaborationStyle: 'discuss',
         executionMode: 'auto', effectiveExecutionMode: 'parallel', maxConcurrency: 4,
         runtime: null,
         paused: null, turnTimeoutMinutes: 20,
@@ -185,6 +185,7 @@ export async function startServer({
       stopped: Boolean(room.stopped),
       headPassiveWake: room.headPassiveWake !== false,
       allowPeerMentions: Boolean(room.allowPeerMentions),
+      collaborationStyle: room.collaborationStyle ?? 'discuss',
       executionMode: room.executionMode,
       effectiveExecutionMode: room.effectiveExecutionMode(),
       maxConcurrency: room.maxConcurrency,
@@ -447,6 +448,15 @@ export async function startServer({
           parsedMaxConcurrency = n;
         }
 
+        let parsedCollabStyle;
+        if (body.collaborationStyle !== undefined) {
+          const style = String(body.collaborationStyle ?? '').trim();
+          if (!['discuss', 'deliver'].includes(style)) {
+            return json(res, 400, { error: 'collaborationStyle 必须是 discuss 或 deliver' });
+          }
+          parsedCollabStyle = style;
+        }
+
         if (body.goal !== undefined) {
           const goal = String(body.goal ?? '').trim().slice(0, 2000);
           room.goal = goal;
@@ -483,6 +493,11 @@ export async function startServer({
           cfg.maxConcurrency = parsedMaxConcurrency;
           changed.maxConcurrency = parsedMaxConcurrency;
         }
+        if (parsedCollabStyle !== undefined) {
+          room.collaborationStyle = parsedCollabStyle;
+          cfg.collaborationStyle = parsedCollabStyle;
+          changed.collaborationStyle = parsedCollabStyle;
+        }
 
         if (Object.keys(changed).length > 0) {
           await manager.persist();
@@ -509,6 +524,7 @@ export async function startServer({
           turnTimeoutMinutes: cfg.turnTimeoutMinutes ?? null,
           headPassiveWake: room.headPassiveWake,
           allowPeerMentions: room.allowPeerMentions,
+          collaborationStyle: room.collaborationStyle,
           executionMode: room.executionMode,
           effectiveExecutionMode: room.effectiveExecutionMode(),
           maxConcurrency: room.maxConcurrency,

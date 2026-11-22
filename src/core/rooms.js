@@ -417,6 +417,7 @@ export async function createRoom(dataDir, meta, name, { now = Date.now() } = {})
       members: [],
       aiCabTier: 'full',
       allowPeerMentions: true,
+      collaborationStyle: 'discuss',
       headPassiveWake: true,
       executionMode: 'auto',
       maxConcurrency: 4,

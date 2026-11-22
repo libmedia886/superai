@@ -70,6 +70,7 @@ const state = {
   overridden: false,
   stopped: false,
   allowPeerMentions: true,
+  collaborationStyle: 'discuss', // 'discuss' | 'deliver'
   headPassiveWake: true,
   executionMode: 'auto',       // 'auto' | 'parallel' | 'serial'
   effectiveMode: 'parallel',   // 'parallel' | 'serial'
@@ -1252,6 +1253,22 @@ function renderExecModeControls() {
   }
 }
 
+function renderCollabStyleControls() {
+  const style = state.collaborationStyle === 'deliver' ? 'deliver' : 'discuss';
+  const sel = $('collab-style');
+  if (sel && sel.value !== style) sel.value = style;
+  const hint = $('collab-style-hint');
+  if (hint) {
+    if (style === 'discuss') {
+      hint.textContent = state.allowPeerMentions
+        ? '已开启交叉质询：成员初稿后必须直接互 @ 挑刺对齐，禁止客套附和直接交差。'
+        : '已开启深度讨论（建议同时开启下方「允许成员互 @」，让成员直接对线讨论）。';
+    } else {
+      hint.textContent = '高效交付：各成员完成各自子任务后直接交由头头汇总，减少往返轮次。';
+    }
+  }
+}
+
 function applyRuntime(rt, { hydrateTurns = false } = {}) {
   if (!rt || typeof rt !== 'object') return;
   state.runtime = rt;
@@ -2322,6 +2339,7 @@ function handle(ev) {
 
       state.allowPeerMentions = ev.allowPeerMentions !== false;
       $('peer-mentions').checked = state.allowPeerMentions;
+      state.collaborationStyle = ev.collaborationStyle === 'deliver' ? 'deliver' : 'discuss';
       state.headPassiveWake = ev.headPassiveWake !== false;
       $('passive-wake').checked = state.headPassiveWake;
       $('room-timeout').value = ev.turnTimeoutMinutes != null ? String(ev.turnTimeoutMinutes) : '';
@@ -2337,6 +2355,7 @@ function handle(ev) {
       document.title = `${ev.room.name} · SuperAI`;
       renderGoalBar();
       renderExecModeControls();
+      renderCollabStyleControls();
 
       state.tasks = new Map();
       for (const t of (ev.tasks ?? [])) state.tasks.set(t.id, t);
@@ -2493,7 +2512,15 @@ function handle(ev) {
       if (ev.allowPeerMentions !== undefined) {
         state.allowPeerMentions = Boolean(ev.allowPeerMentions);
         $('peer-mentions').checked = state.allowPeerMentions;
+        renderCollabStyleControls();
         notes.push(state.allowPeerMentions ? '已开启成员之间互相 @ 协作' : '已关闭成员之间互相 @ 协作');
+      }
+      if (ev.collaborationStyle !== undefined) {
+        state.collaborationStyle = ev.collaborationStyle === 'deliver' ? 'deliver' : 'discuss';
+        renderCollabStyleControls();
+        notes.push(state.collaborationStyle === 'discuss'
+          ? '协作风格已切换为「深度讨论（交叉质询）」'
+          : '协作风格已切换为「高效交付」');
       }
       if (ev.headPassiveWake !== undefined) {
         state.headPassiveWake = Boolean(ev.headPassiveWake);
@@ -3709,6 +3736,24 @@ $('exec-mode-badge').onclick = () => {
   $('exec-mode')?.focus();
 };
 
+$('collab-style').onchange = async (e) => {
+  const style = e.target.value;
+  const prev = state.collaborationStyle;
+  state.collaborationStyle = style;
+  renderCollabStyleControls();
+  const res = await fetch('/api/room-settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ collaborationStyle: style }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    state.collaborationStyle = prev;
+    renderCollabStyleControls();
+    return appendSystemNote(`修改协作风格失败：${data.error ?? res.status}`, 'warn');
+  }
+};
+
 // 房间设置控件
 $('cabtier').onchange = async (e) => {
   const tier = e.target.value;
@@ -3747,6 +3792,7 @@ $('peer-mentions').onchange = async (e) => {
     return appendSystemNote('更新成员互 @ 设置失败', 'warn');
   }
   state.allowPeerMentions = on;
+  renderCollabStyleControls();
 };
 
 $('passive-wake').onchange = async (e) => {

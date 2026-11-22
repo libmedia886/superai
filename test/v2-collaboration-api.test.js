@@ -636,3 +636,64 @@ test('HTTP：POST /api/member 创建 agy 成员默认得到 full 档并落盘', 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('collaborationStyle：buildPrompt 按 discuss / deliver 生成交叉质询指令，且 /api/room-settings 支持切换与校验', async () => {
+  const lead = { id: 'lead', name: 'lead', role: 'leader', backend: 'agy', tier: 'full' };
+  const dev = { id: 'dev', name: 'dev', role: 'member', backend: 'agy', tier: 'full' };
+  const fakeStore = { roster: new Map(), tasks: new Map(), messages: [], messagesSince: () => [] };
+
+  const leadDiscuss = buildPrompt({
+    agent: lead,
+    room: { name: 'r', goal: 'g', members: [lead, dev], registry: [], allowPeerMentions: true, collaborationStyle: 'discuss' },
+    store: fakeStore,
+    trigger: { senderId: 'human', body: 'hi' },
+  });
+  assert.match(leadDiscuss, /深度讨论（交叉质询）/);
+  assert.match(leadDiscuss, /互相制衡/);
+
+  const memberDiscuss = buildPrompt({
+    agent: dev,
+    room: { name: 'r', goal: 'g', members: [lead, dev], registry: [], allowPeerMentions: true, collaborationStyle: 'discuss' },
+    store: fakeStore,
+    trigger: { senderId: 'lead', body: '@dev 开始' },
+  });
+  assert.match(memberDiscuss, /禁止一团和气/);
+  assert.match(memberDiscuss, /直接 @ 相关同事/);
+
+  const memberDeliver = buildPrompt({
+    agent: dev,
+    room: { name: 'r', goal: 'g', members: [lead, dev], registry: [], allowPeerMentions: true, collaborationStyle: 'deliver' },
+    store: fakeStore,
+    trigger: { senderId: 'lead', body: '@dev 开始' },
+  });
+  assert.doesNotMatch(memberDeliver, /深度讨论（交叉质询）/);
+
+  const { server, url, manager, dir } = await makeHttpServer();
+  try {
+    assert.equal(manager.session.room.collaborationStyle, 'discuss');
+    const bad = await fetch(`${url}/api/room-settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ collaborationStyle: 'invalid' }),
+    });
+    assert.equal(bad.status, 400);
+
+    const res = await fetch(`${url}/api/room-settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ collaborationStyle: 'deliver' }),
+    });
+    assert.equal(res.status, 200);
+    assert.equal((await res.json()).collaborationStyle, 'deliver');
+    assert.equal(manager.session.room.collaborationStyle, 'deliver');
+
+    const init = await fetchInit(url);
+    assert.equal(init.collaborationStyle, 'deliver');
+
+    const saved = JSON.parse(await readFile(join(dir, 'rooms', 'r-a', 'room.json'), 'utf8'));
+    assert.equal(saved.collaborationStyle, 'deliver');
+  } finally {
+    closeServer(server);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
