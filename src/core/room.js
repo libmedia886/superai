@@ -249,6 +249,7 @@ export class Room {
     id, name, goal = '', members, store, resolveAdapter, onEvent,
     registry = [], worktreesRoot = null, onMemberCreate = null,
     aiCabTier = DEFAULT_AI_CAB_TIER, headPassiveWake = true, sharedDir = null,
+    netgetPath = null, forbiddenRoots = [],
     turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS,
   }) {
     /** 造人落地钩子（由 config 注入，负责建目录 + 写配置） */
@@ -271,11 +272,15 @@ export class Room {
     this.registry = registry;
     /** 房间共享目录（成员交换文件用；不靠 prompt 里贴全文） */
     this.sharedDir = sharedDir;
+    /** 受约束网络读取器路径（成员启用联网查资料时适配器与 prompt 共用） */
+    this.netgetPath = netgetPath;
+    /** 不允许出现在子进程 PATH 中的数据目录根 */
+    this.forbiddenRoots = Array.isArray(forbiddenRoots) ? [...forbiddenRoots] : [];
     /**
-     * 共享目录挂在房间上，同时镜像到每个成员：适配器按 agent 配置构建，
-     * 拿不到 room。两处都设，防止"prompt 说有、适配器不知道"这种半生效状态。
+     * 运行时上下文统一镜像到每个成员：适配器按 agent 配置构建，拿不到 room。
+     * 构造、网页热加、AI 造人共用 hydrateMember，防止热加成员漏字段。
      */
-    if (sharedDir) for (const m of this.members) m.sharedDir = sharedDir;
+    for (const m of this.members) this.hydrateMember(m);
     /** worktree 集中放在这里，路径只用任务 id */
     this.worktreesRoot = worktreesRoot;
     this.store = store;
@@ -947,7 +952,7 @@ export class Room {
     // 已有交接 → 本轮开头轮换（用 agent 自己写的交接重建上下文，不是我们的摘要）
     let rebootstrap = null;
     if (this.handoff.canFire(agent.id)) {
-      rebootstrap = await this._compact(agent, adapter);
+      rebootstrap = await this._compact(agent, adapter, { taskId: job.taskId ?? null });
     }
 
     // 上一轮被拒的越权 @ 等说明：必须在它开口之前告诉它，否则它会继续按错误的理解做
@@ -1171,20 +1176,24 @@ export class Room {
     // 因为 lastActivityAt 一直是 0，isStalled 永远返回 false，看门狗等于不存在。
     this.health.touch(agent.id);
     let stalledOut = false;   // 本次是否被看门狗判死（要和"人为打断"区分开）
+    let stalledWindowMs = stallThreshold(timeoutMs);
 
     const stallTimer = setInterval(() => {
-      // 工具正在跑 → 用更长的静默窗口（但仍受本轮硬上限约束）
+      // 工具正在跑 → 真正放宽静默窗口（不再被 90s 的 STALL_MS 钳死，仍受本轮硬上限兜底）
       const inFlight = this._toolFlight?.get(agent.id);
-      const effTimeout = inFlight ? Math.max(timeoutMs, TOOL_FLIGHT_SILENCE_MS) : timeoutMs;
-      if (!this.health.isStalled(agent.id, { timeoutMs: effTimeout })) return;
+      const windowMs = inFlight
+        ? Math.max(20_000, Math.min(TOOL_FLIGHT_SILENCE_MS, timeoutMs))
+        : null;
+      if (!this.health.isStalled(agent.id, { timeoutMs, windowMs })) return;
       if (ac.signal.aborted) return;
       stalledOut = true;
+      stalledWindowMs = windowMs ?? stallThreshold(timeoutMs);
       this.onEvent({
         type: 'failure',
         agentId: agent.id,
         reason: EXIT.TIMEOUT,
         stalled: true,
-        detail: `超过 ${Math.round(stallThreshold(timeoutMs) / 1000)} 秒没有任何输出，判定卡死并终止`,
+        detail: `超过 ${Math.round(stalledWindowMs / 1000)} 秒没有任何输出，判定卡死并终止`,
         health: this.health.snapshot(agent.id),
       });
       ac.abort('stalled');
@@ -1460,7 +1469,7 @@ export class Room {
           textChars,
           capContinues,
           maxCapContinues: MAX_CAP_CONTINUES,
-          stallMs: stallThreshold(timeoutMs),
+          stallMs: stalledOut ? stalledWindowMs : stallThreshold(timeoutMs),
           canResume,
         }));
       }
@@ -1481,16 +1490,22 @@ export class Room {
        *   2. 状态栏写明是谁、哪一轮被中断；
        *   3. 会话仍在，续做不会重做已完成的部分。
        */
-      this.resumeTarget = {
-        agentId: agent.id,
-        taskId: job.taskId ?? null,
-        at: new Date().toISOString(),
-        partialChars: String(body).length,
-      };
-      if (this.queue.length === 0) {
-        this._pause('interrupted',
-          `${agent.name} 的这一轮被打断（已输出 ${String(body).length} 字，未完成）。`
-          + '点「接着做完」让它继续——会话还在，不会重做已完成的部分。');
+      // 房间已被「停止」时（高优先级 stopped 压过 interrupted），不再挂 resumeTarget，
+      // 保持「Boolean(resumeTarget) === detail 含接着做完」恒成立。
+      if (!this.stopped) {
+        this.resumeTarget = {
+          agentId: agent.id,
+          taskId: job.taskId ?? null,
+          at: new Date().toISOString(),
+          partialChars: String(body).length,
+        };
+        if (this.queue.length === 0) {
+          this._pause('interrupted',
+            `${agent.name} 的这一轮被打断（已输出 ${String(body).length} 字，未完成）。`
+            + '点「接着做完」让它继续——会话还在，不会重做已完成的部分。');
+        }
+      } else {
+        this.resumeTarget = null;
       }
     } else if (adapterResult?.reason === EXIT.COMPLETED) {
       this.resumeTarget = null;
@@ -1887,6 +1902,42 @@ export class Room {
     return woke;
   }
 
+  /** 给成员补齐房间级运行时上下文（共享目录 / netget 路径 / PATH 禁区） */
+  hydrateMember(member) {
+    if (!member) return member;
+    if (this.sharedDir && !member.sharedDir) member.sharedDir = this.sharedDir;
+    if (this.netgetPath && !member.netgetPath) member.netgetPath = this.netgetPath;
+    if (this.forbiddenRoots?.length && !member.forbiddenRoots?.length) {
+      member.forbiddenRoots = [...this.forbiddenRoots];
+    }
+    return member;
+  }
+
+  /**
+   * 清除某个成员的内存会话缓存（上下文轮换 / 换后端 / 删除成员时必须调用）。
+   *
+   * ★ `_runTurn` 通过 `_sessionFor()` 查 `this._sessions`，只清 `agent.sessionId`
+   *   不碰 `this._sessions` 会导致下一轮继续把旧 sessionId 传给新会话或新后端。
+   */
+  resetSession(agentId, { taskId = undefined } = {}) {
+    if (!agentId) return;
+    if (taskId === undefined || taskId === null) {
+      const m = this.members.find((x) => x.id === agentId);
+      if (m) m.sessionId = null;
+    }
+    if (!this._sessions) return;
+    if (taskId === undefined) {
+      this._sessions.delete(agentId);
+      const prefix = `${agentId}::`;
+      for (const k of [...this._sessions.keys()]) {
+        if (k.startsWith(prefix)) this._sessions.delete(k);
+      }
+    } else {
+      const key = taskId ? `${agentId}::${taskId}` : agentId;
+      this._sessions.delete(key);
+    }
+  }
+
   /**
    * 把新成员加进房间（内存 + 持久化）。
    * server 的手动加成员和 agent 造人走同一条路，避免两处逻辑不一致。
@@ -1896,7 +1947,7 @@ export class Room {
       return { ok: false, reason: '当前运行方式不支持动态加成员' };
     }
     try {
-      const added = await this.onMemberCreate(member, { createdBy, reason });
+      const added = this.hydrateMember(await this.onMemberCreate(member, { createdBy, reason }));
       this.members.push(added);
       if (added.role === 'leader') this.leaderIds.push(added.id);
 
@@ -1930,7 +1981,7 @@ export class Room {
    * 用一次性调用生成摘要，然后清掉 sessionId —— 下一次发言就是新会话，
    * 且首轮 prompt 用 buildRebootstrap（摘要里含它自己的立场）。
    */
-  async _compact(agent, adapter) {
+  async _compact(agent, adapter, { taskId = null } = {}) {
     const tasks = [...this.store.tasks.values()];
     const msgs = decorate(this.store.messages, this.members);
 
@@ -1941,7 +1992,9 @@ export class Room {
     // 我们的摘要只作为它没给交接时的兜底。
     const staged = this.handoff.snapshot(agent.id);
     if (staged.phase === 'ready' && staged.handoff) {
-      const oldSessionId = agent.sessionId ?? null;
+      const boundKey = taskId ? `${agent.id}::${taskId}` : agent.id;
+      const oldSessionId = this._sessions?.get(boundKey)?.sessionId ?? agent.sessionId ?? null;
+      this.resetSession(agent.id, { taskId });
       agent.sessionId = null;
       this.handoff.reset(agent.id);
 
@@ -2002,7 +2055,9 @@ export class Room {
     }
 
     this.summaries.set(agent.id, summary);
-    const oldSessionId = agent.sessionId ?? null;
+    const boundKey = taskId ? `${agent.id}::${taskId}` : agent.id;
+    const oldSessionId = this._sessions?.get(boundKey)?.sessionId ?? agent.sessionId ?? null;
+    this.resetSession(agent.id, { taskId });
     agent.sessionId = null;               // 下一轮开新会话
     delete agent.pendingCompact;
 
@@ -2091,6 +2146,7 @@ export class Room {
         // 不传就由 createTaskWorktree 自动探测默认分支（老仓库是 master，硬编码 main 会全线失败）
         // 兼容模型直觉写法：base_branch / baseBranch / branch 都认
         baseBranch: a.base_branch ?? a.baseBranch ?? a.branch ?? null,
+        branch: null,
         worktree: null,
       };
 
@@ -2104,6 +2160,8 @@ export class Room {
         }
         task.worktree = wt.worktree;
         task.baseBranch = wt.baseBranch;
+        // 保存实际创建的任务分支名（重名回退时可能是 task/T-001-xxxx，验收时不能硬编码 task/T-001）
+        task.branch = wt.branch ?? `task/${id}`;
       }
 
       await this.store.createTask(task);

@@ -48,10 +48,12 @@ export function slowStartThreshold(timeoutMs) {
   return Math.max(5_000, Math.min(60_000, Math.floor(timeoutMs / 4)));
 }
 
-export function stallThreshold(timeoutMs) {
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return STALL_MS;
-  // 上限很短时（比如测试里 30 秒），窗口不能比上限还长，否则永远等不到判定
-  return Math.max(20_000, Math.min(STALL_MS, Math.floor(timeoutMs / 2)));
+export function stallThreshold(timeoutMs, { maxStallMs = STALL_MS } = {}) {
+  const cap = Number.isFinite(maxStallMs) && maxStallMs > 0 ? maxStallMs : STALL_MS;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return cap;
+  // 上限很短时（比如测试里 30 秒），窗口不能比上限还长，否则永远等不到判定；
+  // 常规对话与硬上限解耦（固定 cap = 90s），长工具执行时由调用方传更大的 maxStallMs/windowMs 真正放宽。
+  return Math.max(20_000, Math.min(cap, Math.floor(timeoutMs / 2)));
 }
 
 export class HealthTracker {
@@ -147,12 +149,21 @@ export class HealthTracker {
   /**
    * 是否卡死：进程还活着、但从上次活动到现在超过阈值。
    * @param {string} agentId
-   * @param {{timeoutMs:number, now?:number}} o
+   * @param {{timeoutMs:number, windowMs?:number|null, now?:number}} o
    */
-  isStalled(agentId, { timeoutMs, now = Date.now() }) {
+  isStalled(agentId, { timeoutMs, windowMs = null, now = Date.now() }) {
     const a = this.#get(agentId);
     if (!a.lastActivityAt) return false;
-    return now - a.lastActivityAt >= stallThreshold(timeoutMs);
+    /**
+     * 工具执行期（windowMs != null）按工具静默窗口判定，不再被 90s 的 STALL_MS 硬钳死，
+     * 同时仍受本轮硬上限 timeoutMs 兜底约束。
+     */
+    const limit = Number.isFinite(windowMs) && windowMs > 0
+      ? (Number.isFinite(timeoutMs) && timeoutMs > 0
+        ? Math.max(20_000, Math.min(windowMs, timeoutMs))
+        : Math.max(20_000, windowMs))
+      : stallThreshold(timeoutMs);
+    return now - a.lastActivityAt >= limit;
   }
 
   snapshot(agentId) {

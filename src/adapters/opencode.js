@@ -96,18 +96,25 @@ export class OpencodeAdapter extends AgentAdapter {
   /**
    * 把权限写成 cwd 里的 opencode.json。
    *
-   * 共享目录：opencode 靠 `external_directory` 这一项控制，而它只有
-   * deny/allow 两档——**没有"只读"**。所以共享目录一旦给出去就是可读写，
-   * 和 claude 的 `--add-dir` 一样。只读档不给。
+   * ★ 共享目录必须用路径白名单精确放行（`{"*": "deny", "<shared>": "allow", ...}`），
+   *   绝不能把 `external_directory` 设为 `"allow"`：后者会彻底撤掉整个宿主机的目录边界
+   *   （实测 opencode 1.19.5 原生支持按路径映射控制 external_directory，且只允许共享目录、
+   *   拒绝共享目录外的任意文件）。readonly 档不放行任何外部目录。
    */
   async prepare(cwd) {
     await mkdir(cwd, { recursive: true });
     const tier = this.config.tier ?? 'readonly';
     const permission = permissionConfig(tier);
     const shared = this.config.sharedDir;
-    const writable = tier === 'write' || tier === 'writeExec' || tier === 'write-exec';
-    if (shared && writable) {
-      permission.external_directory = 'allow';
+    const canUseFiles = tier && tier !== 'readonly';
+    if (shared && canUseFiles) {
+      const sharedRoot = String(shared).replace(/\/+$/, '');
+      permission.external_directory = {
+        '*': 'deny',
+        [sharedRoot]: 'allow',
+        [`${sharedRoot}/*`]: 'allow',
+        [`${sharedRoot}/**`]: 'allow',
+      };
     }
     const cfg = { permission };
     await writeFile(join(cwd, 'opencode.json'), JSON.stringify(cfg, null, 2));
@@ -131,7 +138,8 @@ export class OpencodeAdapter extends AgentAdapter {
     await this.prepare(cwd);
 
     const tier = this.config.tier ?? 'readonly';
-    const needsHint = tier === 'write' || tier === 'writeExec';
+    // 只有 write 档（可写但不给 shell）才提示不要用 shell；write-exec/writeExec 允许 bash
+    const needsHint = tier === 'write';
     /**
      * read 档也要注入提示：`edit:deny + bash:deny` 会让部分模型反复重试
      * 直到挂死（和"混合档位"是同一个病）。明确告诉它没写入权限，它才会收手。
@@ -181,10 +189,31 @@ export class OpencodeAdapter extends AgentAdapter {
           }
           case 'tool_use': {
             sawToolUse = true;
-            onEvent?.({ type: 'tool', name: ev.part?.tool ?? 'tool', input: ev.part?.state?.input ?? null });
+            const toolName = ev.part?.tool ?? 'unknown';
+            const input = ev.part?.state?.input ?? {};
+            const status = ev.part?.state?.status ?? null;
+            const filePath = input.filePath ?? input.file_path ?? input.path ?? null;
+            const command = input.command ?? null;
+            const detail = command
+              ? String(command).slice(0, 300)
+              : (filePath ? String(filePath) : '');
+            onEvent?.({
+              type: 'tool',
+              tool: toolName,
+              name: toolName,
+              path: filePath,
+              command,
+              input,
+              detail,
+            });
+            // opencode JSON 流里的 tool_use 多在工具结束时下发（status=completed/error），同步清 in-flight
+            if (status === 'completed' || status === 'error') {
+              onEvent?.({ type: 'tool.result' });
+            }
             break;
           }
           case 'step_finish': {
+            onEvent?.({ type: 'tool.result' });
             sawFinish = true;
             const tk = ev.part?.tokens;
             if (tk) {

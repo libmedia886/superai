@@ -1,20 +1,22 @@
-# multiagent-chat — M1
+# multiagent-chat（多 AI 协作房间）
 
-多个 `claude` / `codex`（预留 `opencode`）实例在同一个房间里通过 **@ 点名** 串行协作。
+多个 `claude` / `codex` / `opencode` 实例在同一个房间里通过 **@ 点名 + 结构化动作协议** 串行协作。
 
-**现在就能跑。** 不需要配置、不需要 API key——直接用本机已登录的 CLI：
+**零外部 npm 依赖，现在就能跑。** 不需要 API key——直接用本机已登录的 CLI：
 
 ```bash
-node bin/room.mjs --demo    # 一键演示：头头拆任务 → 派给成员 → 成员产出 → 看板更新
-node bin/room.mjs           # 交互模式
+node bin/doctor.mjs         # 环境与沙箱自检
+node bin/serve.mjs          # 启动多房间 Web 界面（http://127.0.0.1:4321）
+node bin/room.mjs --demo    # 终端一键演示：头头拆任务 → 派给成员 → 成员产出 → 看板更新
+node bin/room.mjs           # 终端交互模式
 ```
 
-终端界面是内核的可体验外壳；Electron 界面是后续步骤，两者共用同一套 `src/core/`。
+详细操作见 [使用说明.md](./使用说明.md)，部署与基线核对见 [docs/DEPLOY.md](./docs/DEPLOY.md)。
 
 ## 已验证
 
 ```
-node --test "test/*.test.js"   # 54 项单元测试全通过
+npm test                       # 静态检查 + 560+ 项单元与集成测试全通过
 node scripts/smoke.mjs         # 真实 CLI 端到端：claude + codex
 node bin/room.mjs --demo       # 真实多 agent 闭环
 ```

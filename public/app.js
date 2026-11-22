@@ -162,12 +162,18 @@ function approvalNote(member) {
   const base = '<div class="approval-note auto">文件写入：自动批准，不会询问</div>';
   if (tier !== 'write-exec') return base;
 
-  const cmds = String(member.allowedCommands ?? '').trim();
-  if (!cmds) {
+  const cmds = String(member.allowedCommands ?? '').trim().split(/\s+/).filter(Boolean);
+  if (!cmds.length) {
     return '<div class="approval-note">命令：<b>一条都不许</b>（需要的话在设置里填）</div>';
   }
-  return `<div class="approval-note cmd">命令：仅 ${escapeHtml(cmds)} <br>`
-    + '<span class="cmd-risk">这些命令不受目录限制</span></div>';
+  const hasNetget = cmds.includes('netget');
+  const rawCmds = cmds.filter((c) => c !== 'netget');
+  if (hasNetget && !rawCmds.length) {
+    return '<div class="approval-note">命令：仅联网查资料（受限 GET，写不出工作目录）</div>';
+  }
+  const netPart = hasNetget ? '＋联网查资料 ' : '';
+  return `<div class="approval-note cmd">命令：${netPart}仅 ${escapeHtml(rawCmds.join(' '))} <br>`
+    + '<span class="cmd-risk">自定义命令不受目录限制</span></div>';
 }
 
 function renderRoster() {
@@ -1971,7 +1977,7 @@ async function saveMemberSettings() {
     const res = await fetch('/api/member', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...payload, tier: mm.tier }),
+      body: JSON.stringify({ ...payload, tier: mm.tier, confirmOverride: mm.confirmOverride }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return showModalError(data.error ?? `保存失败（${res.status}）`);

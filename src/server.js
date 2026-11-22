@@ -25,7 +25,7 @@ import { planMemberUpdate } from './core/memberSettings.js';
 import { detectTierOverride, EFFORT_HINTS } from './core/extraargs.js';
 import { exportMarkdown } from './core/export.js';
 import {
-  diffAgainstBase, commitWorktree, mergeTaskBranch, finalizeTaskWorktree,
+  diffAgainstBase, commitWorktree, mergeTaskBranch, finalizeTaskWorktree, commitsAheadOfBase,
 } from './core/worktree.js';
 
 const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url));
@@ -336,8 +336,8 @@ export async function startServer({
         if (!requireRoom(res)) return;
         const body = await readJson(req);
         const tier = body.tier;
-        if (!['readonly', 'write', 'write-exec'].includes(tier)) {
-          return json(res, 400, { error: 'tier 必须是 readonly / write / write-exec' });
+        if (!['readonly', 'read', 'write', 'write-exec'].includes(tier)) {
+          return json(res, 400, { error: 'tier 必须是 readonly / read / write / write-exec' });
         }
         room.aiCabTier = tier;
         cfg.aiCabTier = tier;
@@ -504,7 +504,7 @@ export async function startServer({
         const role = body.role ? (body.role === 'leader' ? 'leader' : 'member')
           : (first ? 'leader' : 'member');
 
-        const member = {
+        const baseMember = {
           id: `m${Date.now().toString(36)}`,
           name,
           backend,
@@ -512,13 +512,65 @@ export async function startServer({
           role,
           persona: body.persona ?? '',
         };
+
+        // 弹窗新建成员时用户也会填模型/思考等级/联网/命令/启动参数/单轮上限，
+        // 复用 planMemberUpdate 校验并落盘，不能静默丢弃（又一类"界面撒谎"）。
+        const extraPatch = {};
+        if (body.model !== undefined && String(body.model).trim()) extraPatch.model = body.model;
+        if (body.effort !== undefined && String(body.effort).trim()) extraPatch.effort = body.effort;
+        if (body.extraArgs !== undefined && String(body.extraArgs).trim()) extraPatch.extraArgs = body.extraArgs;
+        if (body.allowedCommands !== undefined && (Array.isArray(body.allowedCommands)
+          ? body.allowedCommands.length : String(body.allowedCommands).trim())) {
+          extraPatch.allowedCommands = body.allowedCommands;
+        }
+        if (body.timeoutMinutes !== undefined && String(body.timeoutMinutes).trim()) {
+          extraPatch.timeoutMinutes = body.timeoutMinutes;
+        }
+
+        let member = baseMember;
+        if (Object.keys(extraPatch).length) {
+          const plan = planMemberUpdate({
+            member: baseMember,
+            patch: extraPatch,
+            members: room.members,
+            confirmOverride: Boolean(body.confirmOverride),
+          });
+          if (!plan.ok) {
+            return json(res, 400, {
+              error: plan.reason, code: plan.code ?? null,
+              needingConfirm: plan.needingConfirm ?? null,
+              rejected: plan.rejected ?? null,
+              availableTiers: plan.availableTiers ?? null,
+            });
+          }
+          const next = plan.member;
+          member = {
+            ...baseMember,
+            ...(next.model != null ? { model: next.model } : {}),
+            ...(next.effort != null ? { effort: next.effort } : {}),
+            ...(next.extraArgs?.length ? { extraArgs: next.extraArgs, extraArgsText: next.extraArgsText ?? '' } : {}),
+            ...(next.allowedCommands?.length ? {
+              allowedCommands: next.allowedCommands,
+              allowedCommandsText: next.allowedCommandsText ?? '',
+            } : {}),
+            ...(next.timeoutMinutes != null ? { timeoutMinutes: next.timeoutMinutes } : {}),
+          };
+        }
+
         cfg.members.push(member);
         await manager.persist();
 
-        // 热添加：不用重启
+        // 热添加：不用重启；同时补齐房间级运行时上下文（sharedDir / netgetPath / forbiddenRoots）
         const cwd = join(session.dir, 'agents', member.id);
         await mkdir(cwd, { recursive: true });
-        room.members.push({ ...member, cwd, aliases: [name.toLowerCase()] });
+        room.members.push(room.hydrateMember({
+          ...member,
+          cwd,
+          sharedDir: room.sharedDir ?? null,
+          netgetPath: session.netgetPath ?? room.netgetPath ?? null,
+          forbiddenRoots: room.forbiddenRoots?.length ? [...room.forbiddenRoots] : [session.dir],
+          aliases: [name.toLowerCase()],
+        }));
         if (member.role === 'leader') {
           room.leaderIds.push(member.id);
           room.leaderId = room.leaderIds[0];
@@ -615,7 +667,9 @@ export async function startServer({
         });
 
         // 换后端：会话 id 必须清掉（旧 CLI 的 session 交错会空轮/挂死）
+        // 同时清理 room._sessions 内存缓存，否则下一轮 _sessionFor() 仍会把旧 sessionId 传给新后端
         if (next.sessionReset) {
+          room.resetSession(agentId);
           target.sessionId = null;
           store.sessions.delete(agentId);
           await store.saveSession(agentId, { sessionId: null, cwd: target.cwd ?? null, backend: next.backend });
@@ -669,8 +723,9 @@ export async function startServer({
         cfg.members = (cfg.members ?? []).filter((m) => m.id !== agentId);
         room.leaderIds = room.members.filter((m) => m.role === 'leader').map((m) => m.id);
         room.leaderId = room.leaderIds[0] ?? null;
-        // 队列里排着的它也不能再跑
+        // 队列里排着的它也不能再跑，同时清掉内存会话缓存
         room.queue = room.queue.filter((q) => q.agentId !== agentId);
+        room.resetSession(agentId);
 
         await manager.persist();
         await store.append({
@@ -718,6 +773,9 @@ export async function startServer({
         if (!t) return json(res, 404, { error: '任务不存在' });
         if (!t.worktree || !t.repo) return json(res, 400, { error: '该任务没有 worktree，无需验收' });
 
+        const branch = t.branch || `task/${t.id}`;
+        const baseBranch = t.baseBranch ?? 'main';
+
         if (body.action === 'merge') {
           const c = await commitWorktree({
             worktree: t.worktree,
@@ -725,16 +783,21 @@ export async function startServer({
             taskId: t.id,
           });
           if (!c.ok) return json(res, 500, { error: c.reason });
-          if (!c.committed) return json(res, 400, { error: '没有可合并的改动' });
+          if (!c.committed) {
+            // 上一次合并可能已 commit 到任务分支但 merge 冲突/失败；
+            // 重试时工作区是干净的，必须看分支上是否已有领先于基线的提交。
+            const ahead = await commitsAheadOfBase(t.repo, branch, baseBranch);
+            if (ahead <= 0) return json(res, 400, { error: '没有可合并的改动' });
+          }
 
           const m = await mergeTaskBranch({
-            repoPath: t.repo, branch: `task/${t.id}`, baseBranch: t.baseBranch ?? 'main',
+            repoPath: t.repo, branch, baseBranch,
           });
-          if (!m.ok) return json(res, 409, { error: m.reason, commit: c.commit });
+          if (!m.ok) return json(res, 409, { error: m.reason, commit: c.commit ?? null });
 
           // 合并成功：worktree 转 detached 再删分支，保留目录供事后追问
           const f = await finalizeTaskWorktree({
-            repoPath: t.repo, worktree: t.worktree, branch: `task/${t.id}`, keepWorktree: true,
+            repoPath: t.repo, worktree: t.worktree, branch, keepWorktree: true,
           });
 
           await store.updateTask(t.id, { status: '完成', acceptedAt: new Date().toISOString() });
@@ -747,7 +810,7 @@ export async function startServer({
 
         if (body.action === 'discard') {
           const f = await finalizeTaskWorktree({
-            repoPath: t.repo, worktree: t.worktree, branch: `task/${t.id}`, keepWorktree: false,
+            repoPath: t.repo, worktree: t.worktree, branch, keepWorktree: false,
           });
           await store.updateTask(t.id, { status: '阻塞', discardedAt: new Date().toISOString() });
           broadcast({ type: 'task.accepted', id: t.id, action: 'discard', ok: f.ok });

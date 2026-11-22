@@ -140,16 +140,17 @@ export class RoomManager {
      */
     const binDir = join(dir, 'bin');
     await mkdir(binDir, { recursive: true });
-    const netgetPath = join(binDir, 'netget');
+    let netgetPath = join(binDir, 'netget');
     try {
       await installNetget(netgetPath);
     } catch (err) {
-      // 生成失败不能静默：成员配了 netget 也跑不了，界面必须知道
+      // 生成失败不能静默，也不能把不存在的路径挂到成员上（否则 prompt 和适配器会以为可用）
+      netgetPath = null;
       this.notices.push(`网络读取器生成失败（${err.message}），配了 netget 的成员将无法联网`);
     }
 
     const { room, store, members, warnings } = await buildRoom({
-      cfg, dataDir: dir, onEvent, sharedDir,
+      cfg, dataDir: dir, onEvent, sharedDir, netgetPath, extraForbiddenRoots: [this.dataDir],
     });
     for (const w of warnings) this.notices.push(w);
 

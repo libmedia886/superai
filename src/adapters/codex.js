@@ -91,6 +91,50 @@ export class CodexAdapter extends AgentAdapter {
     let sawTurnCompleted = false;
     let usage = null;
     const texts = [];
+    const seenToolItems = new Set();
+
+    const emitToolItem = (item) => {
+      const t = item?.type;
+      if (!t || t === 'agent_message' || t === 'reasoning') return false;
+      if (t === 'command_execution') {
+        const command = item.command ?? null;
+        onEvent?.({
+          type: 'tool',
+          tool: 'Bash',
+          path: null,
+          command,
+          detail: command ? String(command).slice(0, 300) : '',
+        });
+        return true;
+      }
+      if (t === 'file_change') {
+        const changes = Array.isArray(item.changes) ? item.changes : [];
+        const firstPath = changes[0]?.path ?? item.path ?? null;
+        const summary = changes.length > 1
+          ? `${firstPath ?? ''} 等 ${changes.length} 个文件`
+          : (firstPath ?? '');
+        onEvent?.({
+          type: 'tool',
+          tool: 'Edit',
+          path: firstPath,
+          command: null,
+          detail: summary,
+        });
+        return true;
+      }
+      if (t === 'mcp_tool_call' || t === 'web_search' || t === 'tool_call') {
+        const name = item.tool ?? item.name ?? t;
+        onEvent?.({
+          type: 'tool',
+          tool: name,
+          path: item.path ?? null,
+          command: item.query ?? item.command ?? null,
+          detail: String(item.query ?? item.tool ?? item.name ?? t).slice(0, 300),
+        });
+        return true;
+      }
+      return false;
+    };
 
     const res = await runJsonCli({
       command: this.config.bin || 'codex',
@@ -110,6 +154,11 @@ export class CodexAdapter extends AgentAdapter {
             newSessionId = ev.thread_id ?? newSessionId;
             onEvent?.({ type: 'meta', sessionId: newSessionId });
             break;
+          case 'item.started': {
+            const item = ev.item ?? {};
+            if (emitToolItem(item) && item.id) seenToolItems.add(item.id);
+            break;
+          }
           case 'item.completed': {
             const item = ev.item ?? {};
             if (item.type === 'agent_message' && typeof item.text === 'string') {
@@ -118,10 +167,15 @@ export class CodexAdapter extends AgentAdapter {
               onEvent?.({ type: 'text', text: item.text, done: false });
             } else if (item.type === 'reasoning' && typeof item.text === 'string') {
               onEvent?.({ type: 'thinking', text: item.text });
+            } else {
+              const alreadyEmitted = item.id && seenToolItems.has(item.id);
+              const isTool = alreadyEmitted || emitToolItem(item);
+              if (isTool) onEvent?.({ type: 'tool.result' });
             }
             break;
           }
           case 'turn.completed':
+            onEvent?.({ type: 'tool.result' });
             sawTurnCompleted = true;
             if (ev.usage) {
               usage = {
@@ -138,6 +192,7 @@ export class CodexAdapter extends AgentAdapter {
             break;
           case 'turn.failed':
           case 'error':
+            onEvent?.({ type: 'tool.result' });
             onEvent?.({ type: 'error', message: JSON.stringify(ev).slice(0, 2000) });
             break;
           default:

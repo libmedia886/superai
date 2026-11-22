@@ -394,3 +394,18 @@ test('清单：净化写在 ...extra 之后（否则调用方传 extra.PATH 就�
   assert.doesNotMatch(fn.slice(sanitizeIdx), /base\.PATH\.split/,
     '不能拿 base.PATH 去切分（那是净化前的值）');
 });
+
+test('清单：本次修复的 6 项能力守卫（工具期看门狗 / 会话缓存重置 / 热加补齐 / opencode 路径白名单 / worktree 闭环 / netget SSRF）', async () => {
+  await mustMention('core/health.js', 'windowMs', '工具执行期静默窗口不能被 STALL_MS=90s 硬钳死');
+  await mustMention('core/room.js', 'resetSession', '上下文轮换与热切后端必须清 room._sessions');
+  await mustMention('core/room.js', 'hydrateMember', '热加成员与 AI 造人必须补齐 sharedDir/netgetPath/forbiddenRoots');
+  await mustMention('core/worktree.js', 'commitsAheadOfBase', '合并失败后重试必须识别分支上已有提交');
+  await mustMention('core/worktree.js', 'ls-files', 'diffAgainstBase 必须包含未跟踪新文件');
+
+  const ocSrc = await read('adapters/opencode.js');
+  assert.doesNotMatch(ocSrc, /permission\.external_directory\s*=\s*['"]allow['"]/,
+    'opencode 绝不能把 external_directory 整片设为 allow（会击穿沙箱）');
+
+  const netgetSrc = await readFile(new URL('../bin/netget', import.meta.url), 'utf8');
+  assert.match(netgetSrc, /禁止访问本机与内网地址/, 'netget 必须拦截本机与内网 SSRF');
+});

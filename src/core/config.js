@@ -72,12 +72,15 @@ async function sameRealPath(a, b) {
   }
 }
 
-export async function buildRoom({ cfg, dataDir = DEFAULT_DATA_DIR, onEvent, sharedDir = null }) {
+export async function buildRoom({
+  cfg, dataDir = DEFAULT_DATA_DIR, onEvent, sharedDir = null, netgetPath = null, extraForbiddenRoots = [],
+}) {
   const store = new Store(join(dataDir, 'room.jsonl'));
   await store.load();
 
   const warnings = [];
   const members = [];
+  const allForbiddenRoots = [...new Set([dataDir, ...extraForbiddenRoots.filter(Boolean)])];
 
   for (const m of cfg.members) {
     const cwd = join(dataDir, 'agents', m.id);
@@ -139,7 +142,7 @@ export async function buildRoom({ cfg, dataDir = DEFAULT_DATA_DIR, onEvent, shar
       );
     }
 
-    members.push({
+    const memberObj = {
       ...m, tier, cwd, sessionId, sessionResetReason,
       /**
        * 数据目录：子进程 PATH 里不许出现它下面的任何条目。
@@ -147,7 +150,9 @@ export async function buildRoom({ cfg, dataDir = DEFAULT_DATA_DIR, onEvent, shar
        */
       forbiddenRoots: [dataDir],
       aliases: [m.name.toLowerCase()],
-    });
+    };
+    if (allForbiddenRoots.length > 1) memberObj.forbiddenRoots = [...allForbiddenRoots];
+    members.push(memberObj);
   }
 
   const adapters = new Map();
@@ -163,6 +168,10 @@ export async function buildRoom({ cfg, dataDir = DEFAULT_DATA_DIR, onEvent, shar
     aiCabTier: cfg.aiCabTier ?? TIER.READONLY,
     /** 房间共享目录：成员能读，头头能写。协作不用再把整张表贴进群 */
     sharedDir,
+    /** 受约束网络读取器路径：热加成员/AI 造人也要立刻拿到，不能等重启 */
+    netgetPath,
+    /** 数据目录根：新加成员同样禁止出现在子进程 PATH 中 */
+    forbiddenRoots: allForbiddenRoots,
     /** 成员不 @ 发言时是否叫醒头头（房间级开关，默认开） */
     headPassiveWake: cfg.headPassiveWake !== false,
     /**
@@ -170,7 +179,7 @@ export async function buildRoom({ cfg, dataDir = DEFAULT_DATA_DIR, onEvent, shar
      * 下一轮就生效——不能在磁盘上改了却要重启（CR-027 同一条教训）。
      */
     turnTimeoutMs: cfg.turnTimeoutMinutes ? cfg.turnTimeoutMinutes * 60_000 : undefined,
-    // agent 造人时的落地钩子：建目录 + 写配置，返回带 cwd 的成员
+    // agent 造人时的落地钩子：建目录 + 写配置，返回带 cwd 与房间运行时上下文的成员
     onMemberCreate: async (member, { createdBy = null, reason = '' } = {}) => {
       const cwd = join(dataDir, 'agents', member.id);
       await mkdir(cwd, { recursive: true });
@@ -185,7 +194,14 @@ export async function buildRoom({ cfg, dataDir = DEFAULT_DATA_DIR, onEvent, shar
         createdAt: new Date().toISOString(),
       });
       await saveConfig(cfg, dataDir);
-      return { ...member, cwd, aliases: [member.name.toLowerCase()] };
+      return {
+        ...member,
+        cwd,
+        sharedDir,
+        netgetPath,
+        forbiddenRoots: [...allForbiddenRoots],
+        aliases: [member.name.toLowerCase()],
+      };
     },
     /**
      * 按**配置签名**缓存：改了档位/模型/参数立刻生效，不需要重启。

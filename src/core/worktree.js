@@ -16,7 +16,13 @@ import { isAbsolute, normalize, sep, join } from 'node:path';
 
 function git(cwd, args, timeoutMs = 60_000) {
   return new Promise((resolve) => {
-    execFile('git', args, { cwd, timeout: timeoutMs, windowsHide: true }, (err, stdout, stderr) => {
+    // 强制 LC_ALL=C：避免中文等 locale 下 git 报错文案变成"已经存在"，导致 already exists 分支回退等匹配失效
+    execFile('git', args, {
+      cwd,
+      timeout: timeoutMs,
+      windowsHide: true,
+      env: { ...process.env, LC_ALL: 'C', LANG: 'C' },
+    }, (err, stdout, stderr) => {
       resolve({
         ok: !err,
         code: err?.code ?? 0,
@@ -139,7 +145,7 @@ export async function createTaskWorktree({
   // 自动换个名字继续，而不是让用户去手动删分支——任务 id 是 app 生成的，
   // 用户没有理由知道仓库里躺着一条同名分支。
   let finalBranch = taskBranch;
-  if (!add.ok && /already exists/i.test(`${add.stderr}${add.stdout}`)) {
+  if (!add.ok && /already exists|已经存在/i.test(`${add.stderr}${add.stdout}`)) {
     finalBranch = `${taskBranch}-${Date.now().toString(36).slice(-4)}`;
     add = await git(repoPath, ['worktree', 'add', wtPath, '-b', finalBranch, baseBranch]);
     if (add.ok) {
@@ -252,12 +258,46 @@ export async function listWorktrees(repoPath) {
   return out;
 }
 
-/** 相对主仓库的改动，供人验收时看 diff（P0 #24） */
+/** 任务分支领先基线分支的提交数（用于合并失败重试时判断是否已有待合并提交） */
+export async function commitsAheadOfBase(repoPath, branch, baseBranch) {
+  const r = await git(repoPath, ['rev-list', '--count', `${baseBranch}..${branch}`]);
+  if (!r.ok) return 0;
+  const n = Number.parseInt(r.stdout, 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * 相对主仓库的改动，供人验收时看 diff（P0 #24）。
+ *
+ * ★ 必须包含未跟踪的新文件（untracked）：
+ *   `git diff <baseBranch>` 只展示已跟踪文件的修改，agent 只用 Write 新建文件时
+ *   会返回空列表，界面就会显示「没有改动」并藏起合并按钮——但 commitWorktree
+ *   是用 `git add -A` 提交的，其实明明有产出。
+ */
 export async function diffAgainstBase(worktree, baseBranch) {
   const files = await git(worktree, ['diff', '--name-status', baseBranch]);
   const patch = await git(worktree, ['diff', baseBranch]);
+  const untracked = await git(worktree, ['ls-files', '--others', '--exclude-standard']);
+
+  const fileList = files.ok ? files.stdout.split('\n').filter(Boolean) : [];
+  let patchText = patch.ok ? patch.stdout : '';
+
+  const extraFiles = untracked.ok ? untracked.stdout.split('\n').filter(Boolean) : [];
+  const MAX_PATCH_BYTES = 512 * 1024;
+  for (const rel of extraFiles) {
+    fileList.push(`A\t${rel}`);
+    if (patchText.length >= MAX_PATCH_BYTES) continue;
+    // `git diff --no-index` 有差异时返回退出码 1（正常语义），直接读 stdout
+    const d = await git(worktree, ['diff', '--no-index', '--', '/dev/null', rel]);
+    if (d.stdout) {
+      patchText = patchText ? `${patchText}\n${d.stdout}` : d.stdout;
+    }
+  }
+
   return {
-    files: files.ok ? files.stdout.split('\n').filter(Boolean) : [],
-    patch: patch.ok ? patch.stdout : '',
+    files: fileList,
+    patch: patchText.length > MAX_PATCH_BYTES
+      ? `${patchText.slice(0, MAX_PATCH_BYTES)}\n…（diff 过长已截断）`
+      : patchText,
   };
 }
