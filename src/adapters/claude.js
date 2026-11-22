@@ -175,6 +175,7 @@ export class ClaudeAdapter extends AgentAdapter {
     let sawResult = false;
     let resultOk = false;
     let usage = null;
+    let lastError = null;
     let text = '';
 
     const res = await runJsonCli({
@@ -227,6 +228,10 @@ export class ClaudeAdapter extends AgentAdapter {
           return;
         }
         if (ev.type === 'assistant' && Array.isArray(ev.message?.content)) {
+          if (ev.is_api_error_message) {
+            const errBlock = ev.message.content.find((b) => b.type === 'text' && b.text);
+            if (errBlock?.text) lastError = String(errBlock.text).slice(0, 2000);
+          }
           for (const block of ev.message.content) {
             if (block.type !== 'tool_use') continue;
             const input = block.input ?? {};
@@ -245,6 +250,10 @@ export class ClaudeAdapter extends AgentAdapter {
           onEvent?.({ type: 'tool.result' });
           sawResult = true;
           resultOk = ev.subtype === 'success' && ev.is_error !== true;
+          if (!resultOk && typeof ev.result === 'string' && ev.result) {
+            // API 错误（如 400 unknown provider for model ...）走 error，不伪装成正常对话正文
+            lastError = ev.result.slice(0, 2000);
+          }
           if (ev.usage) {
             usage = {
               inputTokens: ev.usage.input_tokens ?? 0,
@@ -256,7 +265,7 @@ export class ClaudeAdapter extends AgentAdapter {
             };
             onEvent?.({ type: 'usage', ...usage });
           }
-          if (typeof ev.result === 'string' && ev.result && !text) {
+          if (resultOk && typeof ev.result === 'string' && ev.result && !text) {
             text = ev.result;
           }
         }
@@ -272,12 +281,20 @@ export class ClaudeAdapter extends AgentAdapter {
     else if (res.code === 0 && !sawResult) reason = EXIT.CRASHED;
     else reason = EXIT.FAILED;
 
-    if (reason !== EXIT.COMPLETED && !text) {
-      onEvent?.({ type: 'error', message: res.stderr.trim().slice(0, 2000) || 'claude 未产出内容' });
+    const errorText = lastError || res.stderr.trim().slice(0, 2000) || null;
+    if (reason !== EXIT.COMPLETED && (!text || lastError)) {
+      onEvent?.({ type: 'error', message: errorText || 'claude 未产出内容' });
     }
     onEvent?.({ type: 'done', ok: reason === EXIT.COMPLETED, reason });
 
-    return { sessionId: newSessionId, text, usage, reason, stderr: res.stderr };
+    return {
+      sessionId: newSessionId,
+      text,
+      usage,
+      reason,
+      error: reason === EXIT.COMPLETED ? null : errorText,
+      stderr: res.stderr,
+    };
   }
 
   /** 真实探测：不要再依赖版本/登录提示，直接跑一轮极短对话 */
@@ -297,6 +314,7 @@ export class ClaudeAdapter extends AgentAdapter {
     if (last && last.subtype === 'success' && last.is_error !== true) {
       return { ok: true, sessionId: last.session_id ?? null };
     }
-    return { ok: false, reason: res.stderr.trim().slice(0, 500) || '探测失败' };
+    const jsonErr = last?.is_error && typeof last?.result === 'string' ? last.result : '';
+    return { ok: false, reason: String(jsonErr || res.stderr.trim()).slice(0, 500) || '探测失败' };
   }
 }

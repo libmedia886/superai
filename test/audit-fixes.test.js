@@ -516,3 +516,75 @@ test('★ 发言中途点 stop() → pauseReason=stopped 且 resumeTarget 必须
   assert.equal(room.resumeTarget, null, 'stop() 之后 resumeTarget 必须为 null');
   assert.equal(Boolean(room.resumeTarget), String(room.pauseReason?.detail ?? '').includes('接着做完'));
 });
+
+/* ---------- 7. CLI JSON 报错透传 + Codex 自定义 provider env_key ---------- */
+
+test('★ codex / claude 的 JSON 报错（如缺 env_key / 400 模型不支持）必须透传到 error 与 pauseReason', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'fix-err-'));
+
+  // codex: stdout JSON 报错、stderr 为空
+  const fakeCx = join(dir, 'fake-codex-err.sh');
+  await writeFile(fakeCx, `#!/bin/bash
+cat >/dev/null
+echo '{"type":"thread.started","thread_id":"th-err"}'
+echo '{"type":"error","message":"Missing environment variable: SUPERAI_API_KEY."}'
+echo '{"type":"turn.failed","error":{"message":"Missing environment variable: SUPERAI_API_KEY."}}'
+exit 1
+`, { mode: 0o755 });
+  await chmod(fakeCx, 0o755);
+
+  const cx = new CodexAdapter({ backend: 'codex', tier: 'read', bin: fakeCx });
+  const cxRes = await cx.run({ prompt: 'hi', cwd: dir, sessionId: null });
+  assert.equal(cxRes.reason, 'failed');
+  assert.match(cxRes.error ?? '', /SUPERAI_API_KEY/, 'codex JSON 错误必须透传到 error 字段');
+
+  // claude: result is_error=true
+  const fakeCl = join(dir, 'fake-claude-err.sh');
+  await writeFile(fakeCl, `#!/bin/bash
+cat >/dev/null
+echo '{"type":"system","subtype":"init","session_id":"cl-err"}'
+echo '{"type":"result","subtype":"success","is_error":true,"result":"API Error: 400 unknown provider for model bad-model"}'
+exit 1
+`, { mode: 0o755 });
+  await chmod(fakeCl, 0o755);
+
+  const cl = new ClaudeAdapter({ backend: 'claude', tier: 'readonly', bin: fakeCl });
+  const clRes = await cl.run({ prompt: 'hi', cwd: dir, sessionId: null });
+  assert.equal(clRes.reason, 'failed');
+  assert.equal(clRes.text, '', 'API 错误不能混进正常正文 text');
+  assert.match(clRes.error ?? '', /unknown provider for model bad-model/);
+
+  // 挂进 Room：停因文案必须带上真实报错，不能让用户盲猜
+  const store = new Store(join(dir, 'room.jsonl'));
+  await store.load();
+  const room = new Room({
+    id: 'r', name: 't',
+    members: [{ id: 'a', name: '小李子', role: 'leader', backend: 'codex', tier: 'read', cwd: dir, aliases: ['小李子'] }],
+    store,
+    resolveAdapter: () => cx,
+  });
+  room.maxRetries = 0;
+  await room.humanSay('@小李子 你好');
+  await room.drain();
+  assert.equal(room.pauseReason?.reason, 'error');
+  assert.match(room.pauseReason?.detail ?? '', /SUPERAI_API_KEY/, '状态栏暂停原因必须显示具体错误');
+});
+
+test('★ childEnv 为 codex 放行 config.toml 里声明的自定义 env_key，且不漏给其他后端', async () => {
+  const { childEnv } = await import('../src/core/runner.js');
+  const dir = await mkdtemp(join(tmpdir(), 'fix-cx-env-'));
+  await writeFile(join(dir, 'config.toml'), '[model_providers.superai]\nenv_key = "SUPERAI_API_KEY"\n');
+
+  const saved = { CODEX_HOME: process.env.CODEX_HOME, SUPERAI_API_KEY: process.env.SUPERAI_API_KEY };
+  try {
+    process.env.CODEX_HOME = dir;
+    process.env.SUPERAI_API_KEY = 'sk-test-123';
+    assert.equal(childEnv({}, { backend: 'codex' }).SUPERAI_API_KEY, 'sk-test-123');
+    assert.equal('SUPERAI_API_KEY' in childEnv({}, { backend: 'claude' }), false, '绝不漏给 claude');
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+});

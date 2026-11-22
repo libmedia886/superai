@@ -10,6 +10,9 @@
  */
 
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 export const DEFAULT_TIMEOUT_MS = 180_000;
 
@@ -79,13 +82,36 @@ export const AUTH_VARS_BY_BACKEND = {
  * @param {string} [o.backend]                  只放行该后端的认证变量（不传则放行全部前缀）
  * @param {string[]} [o.forbiddenRoots]         PATH 里不许出现的目录前缀（数据目录）
  */
+/** 绝不能通过自定义配置放行的危险环境变量 */
+const NEVER_ALLOW_ENV = new Set([
+  'BASH_ENV', 'ENV', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'DYLD_INSERT_LIBRARIES',
+  'NODE_OPTIONS', 'PATH', 'IFS',
+]);
+
+/**
+ * 读取 Codex `config.toml` 里声明的自定义 provider `env_key`（如 `SUPERAI_API_KEY`）。
+ * 仅用于 codex 后端放行该 key，不向其他后端暴露，也不放开无关环境变量。
+ */
+export function codexDeclaredEnvKeys(codexHome = process.env.CODEX_HOME || join(homedir(), '.codex')) {
+  const keys = new Set();
+  try {
+    const raw = readFileSync(join(codexHome, 'config.toml'), 'utf8');
+    for (const m of raw.matchAll(/\benv_key\s*=\s*["']([A-Z][A-Z0-9_]{1,63})["']/g)) {
+      if (!NEVER_ALLOW_ENV.has(m[1])) keys.add(m[1]);
+    }
+  } catch { /* 无 config.toml 时忽略 */ }
+  return keys;
+}
+
 export function childEnv(extra = {}, { backend = null, forbiddenRoots = [] } = {}) {
   const base = {};
   const allowedAuth = backend ? new Set(AUTH_VARS_BY_BACKEND[backend] ?? []) : null;
+  const extraBackendKeys = backend === 'codex' ? codexDeclaredEnvKeys() : null;
 
   for (const [key, value] of Object.entries(process.env)) {
     if (value === undefined) continue;
     if (EXACT_ALLOW.has(key)) { base[key] = value; continue; }
+    if (extraBackendKeys?.has(key)) { base[key] = value; continue; }
 
     const byPrefix = PREFIX_ALLOW.some((p) => key.startsWith(p));
     if (!byPrefix) continue;

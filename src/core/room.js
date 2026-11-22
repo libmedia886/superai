@@ -1655,10 +1655,11 @@ export class Room {
      */
     // 超时已经有更精确的原因了（"跑满 N 秒" vs 泛泛的"失败"），不要覆盖成 error
     if (failedTurn && !job.passive && !capAutoContinued && !timedOut) {
-      // 失败也要有原因，且这个原因优先级高于任何"没点名下一位"
+      // 失败也要有原因，且把 CLI 返回的具体错误（如缺环境变量 / 400 模型不可用）带上，避免用户盲猜
+      const errDetail = cleanStderr(adapterResult?.error ?? adapterResult?.stderr ?? '');
+      const whyPart = errDetail ? `：${errDetail.slice(0, 240)}` : '。没有产出可交接的内容，所以没有把话往下传。';
       this._pause('error', `${agent.name} 本轮失败（${adapterResult?.reason ?? 'unknown'}）`
-        + `，耗时 ${Math.round(durationMs / 1000)} 秒、工具调用 ${rowToolsInTurn} 次。`
-        + '没有产出可交接的内容，所以没有把话往下传。');
+        + `，耗时 ${Math.round(durationMs / 1000)} 秒、工具调用 ${rowToolsInTurn} 次${whyPart}`);
     }
 
     // 5) 接力：解析它 @ 了谁

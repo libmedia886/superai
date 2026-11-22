@@ -90,6 +90,7 @@ export class CodexAdapter extends AgentAdapter {
     let newSessionId = sessionId ?? null;
     let sawTurnCompleted = false;
     let usage = null;
+    let lastError = null;
     const texts = [];
     const seenToolItems = new Set();
 
@@ -191,10 +192,13 @@ export class CodexAdapter extends AgentAdapter {
             }
             break;
           case 'turn.failed':
-          case 'error':
+          case 'error': {
             onEvent?.({ type: 'tool.result' });
-            onEvent?.({ type: 'error', message: JSON.stringify(ev).slice(0, 2000) });
+            const msg = ev.error?.message ?? ev.message ?? JSON.stringify(ev).slice(0, 500);
+            if (msg) lastError = String(msg).slice(0, 2000);
+            onEvent?.({ type: 'error', message: lastError ?? JSON.stringify(ev).slice(0, 2000) });
             break;
+          }
           default:
             break;
         }
@@ -209,12 +213,20 @@ export class CodexAdapter extends AgentAdapter {
     else if (res.spawnError) reason = EXIT.CRASHED;
     else reason = EXIT.FAILED;
 
+    const errorText = lastError || res.stderr.trim().slice(0, 2000) || null;
     if (reason !== EXIT.COMPLETED && texts.length === 0) {
-      onEvent?.({ type: 'error', message: res.stderr.trim().slice(0, 2000) || 'codex 未产出内容' });
+      onEvent?.({ type: 'error', message: errorText || 'codex 未产出内容' });
     }
     onEvent?.({ type: 'done', ok: reason === EXIT.COMPLETED, reason });
 
-    return { sessionId: newSessionId, text: texts.join('\n'), usage, reason, stderr: res.stderr };
+    return {
+      sessionId: newSessionId,
+      text: texts.join('\n'),
+      usage,
+      reason,
+      error: reason === EXIT.COMPLETED ? null : errorText,
+      stderr: res.stderr,
+    };
   }
 
   async probe(cwd, timeoutMs = 30_000) {
@@ -233,6 +245,8 @@ export class CodexAdapter extends AgentAdapter {
       const started = res.lines.find((l) => l.type === 'thread.started');
       return { ok: true, sessionId: started?.thread_id ?? null };
     }
-    return { ok: false, reason: res.stderr.trim().slice(0, 500) || '探测失败' };
+    const errLine = res.lines.find((l) => l.type === 'error' || l.type === 'turn.failed');
+    const jsonErr = errLine?.error?.message ?? errLine?.message ?? '';
+    return { ok: false, reason: String(jsonErr || res.stderr.trim()).slice(0, 500) || '探测失败' };
   }
 }
